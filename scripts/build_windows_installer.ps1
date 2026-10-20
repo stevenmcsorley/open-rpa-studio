@@ -30,11 +30,12 @@ if (-not (Test-Path $tauri)) { throw 'Run npm ci before building the Windows ins
 & $tauri build --bundles nsis
 if ($LASTEXITCODE -ne 0) { throw 'Tauri failed to build the NSIS installer.' }
 
-$installer = Get-ChildItem (Join-Path $appRoot 'src-tauri\target\release\bundle\nsis') -Filter '*-setup.exe' | Select-Object -First 1
+$version = (Get-Content (Join-Path $appRoot 'package.json') -Raw | ConvertFrom-Json).version
+$installer = Get-ChildItem (Join-Path $appRoot 'src-tauri\target\release\bundle\nsis') -Filter "*$version*x64-setup.exe" | Select-Object -First 1
 if (-not $installer) { throw 'Tauri reported success but no NSIS setup executable was produced.' }
 $releaseDir = Join-Path $appRoot 'release'
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$versionedInstaller = Join-Path $releaseDir 'Open-RPA-Studio-Setup-0.1.0-x64.exe'
+$versionedInstaller = Join-Path $releaseDir 'Open-RPA-Studio-Setup-0.1.1-x64.exe'
 Copy-Item -LiteralPath $installer.FullName -Destination $versionedInstaller -Force
 Write-Host "Installer created: $versionedInstaller"
 certutil.exe -hashfile $versionedInstaller SHA256

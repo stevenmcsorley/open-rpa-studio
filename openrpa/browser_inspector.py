@@ -55,6 +55,10 @@ class BrowserInspector:
         self.browser:Any=None
         self.context:Any=None
         self.page:Any=None
+        self._recording=False
+        self._binding_installed=False
+        self._recorded_events:list[dict[str,Any]]=[]
+        self._recording_truncated=False
 
     def open(self,url:str)->dict[str,Any]:
         if not isinstance(url,str) or not url.strip() or len(url)>2048:
@@ -94,7 +98,45 @@ class BrowserInspector:
         controls=build_control_descriptors(raw)
         return {"url":self.page.url[:2048],"title":self.page.title()[:300],"controls":controls,"truncated":len(raw)>MAX_CONTROLS}
 
+    def start_recording(self)->dict[str,Any]:
+        """Capture bounded browser actions without reading or retaining entered values."""
+        if self.page is None: raise RuntimeError("Open a page in the Browser Inspector first")
+        if not self._binding_installed:
+            self.page.expose_binding("__openRpaRecordEvent",self._capture_recording_event)
+            self._binding_installed=True
+        self._recorded_events=[]
+        self._recording_truncated=False
+        self._recording=True
+        self.context.add_init_script(f"({_RECORDING_INIT})()")
+        self.page.evaluate(_RECORDING_INIT)
+        self.page.evaluate(_RECORDING_START)
+        return {"recording":True,"url":self.page.url[:2048]}
+
+    def _capture_recording_event(self,source:Any,event:Any)->None:
+        if not self._recording or not isinstance(event,dict):return
+        if len(self._recorded_events)>=300:
+            self._recording_truncated=True
+            return
+        allowed_types={"browser_click","browser_fill","browser_select","browser_check","browser_uncheck"}
+        kind=event.get("selectorKind");selector=event.get("selector");typ=event.get("type")
+        if typ not in allowed_types or kind not in {"role","test_id","placeholder"} or not isinstance(selector,str) or not selector.strip() or len(selector)>300:return
+        item={"type":typ,"selectorKind":kind,"selector":selector[:300]}
+        if typ in {"browser_check","browser_uncheck"}:item["checked"]=typ=="browser_check"
+        if self._recorded_events and self._recorded_events[-1]==item:return
+        self._recorded_events.append(item)
+
+    def stop_recording(self)->dict[str,Any]:
+        if self.page is None: raise RuntimeError("Open a page in the Browser Inspector first")
+        self._recording=False
+        self.page.evaluate(_RECORDING_STOP)
+        events=list(self._recorded_events)
+        return {"recording":False,"url":self.page.url[:2048],"events":events[:300],"truncated":self._recording_truncated}
+
     def close(self)->None:
+        self._recording=False
+        self._binding_installed=False
+        self._recorded_events=[]
+        self._recording_truncated=False
         if self.browser is not None:
             try:self.browser.close()
             except Exception:pass
@@ -146,3 +188,48 @@ _CONTROL_SNAPSHOT=r"""() => {
   for (const entry of entries) { if(entry.testId)byTestId.set(entry.testId,(byTestId.get(entry.testId)||0)+1); if(entry.placeholder)byPlaceholder.set(entry.placeholder,(byPlaceholder.get(entry.placeholder)||0)+1); }
   return entries.map(entry => ({...entry,matchCount:entry.role&&entry.name?(byRole.get(entry.role+'\0'+entry.name)||1):entry.testId?(byTestId.get(entry.testId)||1):entry.placeholder?(byPlaceholder.get(entry.placeholder)||1):1}));
 }"""
+
+_RECORDING_INIT=r"""() => {
+  if (window.__openRpaRecorderInstalled) return;
+  window.__openRpaRecorderInstalled=true;
+  window.__openRpaRecording=true;
+  const describe=el=>{
+    if (!(el instanceof Element) || el.closest('[type="password"],[autocomplete*="password" i],[autocomplete^="cc-" i]')) return null;
+    if (el instanceof HTMLInputElement && ['password','file','hidden','email','tel'].includes(el.type.toLowerCase())) return null;
+    const tag=el.tagName.toLowerCase();
+    const role=el.getAttribute('role') || (tag==='button'?'button':tag==='a'?'link':tag==='textarea'||el.isContentEditable?'textbox':tag==='select'?'combobox':tag==='input'?(el.type==='checkbox'?'checkbox':el.type==='radio'?'radio':'textbox'):'');
+    const labelled=el.getAttribute('aria-labelledby')?.split(/\s+/).map(id=>document.getElementById(id)?.innerText||'').join(' ').trim() || '';
+    const label=el.getAttribute('aria-label') || labelled || [...(el.labels||[])].map(x=>x.innerText||'').join(' ').trim();
+    const name=String(label||el.innerText||el.getAttribute('alt')||el.getAttribute('title')||'').trim().replace(/\s+/g,' ').slice(0,120);
+    const testId=el.getAttribute('data-testid')||el.getAttribute('data-test-id')||'';
+    const placeholder=el.getAttribute('placeholder')||'';
+    let selectorKind,selector;
+    if (role && name) { selectorKind='role'; selector=`${role}:${name}`; }
+    else if(testId) { selectorKind='test_id'; selector=testId; }
+    else if(placeholder && role) { selectorKind='placeholder'; selector=placeholder; }
+    else return null;
+    const count=[...document.querySelectorAll('[role],button,a[href],input,textarea,select,[data-testid],[data-test-id]')].filter(x=>{
+      const tagName=x.tagName.toLowerCase();
+      const r=x.getAttribute('role')||(tagName==='button'?'button':tagName==='a'?'link':tagName==='textarea'||x.isContentEditable?'textbox':tagName==='select'?(x.multiple?'listbox':'combobox'):tagName==='input'?(['checkbox','radio'].includes(x.type)?x.type:x.type==='search'?'searchbox':'textbox'):'');
+      const n=x.getAttribute('aria-label')||x.getAttribute('aria-labelledby')?.split(/\s+/).map(id=>document.getElementById(id)?.innerText||'').join(' ').trim()||[...(x.labels||[])].map(y=>y.innerText||'').join(' ').trim()||x.innerText||x.getAttribute('title')||'';
+      return selectorKind==='role'?r===role&&String(n).trim().replace(/\s+/g,' ')===name:selectorKind==='test_id'?(x.getAttribute('data-testid')||x.getAttribute('data-test-id'))===selector:x.getAttribute('placeholder')===selector;
+    }).length;
+    return count===1?{selectorKind,selector,role,tag,inputType:el instanceof HTMLInputElement?el.type:'',sensitive:false}:null;
+  };
+  const emit=(type,el)=>{
+    if(!window.__openRpaRecording) return;
+    const target=describe(el); if(!target) return;
+    const action=type==='click'?(target.role==='checkbox'?(el.checked?'browser_check':'browser_uncheck'):target.role==='radio'?'browser_check':'browser_click'):type==='fill'?'browser_fill':type==='select'?'browser_select':null;
+    if(!action) return;
+    const item={type:action,...target};
+    if(action==='browser_check') item.checked=!!el.checked;
+    // Typed values are deliberately never read or serialized. Fill/select steps require user review.
+    try { window.__openRpaRecordEvent(item); } catch (_) { }
+  };
+  document.addEventListener('click',e=>{const el=e.target?.closest?.('button,a[href],[role="button"],[role="link"],input[type="checkbox"],input[type="radio"]');if(el)emit('click',el)},true);
+  document.addEventListener('change',e=>{const el=e.target;if(el instanceof HTMLSelectElement)emit('select',el);else if((el instanceof HTMLInputElement&&['checkbox','radio'].includes(el.type))||el?.isContentEditable===false&&!(el instanceof HTMLInputElement)&&!(el instanceof HTMLTextAreaElement))return;else if(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement||el?.isContentEditable)emit('fill',el)},true);
+  window.__openRpaStart=()=>{window.__openRpaRecording=true};
+  window.__openRpaStop=()=>{window.__openRpaRecording=false;return true};
+}"""
+_RECORDING_START=r"""() => { if(!window.__openRpaStart) return false; window.__openRpaStart(); return true; }"""
+_RECORDING_STOP=r"""() => { if(!window.__openRpaStop) return []; return window.__openRpaStop(); }"""

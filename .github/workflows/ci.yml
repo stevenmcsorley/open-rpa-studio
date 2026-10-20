@@ -33,5 +33,15 @@ jobs:
         run: npm test
       - name: Production frontend build
         run: npm run build
+      - name: Build bundled Python bridge for the Tauri resource check
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/resources, .build/pyinstaller | Out-Null
+          uv run --locked --extra browser --extra desktop --extra credentials pyinstaller `
+            --noconfirm --clean --onefile --name openrpa-bridge `
+            --distpath src-tauri/resources --workpath .build/pyinstaller --specpath .build/pyinstaller `
+            --paths . --collect-submodules openrpa --collect-all regex `
+            --collect-all playwright --collect-all pyautogui --collect-all keyring `
+            scripts/bridge_entry.py
       - name: Check Windows desktop host
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml

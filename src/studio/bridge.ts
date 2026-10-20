@@ -33,6 +33,8 @@ export async function setDebugVariable(name:string,value:unknown):Promise<void>{
 export type BrowserControl={selectorKind:'role'|'test_id'|'placeholder';selector:string;role:string;name:string;tag:string;inputType:string;placeholder:string;matchCount:number;actions:string[]};
 export async function openBrowserInspector(url:string,allowNetwork:boolean):Promise<{url:string;title:string;status:number|null}>{return rpc('browser.inspect.open',{url,allowNetwork});}
 export async function readBrowserInspectorControls():Promise<{url:string;title:string;controls:BrowserControl[];truncated:boolean}>{return rpc('browser.inspect.controls');}
+export async function startBrowserRecording(allowNetwork:boolean):Promise<{recording:boolean;url:string}>{return rpc('browser.inspect.record.start',{allowNetwork});}
+export async function stopBrowserRecording():Promise<{recording:boolean;url:string;events:Record<string,unknown>[];truncated:boolean}>{return rpc('browser.inspect.record.stop');}
 export async function closeBrowserInspector():Promise<void>{await rpc('browser.inspect.close');}
 export async function getRunHistory(limit=50):Promise<any[]>{const value=await rpc('run.history',{limit});return value.runs??[];}
 export async function getAdapterStatus():Promise<any>{return rpc('adapter.status');}

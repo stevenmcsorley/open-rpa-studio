@@ -270,6 +270,14 @@ def handle(request: dict[str, Any]) -> None:
             result=opened
         elif method == "browser.inspect.controls":
             result=browser_inspector.controls()
+        elif method == "browser.inspect.record.start":
+            if params.get("allowNetwork") is not True:
+                raise ValueError("Browser recording requires explicit network permission in the Studio toolbar")
+            result=browser_inspector.start_recording()
+            history.audit("browser.recorder_start",{"host":__import__("urllib.parse",fromlist=["urlsplit"]).urlsplit(result["url"]).hostname,"networkPermission":True})
+        elif method == "browser.inspect.record.stop":
+            result=browser_inspector.stop_recording()
+            history.audit("browser.recorder_stop",{"eventCount":len(result["events"]),"truncated":result["truncated"]})
         elif method == "browser.inspect.close":
             browser_inspector.close()
             result={"closed":True}

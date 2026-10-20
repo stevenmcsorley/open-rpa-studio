@@ -87,6 +87,48 @@ def test_real_chromium_snapshot_selectors_drive_engine_browser_activities():
         browser.close()
 
 
+def test_real_chromium_recorder_captures_editable_selectors_without_field_values():
+    playwright=pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        context=browser.new_context()
+        page=context.new_page()
+        page.set_content('''<form><label for="customer">Customer name</label><input id="customer" type="text"><label for="secret">Password</label><input id="secret" type="password"><label for="region">Region</label><select id="region"><option value="north">North</option><option value="south">South</option></select><button type="button">Save record</button></form>''')
+        inspector=BrowserInspector();inspector.context=context;inspector.page=page
+        inspector.start_recording()
+        page.get_by_label("Customer name").fill("PRIVATE CUSTOMER VALUE")
+        page.get_by_label("Password").fill("NEVER CAPTURE THIS")
+        page.get_by_label("Region").select_option("south")
+        page.get_by_role("button",name="Save record").click()
+        result=inspector.stop_recording()
+        encoded=str(result)
+        assert result["recording"] is False
+        assert [event["type"] for event in result["events"]]==["browser_fill","browser_select","browser_click"]
+        assert result["events"][0]["selector"]=="textbox:Customer name"
+        assert result["events"][1]["selector"]=="combobox:Region"
+        assert "PRIVATE CUSTOMER VALUE" not in encoded
+        assert "NEVER CAPTURE THIS" not in encoded
+        assert "Password" not in encoded
+        browser.close()
+
+
+def test_recorder_carries_selector_only_events_across_page_navigation():
+    playwright=pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        context=browser.new_context()
+        context.route("https://record.test/**",lambda route:route.fulfill(status=200,content_type="text/html",body='<a href="/finish">Next page</a>' if route.request.url.endswith("/start") else '<button>Finish task</button>'))
+        page=context.new_page();page.goto("https://record.test/start")
+        inspector=BrowserInspector();inspector.context=context;inspector.page=page;inspector.start_recording()
+        page.get_by_role("link",name="Next page").click()
+        page.get_by_role("button",name="Finish task").click()
+        result=inspector.stop_recording()
+        assert [event["selector"] for event in result["events"]]==["link:Next page","button:Finish task"]
+        browser.close()
+
+
 def test_browser_workflow_validation_rejects_bad_or_ambiguous_configuration():
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Browser","variables":[],"arguments":[],"activities":[
         {"id":"fill","type":"browser_fill","selectorKind":"xpath","selector":"//input","value":"x","timeoutSeconds":121}]}
