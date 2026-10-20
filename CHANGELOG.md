@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.14 — Bounded workflow undo and redo
+
+- Added per-workflow, bounded 100-snapshot undo/redo history for authoring changes, with toolbar buttons and Ctrl/Cmd+Z, Ctrl/Cmd+Y, and Ctrl/Cmd+Shift+Z shortcuts.
+- New edits clear the redo branch; switching workflows preserves each workflow's history, while opening, creating or importing a project clears prior-project history.
+- Refreshed the README screenshot to show the undo and redo controls in the visual editor.
+- Verification: 27 frontend tests, 125 Python tests, production Vite build, offline Cargo check and SBOM generation (475 components) passed. A Playwright browser-preview interaction test changed a breakpoint, used toolbar undo/redo and Ctrl+Z/Ctrl+Y, confirmed a new edit clears redo, and verified button availability and restored values. The 59.92 MiB Windows x64 installer built with SHA-256 `db075a8e057dbc69eabb7d403032d56f4883acb4a247224d8fc5043732410dd5`, silently installed, and its frozen bridge passed reusable-workflow acceptance (bridge SHA-256 `df5caf05b1ebd8533b142928e7d27e5e46dacc4fa9bb171fc4680dc27d94e9c0`). GitHub CI results are recorded after publication.
+
 ## 0.1.13 — Flowchart canvas navigation and edge editing
 
 - Pan large flowcharts with Space+drag or middle-button drag and center the selected node without changing graph coordinates.
