@@ -8,14 +8,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.1](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.1). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.1-x64.exe` after running the build command below.
+The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.2](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.2). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.2-x64.exe` after running the build command below.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Verify the SHA-256 before distributing an installer:
+The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `c48df570da10b56626401a3074d58acbd60db4f68624ed8ea6b7fdb2a69ccaac`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.1-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.2-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -85,7 +85,7 @@ This is a set of provider-protocol adapters, not a promise that every model endp
 
 ### Browser and desktop adapters
 
-Browser activities use Playwright with role, label, text, placeholder, test-id, or CSS selectors. The Browser Inspector uses a visible browser, permission-gated navigation, request destination checks, and editable selector-based actions. Its interaction recorder captures bounded click, fill, selection, and checkbox actions for uniquely identified named controls, including across page navigation in one browser tab. It records selector metadata only: it does not read typed values, and it excludes password, email, payment, file, and hidden fields. Generated fill/select activities have blank values and must be reviewed before use. The bridge checks Playwright and Chromium availability at runtime. Install Chromium for development with:
+Browser activities use Playwright with role, label, text, placeholder, test-id, or CSS selectors. The library includes explicit element waits and visible/hidden/enabled/disabled/checked/text assertions with activity-scoped timeouts. The Browser Inspector uses a visible browser, permission-gated navigation, request destination checks, and editable selector-based actions. Its interaction recorder captures bounded click, fill, selection, and checkbox actions for uniquely identified named controls, including across page navigation in one browser tab. It records selector metadata only: it does not read typed values, and it excludes password, email, payment, file, and hidden fields. Generated fill/select activities have blank values and must be reviewed before use. The bridge checks Playwright and Chromium availability at runtime. Install Chromium for development with:
 
 ```powershell
 uv sync --locked --extra dev --extra browser

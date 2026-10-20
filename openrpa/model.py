@@ -199,7 +199,7 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"argument-inputs","message":"Invoke Workflow inputs must be an object","activityId":str(aid or "")})
             elif typ not in ACTIVITY_TYPES:
                 problems.append({"code": "activity-unsupported", "message": f"Unsupported activity type: {typ}", "activityId": str(aid or "")})
-            if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text"}:
+            if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_wait","browser_assert"}:
                 selector_kind=item.get("selectorKind","role")
                 if not isinstance(selector_kind,str) or selector_kind not in {"role","label","text","placeholder","test_id","css"}:
                     problems.append({"code":"browser-selector-kind","message":"Browser selectorKind must be role, label, text, placeholder, test_id, or css","activityId":str(aid or "")})
@@ -217,6 +217,16 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"browser-option-value","message":"Browser Select needs an option value or expression","activityId":str(aid or "")})
                 if typ=="browser_text" and (not isinstance(item.get("result","text"),str) or not item.get("result","text")):
                     problems.append({"code":"browser-result","message":"Browser Text result must be a non-empty variable name","activityId":str(aid or "")})
+                if typ=="browser_wait" and (not isinstance(item.get("state","visible"),str) or item.get("state","visible") not in {"attached","detached","visible","hidden"}):
+                    problems.append({"code":"browser-wait-state","message":"Browser Wait state must be attached, detached, visible, or hidden","activityId":str(aid or "")})
+                if typ=="browser_assert":
+                    assertion=item.get("assertion","visible")
+                    if not isinstance(assertion,str) or assertion not in {"visible","hidden","enabled","disabled","checked","text"}:
+                        problems.append({"code":"browser-assertion","message":"Browser Assert must check visible, hidden, enabled, disabled, checked, or text","activityId":str(aid or "")})
+                    if assertion=="text" and (not isinstance(item.get("expectedText"),str) or not item.get("expectedText")):
+                        problems.append({"code":"browser-assert-text","message":"Browser Assert text requires expectedText","activityId":str(aid or "")})
+                    if not isinstance(item.get("textMatch","exact"),str) or item.get("textMatch","exact") not in {"exact","contains"}:
+                        problems.append({"code":"browser-assert-match","message":"Browser Assert textMatch must be exact or contains","activityId":str(aid or "")})
             elif typ=="browser_navigate":
                 if not isinstance(item.get("url"),str) or not item["url"].strip():
                     problems.append({"code":"browser-url","message":"Browser Navigate needs a URL or expression","activityId":str(aid or "")})
@@ -347,6 +357,6 @@ ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "json_parse", "json_write",
     "wait", "http_request", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field",
-    "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_screenshot",
+    "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
 }

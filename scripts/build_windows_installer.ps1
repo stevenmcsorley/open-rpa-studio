@@ -35,7 +35,7 @@ $installer = Get-ChildItem (Join-Path $appRoot 'src-tauri\target\release\bundle\
 if (-not $installer) { throw 'Tauri reported success but no NSIS setup executable was produced.' }
 $releaseDir = Join-Path $appRoot 'release'
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$versionedInstaller = Join-Path $releaseDir 'Open-RPA-Studio-Setup-0.1.1-x64.exe'
+$versionedInstaller = Join-Path $releaseDir 'Open-RPA-Studio-Setup-0.1.2-x64.exe'
 Copy-Item -LiteralPath $installer.FullName -Destination $versionedInstaller -Force
 Write-Host "Installer created: $versionedInstaller"
 certutil.exe -hashfile $versionedInstaller SHA256

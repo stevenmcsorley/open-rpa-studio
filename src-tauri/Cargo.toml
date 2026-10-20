@@ -1,6 +1,6 @@
 [package]
 name = "open-rpa-studio"
-version = "0.1.1"
+version = "0.1.2"
 description = "Independent local-first RPA workflow studio"
 authors = ["Open RPA Studio contributors"]
 edition = "2021"

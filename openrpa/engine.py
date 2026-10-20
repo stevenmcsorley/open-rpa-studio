@@ -665,6 +665,27 @@ class WorkflowEngine:
         if self._browser_page is None:
             raise WorkflowError("Launch Browser must run before browser interaction", a["id"], "browser-state")
         timeout = min(max(float(a.get("timeoutSeconds", 15)),1),120) * 1000
+        if kind == "browser_wait":
+            self._locator(a).wait_for(state=a.get("state","visible"),timeout=timeout)
+            return
+        if kind == "browser_assert":
+            locator=self._locator(a);assertion=a.get("assertion","visible")
+            if assertion in {"visible","hidden"}:
+                actual=locator.is_visible(timeout=timeout) if assertion=="visible" else locator.is_hidden(timeout=timeout)
+                passed=actual
+            elif assertion in {"enabled","disabled"}:
+                actual=locator.is_enabled(timeout=timeout);passed=actual if assertion=="enabled" else not actual
+            elif assertion=="checked":
+                actual=locator.is_checked(timeout=timeout);passed=actual
+            elif assertion=="text":
+                actual=locator.inner_text(timeout=timeout)
+                expected=str(interpolate(a.get("expectedText",""),v))
+                passed=actual==expected if a.get("textMatch","exact")=="exact" else expected in actual
+            else: raise WorkflowError(f"Unsupported browser assertion: {assertion}",a["id"],"browser-assertion")
+            if not passed:
+                detail=f"expected {assertion}={a.get('expectedText','')!r}, observed {actual!r}" if assertion=="text" else f"expected {assertion}, observed {actual}"
+                raise WorkflowError(f"Browser assertion failed for selector {a.get('selector')!r}: {detail}",a["id"],"browser-assertion-failed")
+            return
         if kind == "browser_navigate":
             url = str(interpolate(a["url"], v))
             if not url.startswith(("https://", "http://")): raise WorkflowError("Browser URL must use http or https", a["id"], "browser-url")

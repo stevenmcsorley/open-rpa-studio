@@ -17,6 +17,8 @@ export function validate(w:Workflow):any[]{
     else if(ids.has(item.id))problems.push({code:'duplicate',message:`Duplicate activity id ${item.id}`,activityId:item.id});
     else ids.add(item.id);
     if(!item.type)problems.push({code:'type',message:'Activity type is required',activityId:item.id});
+    if(item.type==='browser_wait'&&(!['attached','detached','visible','hidden'].includes(item.state??'visible')||typeof item.selector!=='string'||!item.selector.trim()||!['role','label','text','placeholder','test_id','css'].includes(item.selectorKind??'role')||typeof item.timeoutSeconds!=='number'||item.timeoutSeconds<1||item.timeoutSeconds>120))problems.push({code:'browser-wait',message:'Browser Wait needs a valid selector, state and timeout from 1 to 120 seconds',activityId:item.id});
+    if(item.type==='browser_assert'&&(!['visible','hidden','enabled','disabled','checked','text'].includes(item.assertion??'visible')||typeof item.selector!=='string'||!item.selector.trim()||!['role','label','text','placeholder','test_id','css'].includes(item.selectorKind??'role')||typeof item.timeoutSeconds!=='number'||item.timeoutSeconds<1||item.timeoutSeconds>120||(item.assertion==='text'&&(!item.expectedText||!['exact','contains'].includes(item.textMatch??'exact')))))problems.push({code:'browser-assert',message:'Browser Assert needs a valid selector, assertion and timeout; text assertions also need expected text',activityId:item.id});
     if(item.type==='if'){walk(item.then||[]);walk(item.else||[])}
     if(item.type==='for_each'||item.type==='while')walk(item.body||[]);
     if(item.type==='retry'){
@@ -81,6 +83,7 @@ export async function run(w:Workflow,allowNetwork:boolean,emit:(e:any)=>void):Pr
       case'transform_field':{const rows=typeof a.rows==='string'&&a.rows in variables?variables[a.rows]:val(a.rows,variables);const op=a.operation;variables[a.result||'rows']=rows.map((row:any)=>{const copy={...row};if(copy[a.field]!=null){let text=String(copy[a.field]);if(op==='trim')text=text.trim();else if(op==='upper')text=text.toUpperCase();else if(op==='lower')text=text.toLowerCase();else if(op==='regex_replace')text=text.replace(new RegExp(a.pattern,'g'),String(a.replacement??''));else throw Error(`Unsupported field transform ${op}`);copy[a.field]=text}return copy});break}
       case'wait':await new Promise(r=>setTimeout(r,Math.min(300000,Number(val(a.seconds,variables))*1000)));break;
       case'http_request':if(!allowNetwork)throw Error('Network access requires run permission');throw Error('HTTP in browser preview is disabled; use the desktop engine');
+      case'browser_wait':case'browser_assert':throw Error(`${a.type} requires the desktop Playwright engine`);
       case'file_read_text':case'file_write_text':case'file_copy':case'file_list':case'file_move':case'file_delete':case'csv_read':case'csv_write':case'json_parse':case'json_write':case'regex_replace':case'regex_match':throw Error(`${a.type} requires the desktop filesystem engine`);
       default:throw Error(`Unsupported activity ${a.type}`)
     }

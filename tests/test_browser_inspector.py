@@ -136,3 +136,31 @@ def test_browser_workflow_validation_rejects_bad_or_ambiguous_configuration():
     assert {"browser-selector-kind","browser-timeout"}<=codes
     workflow["activities"]=[{"id":"select","type":"browser_select","selectorKind":"role","selector":"combobox:Country","value":""}]
     assert any(problem["code"]=="browser-option-value" for problem in validate_workflow(workflow))
+
+
+def test_browser_wait_and_assert_activities_use_real_page_state_and_clear_errors():
+    playwright=pytest.importorskip("playwright.sync_api")
+    from openrpa.engine import WorkflowEngine, WorkflowError
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        page=browser.new_page()
+        page.set_content('''<p id="status">Ready for review</p><button id="disabled" disabled>Submit</button><input id="terms" type="checkbox">''')
+        page.evaluate("setTimeout(()=>{const item=document.createElement('div');item.id='delayed';item.textContent='Loaded';document.body.append(item)},75)")
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page
+        engine._browser_activity({"id":"wait","type":"browser_wait","selectorKind":"css","selector":"#delayed","state":"visible","timeoutSeconds":2},{})
+        engine._browser_activity({"id":"text","type":"browser_assert","selectorKind":"css","selector":"#status","assertion":"text","expectedText":"Ready","textMatch":"contains","timeoutSeconds":2},{})
+        engine._browser_activity({"id":"disabled","type":"browser_assert","selectorKind":"css","selector":"#disabled","assertion":"disabled","timeoutSeconds":2},{})
+        with pytest.raises(WorkflowError,match="Browser assertion failed") as failure:
+            engine._browser_activity({"id":"bad-assert","type":"browser_assert","selectorKind":"css","selector":"#status","assertion":"text","expectedText":"Complete","textMatch":"contains","timeoutSeconds":2},{})
+        assert failure.value.activity_id=="bad-assert"
+        assert failure.value.code=="browser-assertion-failed"
+        browser.close()
+
+
+def test_browser_wait_and_assert_validation_is_strict():
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Browser checks","variables":[],"arguments":[],"activities":[
+        {"id":"wait","type":"browser_wait","selectorKind":"css","selector":"#main","state":"almost-visible","timeoutSeconds":15},
+        {"id":"assert","type":"browser_assert","selectorKind":"css","selector":"#main","assertion":"contains","timeoutSeconds":15}]}
+    codes={problem["code"] for problem in validate_workflow(workflow)}
+    assert {"browser-wait-state","browser-assertion"}<=codes
