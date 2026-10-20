@@ -235,6 +235,32 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"browser-wait-until","message":"Browser waitUntil must be commit, domcontentloaded, load, or networkidle","activityId":str(aid or "")})
             elif typ=="browser_launch" and "headless" in item and not isinstance(item["headless"],bool):
                 problems.append({"code":"browser-headless","message":"Browser Launch headless must be a boolean","activityId":str(aid or "")})
+            if typ in {"desktop_ui_click","desktop_ui_fill","desktop_ui_text","desktop_ui_wait"}:
+                window_title=item.get("windowTitle")
+                if not isinstance(window_title,str) or not window_title.strip() or len(window_title)>512:
+                    problems.append({"code":"desktop-uia-window","message":"UIA activity needs an exact windowTitle of 1–512 characters","activityId":str(aid or "")})
+                name=item.get("name","");automation_id=item.get("automationId","")
+                if not isinstance(name,str) or len(name)>512:
+                    problems.append({"code":"desktop-uia-name","message":"UIA accessible name must be text no longer than 512 characters","activityId":str(aid or "")})
+                if not isinstance(automation_id,str) or len(automation_id)>512:
+                    problems.append({"code":"desktop-uia-automation-id","message":"UIA Automation ID must be text no longer than 512 characters","activityId":str(aid or "")})
+                if isinstance(name,str) and isinstance(automation_id,str) and not name.strip() and not automation_id.strip():
+                    problems.append({"code":"desktop-uia-selector","message":"Specify an accessible name or Automation ID for the UIA control","activityId":str(aid or "")})
+                control_type=item.get("controlType","")
+                if not isinstance(control_type,str) or len(control_type)>128:
+                    problems.append({"code":"desktop-uia-control-type","message":"UIA controlType must be text no longer than 128 characters","activityId":str(aid or "")})
+                process_id=item.get("processId")
+                if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):
+                    problems.append({"code":"desktop-uia-process-id","message":"UIA processId must be a positive integer","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",10)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
+                    problems.append({"code":"desktop-uia-timeout","message":"UIA timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+                if typ=="desktop_ui_fill" and (not isinstance(item.get("value"),str) or (control_type and control_type!="Edit")):
+                    problems.append({"code":"desktop-uia-fill","message":"UIA Set Text needs a string value and an Edit control","activityId":str(aid or "")})
+                if typ=="desktop_ui_text" and (not isinstance(item.get("result","text"),str) or not item.get("result","text").strip()):
+                    problems.append({"code":"desktop-uia-result","message":"UIA Read Text needs a non-empty result variable name","activityId":str(aid or "")})
+                if typ=="desktop_ui_wait" and item.get("state","exists") not in {"exists","visible","enabled","not_visible"}:
+                    problems.append({"code":"desktop-uia-state","message":"UIA Wait state must be exists, visible, enabled, or not_visible","activityId":str(aid or "")})
     model=workflow.get("executionModel","sequence")
     if model not in {"sequence","flowchart","state_machine"}:
         problems.append({"code":"execution-model","message":"executionModel must be 'sequence', 'flowchart', or 'state_machine'"})
@@ -409,4 +435,5 @@ ACTIVITY_TYPES = {
     "wait", "http_request", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
+    "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
 }

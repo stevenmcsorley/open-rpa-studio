@@ -254,15 +254,19 @@ def handle(request: dict[str, Any]) -> None:
                 pass
             except Exception as exc:
                 desktop = {"available": False, "reason": f"Desktop probe failed: {type(exc).__name__}: {exc}"}
-            accessibility = {"available": False, "reason": "AT-SPI accessibility adapter is not implemented"}
+            if sys.platform == "win32":
+                from . import windows_uia
+                accessibility = windows_uia.status()
+            else:
+                accessibility = {"available": False, "adapter": "AT-SPI", "reason": "AT-SPI accessibility adapter is not implemented"}
             if sys.platform.startswith("linux") and os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
                 try:
                     import gi
                     gi.require_version("Atspi", "2.0")
                     from gi.repository import Atspi  # noqa: F401
-                    accessibility = {"available": False, "reason": "AT-SPI bindings exist, but Open RPA has not implemented this adapter"}
+                    accessibility = {"available": False, "adapter": "AT-SPI", "reason": "AT-SPI bindings exist, but Open RPA has not implemented this adapter"}
                 except Exception as exc:
-                    accessibility = {"available": False, "reason": f"AT-SPI runtime unavailable: {type(exc).__name__}: {exc}"}
+                    accessibility = {"available": False, "adapter": "AT-SPI", "reason": f"AT-SPI runtime unavailable: {type(exc).__name__}: {exc}"}
             try:
                 from .credentials import get_safe_keyring
                 get_safe_keyring()
@@ -270,6 +274,20 @@ def handle(request: dict[str, Any]) -> None:
             except Exception as exc:
                 vault={"available":False,"reason":str(exc)}
             result = {"browser": browser, "desktop": desktop, "accessibility": accessibility,"credentialVault":vault}
+        elif method == "desktop.inspect.windows":
+            if params.get("allowDesktop") is not True:
+                raise ValueError("Desktop inspection requires explicit desktop permission in the Studio toolbar")
+            from . import windows_uia
+            windows=windows_uia.list_windows()
+            history.audit("desktop.uia_windows_inspected",{"count":len(windows)})
+            result={"windows":windows}
+        elif method == "desktop.inspect.controls":
+            if params.get("allowDesktop") is not True:
+                raise ValueError("Desktop inspection requires explicit desktop permission in the Studio toolbar")
+            from . import windows_uia
+            controls=windows_uia.list_controls(str(params.get("windowTitle","")),params.get("processId"))
+            history.audit("desktop.uia_controls_inspected",{"count":len(controls)})
+            result={"controls":controls}
         elif method == "browser.inspect.open":
             if params.get("allowNetwork") is not True:
                 raise ValueError("Browser inspection requires explicit network permission in the Studio toolbar")
@@ -381,6 +399,10 @@ ACTIVITY_CATALOG = [
     {"type":"desktop_hotkey","title":"Press Hotkey","category":"Desktop","description":"Press a hotkey in the focused application; requires per-run approval.","defaults":{"keys":"CTRL+S"}},
     {"type":"desktop_press","title":"Press Key","category":"Desktop","description":"Press a key in the focused application; requires per-run approval.","defaults":{"key":"ENTER"}},
     {"type":"desktop_screenshot","title":"Desktop Screenshot","category":"Desktop","description":"Capture the desktop screen; requires per-run approval.","defaults":{"path":"evidence/desktop.png"}},
+    {"type":"desktop_ui_click","title":"Click UI Control","category":"Desktop UI Automation","description":"Click a unique Windows UI Automation control by exact window and accessible identity; requires per-run desktop approval.","defaults":{"windowTitle":"","name":"","automationId":"","controlType":"Button","timeoutSeconds":10}},
+    {"type":"desktop_ui_fill","title":"Set UI Text","category":"Desktop UI Automation","description":"Set text in a unique Windows UI Automation Edit control. Password values are never read back; use credential_get for secrets.","defaults":{"windowTitle":"","name":"","automationId":"","controlType":"Edit","value":"","timeoutSeconds":10}},
+    {"type":"desktop_ui_text","title":"Read UI Text","category":"Desktop UI Automation","description":"Read accessible text from a unique Windows UI Automation control into a variable; password controls are blocked.","defaults":{"windowTitle":"","name":"","automationId":"","controlType":"Text","result":"text","timeoutSeconds":10}},
+    {"type":"desktop_ui_wait","title":"Wait for UI Control","category":"Desktop UI Automation","description":"Wait for a Windows UI Automation control to exist, become visible or enabled, or become hidden.","defaults":{"windowTitle":"","name":"","automationId":"","controlType":"Button","state":"exists","timeoutSeconds":10}},
 ]
 
 

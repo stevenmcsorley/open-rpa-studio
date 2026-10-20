@@ -793,11 +793,51 @@ class WorkflowEngine:
     def _desktop_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
         if not self.options.allow_desktop:
             raise WorkflowError("Desktop control requires explicit per-run permission", a["id"], "desktop-permission-denied")
+        kind=a["type"]
+        if kind.startswith("desktop_ui_"):
+            try:
+                from . import windows_uia
+                runtime=windows_uia.status()
+                if not runtime.get("available"):
+                    raise WorkflowError(runtime.get("reason") or "Windows UI Automation is unavailable",a["id"],"runtime-unavailable")
+                title=str(interpolate(a.get("windowTitle",""),v))
+                name=a.get("name")
+                automation_id=a.get("automationId")
+                control_type=a.get("controlType")
+                process_id=a.get("processId")
+                timeout=min(max(float(a.get("timeoutSeconds",10)),1),120)
+                def state() -> dict[str,bool] | None:
+                    self._check_cancel()
+                    return windows_uia.control_state(title,name,automation_id,control_type,process_id)
+                desired={"desktop_ui_wait":a.get("state","exists"),
+                         "desktop_ui_click":"enabled","desktop_ui_fill":"enabled",
+                         "desktop_ui_text":"exists"}[kind]
+                deadline=time.monotonic()+timeout
+                observed=None
+                while True:
+                    observed=state()
+                    ready=(observed is not None if desired=="exists" else
+                           observed is None or not observed["visible"] if desired=="not_visible" else
+                           observed is not None and observed.get(desired,False))
+                    if ready:break
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0:
+                        selector=f"window={title!r}, name={name!r}, automationId={automation_id!r}, controlType={control_type!r}"
+                        raise WorkflowError(f"Timed out after {timeout:g}s waiting for UIA {desired}: {selector}",a["id"],"desktop-uia-timeout")
+                    time.sleep(min(0.2,remaining))
+                if kind=="desktop_ui_wait":return
+                if kind=="desktop_ui_click":windows_uia.click(title,name,automation_id,control_type,process_id)
+                elif kind=="desktop_ui_fill":windows_uia.fill(title,name,automation_id,control_type,str(interpolate(a.get("value",""),v)),process_id)
+                elif kind=="desktop_ui_text":v[a.get("result","text")]=windows_uia.read_text(title,name,automation_id,control_type,process_id)
+                return
+            except WorkflowError:
+                raise
+            except Exception as exc:
+                raise WorkflowError(f"Windows UI Automation failed: {type(exc).__name__}: {exc}",a["id"],"desktop-uia-error") from exc
         try:
             import pyautogui
         except ImportError as exc:
             raise WorkflowError("Desktop automation requires the optional PyAutoGUI adapter. See docs/AUTOMATION_ADAPTERS.md", a["id"], "runtime-unavailable") from exc
-        kind=a["type"]
         if kind=="desktop_screenshot":
             path=self._path(a["path"],v,True);pyautogui.screenshot().save(path)
         elif kind=="desktop_click": pyautogui.click(int(a["x"]),int(a["y"]),clicks=int(a.get("clicks",1)))

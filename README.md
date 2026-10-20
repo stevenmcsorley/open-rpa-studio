@@ -4,18 +4,20 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-![Open RPA Studio desktop workspace](docs/assets/studio-overview.png)
+![Open RPA Studio Browser Preview showing the workflow editor](docs/assets/studio-overview.png)
+
+*The screenshot shows the isolated browser preview. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
 ## Download and install
 
-The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.4](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.4). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.4-x64.exe` after running the build command below.
+The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.5](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.5). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.5-x64.exe` after running the build command below.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `7aa27dc3f5708261aaa521b05b21f18535a293b33e0795be011fa1ce9454300e`. Verify the file before running it:
+The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `4e46a7a6b51284f33235d74eccdec51e446ce7cf734ca03f99dadd14fb634121`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.4-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.5-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -53,6 +55,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
 - Use the visible, permission-gated Playwright inspector to discover named page controls and add editable click, fill, select, check, uncheck, and read-text actions.
+- On Windows, inspect visible application windows and accessible controls with UI Automation, then add editable click, set-text, read-text, and wait activities. Exact window titles plus Automation IDs/names identify controls; ambiguous selectors fail closed and password controls are omitted from inspection.
 - Generate a candidate workflow from an optional AI provider, review the validation output, then explicitly insert the draft. Generated workflows are not run automatically.
 - Choose whether AI drafts an activity sequence, connected flowchart, or state machine. Model-specific schemas and the same local workflow validator are applied before a draft can replace the current workflow.
 
@@ -60,7 +63,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON and CSV transforms; wait; HTTP requests; browser actions; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON and CSV transforms; wait; HTTP requests; browser actions; Windows semantic desktop UI Automation; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
 
 ### Debugging and run history
 
@@ -95,7 +98,7 @@ uv sync --locked --extra dev --extra browser
 uv run playwright install chromium
 ```
 
-Linux coordinate-based desktop actions use optional PyAutoGUI and require explicit per-run permission. AT-SPI/AT-SPI2 accessibility inspection is not implemented yet; a capability check reports this rather than presenting it as supported. Coordinate automation is inherently less resilient than semantic selectors and should be used only where an accessible interface is unavailable.
+Windows UI Automation is available through the optional `desktop` extra and the Studio's **Inspect UI → Inspect Desktop UIA** picker. It reads visible control metadata only, excludes password controls, rejects ambiguous selectors, and creates ordinary editable workflow activities. Every desktop inspection and interaction requires explicit desktop permission. Linux coordinate-based desktop actions use optional PyAutoGUI; Linux AT-SPI/AT-SPI2 semantic inspection is not implemented yet. Coordinate automation is less resilient than semantic selectors and should be used only where an accessible interface is unavailable.
 
 ## Safety and security model
 
@@ -161,7 +164,7 @@ npm test
 npm run build
 ```
 
-Build and smoke-install the Windows release using `npm run build:windows-installer`. The v0.1.4 installer was installed silently into an isolated workspace-local directory. Its bundled bridge generated and executed sequence, flowchart, and state-machine drafts through Ollama without relying on a separately installed Python runtime. The run IDs and artifact hash are recorded in [the changelog](CHANGELOG.md). The Tauri host uses Windows `CREATE_NO_WINDOW` for the bridge subprocess to prevent a console window from appearing.
+Build and smoke-install the Windows release using `npm run build:windows-installer`. The changelog records release smoke evidence and artifact hashes. The Tauri host uses Windows `CREATE_NO_WINDOW` for the bridge subprocess to prevent a console window from appearing.
 
 ## Known gaps
 

@@ -10,8 +10,22 @@ Inspection uses standard HTTP(S) ports and blocks non-public DNS answers on init
 
 ## Desktop
 
-Install the optional PyAutoGUI package. Activities can click coordinates, type into the current focus, press keys/hotkeys, and capture screenshots. These are coordinate/focus-dependent operations; robust AT-SPI accessibility selectors and desktop recording are not implemented. The desktop action capability must be enabled for each run. PyAutoGUI's fail-safe remains enabled.
+### Windows UI Automation
+
+Install the optional `desktop` extra. On Windows this includes pywinauto's Microsoft UI Automation (UIA) backend. **Inspect UI → Inspect Desktop UIA** lists visible top-level windows and a bounded set of named interactive controls. The inspector records identity metadata only: accessible name, Automation ID, control type, match count and enabled state. It never reads field values and excludes password controls.
+
+The picker creates normal editable activities: `desktop_ui_click`, `desktop_ui_fill`, `desktop_ui_text` and `desktop_ui_wait`. Selectors include an exact top-level window title, optional process ID, and an accessible name and/or Automation ID, optionally constrained by control type. Interactions require the explicit desktop permission. Ambiguous control matches are rejected; add an Automation ID or control type to disambiguate. Set Text only targets an Edit control. Reading password controls is blocked; use a credential-vault activity for secrets. Wait polls every 200 ms and checks cancellation between UIA queries. A single COM/UIA operation may still block until that call returns.
+
+The UIA adapter was exercised against a local WinForms fixture: the workflow waited for an Edit control, set its text, clicked a button, and read the resulting label text. The engine returned `succeeded` and the expected value. This validates the adapter against a controlled Windows app; it does not prove compatibility with every target framework. Some applications expose incomplete UIA metadata or custom controls.
+
+### Coordinate fallback
+
+PyAutoGUI activities can click coordinates, type into the current focus, press keys/hotkeys, and capture screenshots. These operations depend on screen layout and foreground focus. The desktop action capability must be enabled for each run. PyAutoGUI's fail-safe remains enabled.
+
+### Linux accessibility
+
+Linux coordinate-based desktop actions use PyAutoGUI when a graphical session is available. AT-SPI/AT-SPI2 semantic inspection and actions are not implemented. The capability check reports this limitation instead of treating the bindings as a working adapter.
 
 ## Availability and limits
 
-An absent optional dependency returns `runtime-unavailable` on the activity that needs it. The engine never converts an unavailable adapter into a successful no-op. Linux desktop control additionally depends on an active graphical session and its security model. Browser and desktop adapters are optional and do not change the deterministic core format. The limited browser preview cannot use Playwright, desktop, filesystem, or network adapters; these require the desktop engine.
+An absent optional dependency returns `runtime-unavailable` on the activity that needs it. The engine never converts an unavailable adapter into a successful no-op. Linux desktop control additionally depends on an active graphical session and its security model. Browser and desktop adapters are optional and do not change the deterministic core format. The limited browser preview cannot use Playwright, UIA, desktop, filesystem, or network adapters; these require the desktop engine.

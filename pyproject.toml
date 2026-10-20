@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-rpa-studio-engine"
-version = "0.1.4"
+version = "0.1.5"
 description = "Local-first visual automation workflow engine"
 requires-python = ">=3.11"
 dependencies = ["regex>=2024.11,<2027"]
@@ -12,7 +12,10 @@ dependencies = ["regex>=2024.11,<2027"]
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9", "pytest-cov>=5,<7", "pyinstaller>=6.10,<7"]
 browser = ["playwright>=1.50,<2"]
-desktop = ["pyautogui>=0.9.54,<1"]
+desktop = [
+    "pyautogui>=0.9.54,<1",
+    "pywinauto>=0.6.9,<1 ; sys_platform == 'win32'",
+]
 credentials = ["keyring>=25,<27"]
 
 [project.scripts]
