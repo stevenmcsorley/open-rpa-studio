@@ -97,6 +97,9 @@ class WorkflowEngine:
             if workflow.get("executionModel")=="flowchart":
                 for node in workflow["flowchart"]["nodes"]:
                     if node["kind"]=="action": visit(name,[node["activity"]])
+            if workflow.get("executionModel")=="state_machine":
+                for state in workflow["stateMachine"]["states"]:
+                    visit(name,state.get("activities",[]))
         active:set[str]=set();complete:set[str]=set()
         def dfs(name:str)->None:
             if name in active: raise WorkflowError(f"Workflow invocation cycle includes '{name}'",code="workflow-cycle")
@@ -171,6 +174,8 @@ class WorkflowEngine:
                     raise WorkflowError(f"Argument '{name}' does not match declared type {spec.get('type')}",code="argument-type")
             if wf.get("executionModel","sequence")=="flowchart":
                 self._flowchart(wf["flowchart"],variables,logs,states,workflow_name)
+            elif wf.get("executionModel")=="state_machine":
+                self._state_machine(wf["stateMachine"],variables,logs,states,workflow_name)
             else:
                 self._sequence(wf["activities"], variables, logs, states, workflow_name)
             return RunResult("succeeded", self._redact_value(variables), logs, self._redact_value(states))
@@ -338,6 +343,62 @@ class WorkflowEngine:
                 self._emit({"event":"activity-failed","activityId":aid,"type":node_type,"error":str(exc)},logs)
                 raise
 
+    def _state_machine(self, machine: dict[str,Any], variables: dict[str,Any], logs: list[dict[str,Any]], states: dict[str,dict[str,Any]], workflow_name: str) -> None:
+        """Run states in order, choosing the first true guarded transition.
+
+        A transition without a condition is an explicit final fallback. State
+        visit limits use the same project execution quota as flowcharts.
+        """
+        state_map={state["id"]:state for state in machine["states"]}
+        outgoing:dict[str,list[dict[str,Any]]]={state_id:[] for state_id in state_map}
+        for transition in machine["transitions"]:outgoing[transition["from"]].append(transition)
+        current=machine["initial"]
+        visits=0
+        while current is not None:
+            self._check_cancel()
+            visits+=1
+            if visits>self._max_activity_executions:
+                raise WorkflowError(f"State machine exceeded its {self._max_activity_executions} state visit quota",current,"activity-quota")
+            state=state_map[current]
+            if self.options.debugger is not None:
+                self.options.debugger.before_activity(current,0,variables,self.options.cancel,lambda event:self._emit(event,logs),
+                    snapshot=self._debug_snapshot,editable=lambda active:self._debug_editable_variables(workflow_name,active),
+                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value))
+                self._check_cancel()
+            state_type="state_machine_state"
+            states[current]={"status":"running","type":state_type,"workflow":workflow_name,"label":state.get("label",current)}
+            self._emit({"event":"activity-started","activityId":current,"type":state_type,"state":current},logs)
+            try:
+                self._sequence(state.get("activities",[]),variables,logs,states,workflow_name)
+                next_state=None
+                if not state.get("final",False):
+                    fallback=None
+                    for transition in outgoing[current]:
+                        condition=transition.get("condition")
+                        if condition is None:
+                            fallback=transition
+                            continue
+                        outcome=evaluate(condition,variables)
+                        if not isinstance(outcome,bool):
+                            raise WorkflowError(f"Transition condition from state {current} must evaluate to true or false",current,"state-machine-condition-type")
+                        if outcome:
+                            next_state=transition["to"]
+                            break
+                    if next_state is None and fallback is not None:next_state=fallback["to"]
+                    if next_state is None:
+                        raise WorkflowError(f"No transition condition matched from state {current}",current,"state-machine-no-transition-match")
+                states[current].update(status="succeeded",durationMs=0)
+                self._emit({"event":"activity-completed","activityId":current,"type":state_type,"nextState":next_state},logs)
+                if self.options.debugger is not None:self.options.debugger.after_activity(current,0)
+                current=next_state
+            except Exception as exc:
+                states[current].update(status="failed",error=str(exc))
+                if not getattr(exc,"activity_id",None):
+                    try:setattr(exc,"activity_id",current)
+                    except Exception:pass
+                self._emit({"event":"activity-failed","activityId":current,"type":state_type,"error":str(exc)},logs)
+                raise
+
     def _activity(self, a: dict[str, Any], v: dict[str, Any], logs: list[dict[str, Any]], states: dict[str, dict[str, Any]], workflow_name: str, depth: int = 0) -> None:
         kind = a["type"]
         if kind == "assign":
@@ -474,6 +535,8 @@ class WorkflowEngine:
             before = dict(v)
             if child_wf.get("executionModel","sequence")=="flowchart":
                 self._flowchart(child_wf["flowchart"],child_vars,logs,states,target)
+            elif child_wf.get("executionModel")=="state_machine":
+                self._state_machine(child_wf["stateMachine"],child_vars,logs,states,target)
             else:
                 self._sequence(child_wf["activities"], child_vars, logs, states, target,depth+1)
             for arg in child_specs.values():

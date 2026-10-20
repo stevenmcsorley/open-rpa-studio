@@ -236,8 +236,8 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
             elif typ=="browser_launch" and "headless" in item and not isinstance(item["headless"],bool):
                 problems.append({"code":"browser-headless","message":"Browser Launch headless must be a boolean","activityId":str(aid or "")})
     model=workflow.get("executionModel","sequence")
-    if model not in {"sequence","flowchart"}:
-        problems.append({"code":"execution-model","message":"executionModel must be 'sequence' or 'flowchart'"})
+    if model not in {"sequence","flowchart","state_machine"}:
+        problems.append({"code":"execution-model","message":"executionModel must be 'sequence', 'flowchart', or 'state_machine'"})
     if model=="sequence":
         check(activities)
     elif model=="flowchart":
@@ -320,6 +320,56 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     reachable.add(current);pending.extend(edge["to"] for edge in outgoing.get(current,[]))
                 for node_id in node_map.keys()-reachable:
                     problems.append({"code":"flowchart-unreachable","message":f"Flowchart node {node_id} is unreachable from Start"})
+    elif model=="state_machine":
+        if activities:
+            problems.append({"code":"state-machine-sequence-mixed","message":"State-machine workflows must keep the sequence activities array empty"})
+        machine=workflow.get("stateMachine")
+        if not isinstance(machine,dict):
+            problems.append({"code":"state-machine-type","message":"State-machine workflows need a stateMachine object"})
+            machine={}
+        states=machine.get("states")
+        transitions=machine.get("transitions")
+        if not isinstance(states,list) or not states or len(states)>1000:
+            problems.append({"code":"state-machine-states","message":"State machine needs between 1 and 1,000 states"});states=[]
+        if not isinstance(transitions,list) or len(transitions)>5000:
+            problems.append({"code":"state-machine-transitions","message":"State machine transitions must be an array of at most 5,000 entries"});transitions=[]
+        state_map:dict[str,dict[str,Any]]={}
+        for index,state in enumerate(states):
+            if not isinstance(state,dict) or not isinstance(state.get("id"),str) or not state["id"].strip():
+                problems.append({"code":"state-machine-state-id","message":f"State {index+1} needs a non-empty id"});continue
+            state_id=state["id"]
+            if state_id in state_map or state_id in seen:problems.append({"code":"state-machine-state-duplicate","message":f"Duplicate state id: {state_id}"})
+            seen.add(state_id)
+            state_map[state_id]=state
+            if "breakpoint" in state and not isinstance(state["breakpoint"],bool):problems.append({"code":"state-machine-breakpoint","message":f"State {state_id} breakpoint must be a boolean"})
+            if "final" in state and not isinstance(state["final"],bool):problems.append({"code":"state-machine-final","message":f"State {state_id} final must be a boolean"})
+            if not isinstance(state.get("label",state_id),str):problems.append({"code":"state-machine-label","message":f"State {state_id} label must be text"})
+            state_activities=state.get("activities",[])
+            if not isinstance(state_activities,list):problems.append({"code":"state-machine-activities","message":f"State {state_id} activities must be an array"})
+            else:check(state_activities,f"stateMachine.states.{state_id}.activities")
+        initial=machine.get("initial")
+        if initial not in state_map:problems.append({"code":"state-machine-initial","message":"State machine initial must refer to a declared state"})
+        outgoing:dict[str,list[dict[str,Any]]]={state_id:[] for state_id in state_map}
+        for index,transition in enumerate(transitions):
+            if not isinstance(transition,dict) or transition.get("from") not in state_map or transition.get("to") not in state_map:
+                problems.append({"code":"state-machine-transition-target","message":f"Transition {index+1} refers to an unknown state"});continue
+            source=transition["from"];condition=transition.get("condition")
+            if condition is not None and (not isinstance(condition,str) or not condition.strip()):problems.append({"code":"state-machine-condition","message":f"Transition from {source} condition must be non-empty text"})
+            outgoing[source].append(transition)
+        for state_id,state in state_map.items():
+            edges=outgoing[state_id]
+            if state.get("final",False) and edges:problems.append({"code":"state-machine-final-edges","message":f"Final state {state_id} cannot have outgoing transitions"})
+            if not state.get("final",False) and not edges:problems.append({"code":"state-machine-no-transition","message":f"Non-final state {state_id} needs at least one outgoing transition"})
+            unconditional=[i for i,edge in enumerate(edges) if edge.get("condition") is None]
+            if len(unconditional)>1 or (unconditional and unconditional[0]!=len(edges)-1):problems.append({"code":"state-machine-fallback-order","message":f"State {state_id} may have one unconditional fallback, and it must be last"})
+        if initial in state_map:
+            reachable:set[str]=set();pending=[initial]
+            while pending:
+                current=pending.pop()
+                if current in reachable:continue
+                reachable.add(current);pending.extend(edge["to"] for edge in outgoing.get(current,[]))
+            for state_id in state_map.keys()-reachable:problems.append({"code":"state-machine-unreachable","message":f"State {state_id} is unreachable from the initial state"})
+        if not any(state.get("final",False) for state in state_map.values()):problems.append({"code":"state-machine-final-missing","message":"State machine needs at least one final state"})
     variables = workflow.get("variables", [])
     if not isinstance(variables, list):
         problems.append({"code": "variables-type", "message": "variables must be an array"})

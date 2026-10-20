@@ -8,14 +8,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.2](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.2). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.2-x64.exe` after running the build command below.
+The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.3](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.3). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.3-x64.exe` after running the build command below.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `c48df570da10b56626401a3074d58acbd60db4f68624ed8ea6b7fdb2a69ccaac`. Verify the file before running it:
+The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `820580c0715bcf0da62ec0d7f6711c298c4ed7a10e1054eb9f27f66d77902f03`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.2-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.3-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -48,6 +48,8 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
 - Search a categorized activity catalog, configure activity properties, reorder sequence actions, and edit nested control-flow branches.
 - Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file.
+- Author a state machine with named states, per-state activity sequences, ordered boolean guards, an explicit initial state, and terminal states. State visits obey the workflow execution quota; interrupted workflows are not automatically replayed.
+- See the [workflow format and state-machine example](docs/WORKFLOW-FORMAT.md) and the [architecture notes](docs/ARCHITECTURE.md).
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
 - Use the visible, permission-gated Playwright inspector to discover named page controls and add editable click, fill, select, check, uncheck, and read-text actions.

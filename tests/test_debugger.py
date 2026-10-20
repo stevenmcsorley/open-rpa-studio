@@ -114,6 +114,13 @@ def test_flowchart_node_and_action_breakpoints_are_collected():
     ]}}
     assert _workflow_breakpoints(workflow)=={"decision-node","write-log","nested-log"}
 
+def test_state_machine_breakpoints_include_states_and_nested_activities():
+    from openrpa.bridge import _workflow_breakpoints
+    workflow={"executionModel":"state_machine","activities":[],"stateMachine":{"states":[
+        {"id":"review","breakpoint":True,"activities":[{"id":"process","type":"switch","expression":"route","cases":[{"value":"a","activities":[{"id":"branch-log","type":"log","breakpoint":True}]}],"default":[]}]},
+        {"id":"finish","activities":[]}],"transitions":[]}}
+    assert _workflow_breakpoints(workflow)=={"review","branch-log"}
+
 
 def test_cancel_wakes_a_debugger_paused_at_boundary(tmp_path):
     debugger=DebugController()

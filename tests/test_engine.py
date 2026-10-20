@@ -442,3 +442,50 @@ def test_plaintext_keyring_backend_is_rejected(monkeypatch):
     monkeypatch.setitem(sys.modules,"keyring",fake)
     with pytest.raises(RuntimeError,match="non-approved keyring backend"):
         get_safe_keyring()
+
+def test_state_machine_runs_guards_then_unconditional_fallback(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"State machine","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Route","executionModel":"state_machine","variables":[{"name":"approved","type":"boolean","value":False},{"name":"route","type":"string","value":""}],"arguments":[],"activities":[],"stateMachine":{"initial":"review","states":[
+        {"id":"review","label":"Review request","activities":[{"id":"review-log","type":"log","message":"reviewing"}]},
+        {"id":"accept","label":"Accepted","final":True,"activities":[{"id":"accept-route","type":"assign","target":"route","value":"accepted"}]},
+        {"id":"reject","label":"Rejected","final":True,"activities":[{"id":"reject-route","type":"assign","target":"route","value":"rejected"}]}
+    ],"transitions":[{"from":"review","to":"accept","condition":"approved"},{"from":"review","to":"reject"}]}}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded"
+    assert result.variables["route"]=="rejected"
+    assert result.activities["review"]["status"]=="succeeded"
+    assert result.activities["reject-route"]["status"]=="succeeded"
+
+def test_state_machine_rejects_unreachable_state_and_bad_fallback_order():
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Bad states","executionModel":"state_machine","variables":[],"arguments":[],"activities":[],"stateMachine":{"initial":"a","states":[{"id":"a"},{"id":"b","final":True},{"id":"unused","final":True}],"transitions":[{"from":"a","to":"b"},{"from":"a","to":"unused","condition":"True"}]}}
+    codes={problem["code"] for problem in validate_workflow(workflow)}
+    assert "state-machine-fallback-order" in codes
+    assert "state-machine-unreachable" not in codes  # every edge is reachable, regardless of guards
+
+def test_state_machine_reports_non_boolean_guard_as_failed_state(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Bad guard","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Bad guard","executionModel":"state_machine","variables":[],"arguments":[],"activities":[],"stateMachine":{"initial":"a","states":[{"id":"a"},{"id":"b","final":True}],"transitions":[{"from":"a","to":"b","condition":"1"}]}}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="failed"
+    assert result.error["code"]=="state-machine-condition-type"
+    assert result.activities["a"]["status"]=="failed"
+
+def test_state_machine_cycles_obey_activity_visit_quota(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Cycle","main":"Main","workflows":{"Main":"main.json"},"limits":{"maxActivityExecutions":3}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Cycle","executionModel":"state_machine","variables":[],"arguments":[],"activities":[],"stateMachine":{"initial":"again","states":[{"id":"again","activities":[]},{"id":"done","final":True,"activities":[]}],"transitions":[{"from":"again","to":"again","condition":"True"},{"from":"again","to":"done"}]}}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="failed"
+    assert result.error["code"]=="activity-quota"
+
+def test_invoke_workflow_runs_state_machine_and_maps_outputs(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Invoke state","main":"Main","workflows":{"Main":"main.json","Child":"child.json"}}
+    parent={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"invoke","type":"invoke_workflow","workflow":"Child","arguments":{},"resultTarget":"childResults"}]}
+    child={"format":"openrpa.workflow","formatVersion":1,"name":"Child","executionModel":"state_machine","variables":[{"name":"answer","type":"string","value":"ready"}],"arguments":[],"activities":[],"stateMachine":{"initial":"complete","states":[{"id":"complete","final":True,"activities":[]}],"transitions":[]}}
+    (tmp_path/"main.json").write_text(json.dumps(parent),encoding="utf-8")
+    (tmp_path/"child.json").write_text(json.dumps(child),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded"
+    assert result.variables["childResults"]["answer"]=="ready"

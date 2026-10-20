@@ -26,6 +26,7 @@ def component(kind: str,name: str,version: str,purl: str,license_value: str|None
 
 
 def build() -> dict:
+    app_version=json.loads((ROOT/"package.json").read_text(encoding="utf-8"))["version"]
     components=[]
     python_lock=tomllib.loads((ROOT/"uv.lock").read_text(encoding="utf-8"))
     for package in python_lock.get("package",[]):
@@ -67,7 +68,7 @@ def build() -> dict:
     component_identity="\n".join(f"{row.get('purl','')}@{row.get('version','')}" for row in components)
     serial=uuid.uuid5(uuid.NAMESPACE_URL,"open-rpa-studio-sbom:"+component_identity)
     return {"bomFormat":"CycloneDX","specVersion":"1.5","serialNumber":f"urn:uuid:{serial}","version":1,
-            "metadata":{"component":{"type":"application","name":"Open RPA Studio","version":"0.1.2","purl":"pkg:generic/open-rpa-studio@0.1.2"},
+            "metadata":{"component":{"type":"application","name":"Open RPA Studio","version":app_version,"purl":f"pkg:generic/open-rpa-studio@{app_version}"},
                         "properties":[{"name":"openrpa:lockfiles","value":"uv.lock, package-lock.json, src-tauri/Cargo.lock"}]},
             "components":components}
 

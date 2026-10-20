@@ -55,6 +55,10 @@ def _workflow_breakpoints(workflow: dict[str, Any]) -> set[str]:
             for branch in ("then","else","body","catch","finally"):
                 child=item.get(branch)
                 if isinstance(child,list): walk(child)
+            if item.get("type")=="switch":
+                for case in item.get("cases",[]):
+                    if isinstance(case,dict) and isinstance(case.get("activities"),list):walk(case["activities"])
+                if isinstance(item.get("default"),list):walk(item["default"])
     activities=workflow.get("activities",[])
     if isinstance(activities,list): walk(activities)
     if workflow.get("executionModel")=="flowchart":
@@ -64,6 +68,11 @@ def _workflow_breakpoints(workflow: dict[str, Any]) -> set[str]:
                 target=action.get("id") if node.get("kind")=="action" and isinstance(action,dict) else node.get("id")
                 if isinstance(target,str): found.add(target)
             if node.get("kind")=="action" and isinstance(node.get("activity"),dict): walk([node["activity"]])
+    if workflow.get("executionModel")=="state_machine":
+        for state in workflow.get("stateMachine",{}).get("states",[]):
+            if state.get("breakpoint") is True and isinstance(state.get("id"),str):found.add(state["id"])
+            activities=state.get("activities",[])
+            if isinstance(activities,list):walk(activities)
     return found
 
 def atomic_json(path: Path, value: Any) -> None:
