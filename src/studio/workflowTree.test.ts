@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ActivitySequence } from './App';
 import { draggedPosition, FlowchartEditor } from './FlowchartEditor';
-import { appendNestedActivity, findNestedActivity, removeNestedActivity, reorderNestedActivity, updateNestedActivity } from './workflowTree';
+import { appendNestedActivity, duplicateNestedActivity, findNestedActivity, removeNestedActivity, reorderNestedActivity, updateNestedActivity } from './workflowTree';
 import { insertFlowchartAction, reconnectFlowchartTransition } from './flowchartEditing';
 import { validate as validateWebWorkflow } from './webEngine';
 import type { Activity } from './types';
@@ -18,6 +18,26 @@ const switchTree:Activity[]=[{id:'router',type:'switch',expression:'route',cases
 const retryTree:Activity[]=[{id:'retry',type:'retry',maxAttempts:2,retryOn:['http-timeout'],delaySeconds:1,backoffFactor:2,repeatSafe:true,body:[{id:'retry-log',type:'log',message:'repeat'}]}];
 
 describe('nested visual workflow editing',()=>{
+  it('duplicates an activity subtree beside its source with unique descendant IDs',()=>{
+    let counter=0;
+    const result=duplicateNestedActivity(tree,'branch',()=>`copy-${++counter}`);
+    expect(result.activityId).toBe('copy-1');
+    expect(result.items.map(item=>item.id)).toEqual(['branch','copy-1','last']);
+    const copy=result.items[1];
+    expect((copy.then as Activity[])[0].id).toBe('copy-2');
+    expect(((copy.then as Activity[])[0].body as Activity[]).map(item=>item.id)).toEqual(['copy-3','copy-4']);
+    expect((copy.else as Activity[])[0].id).toBe('copy-5');
+    expect(result.items[0]).toEqual(tree[0]);
+  });
+
+  it('duplicates switch case and default descendants without reusing IDs',()=>{
+    let counter=0;
+    const result=duplicateNestedActivity(switchTree,'router',()=>`switch-copy-${++counter}`);
+    expect(result.activityId).toBe('switch-copy-1');
+    expect((((result.items[1].cases as any[])[0].activities[0]) as Activity).id).toBe('switch-copy-3');
+    expect(((result.items[1].default as Activity[])[0]).id).toBe('switch-copy-2');
+  });
+
   it('appends a new activity to the selected nested branch without changing the source tree',()=>{
     const added={id:'third',type:'assign'};
     const result=appendNestedActivity(tree,'loop','body',added);

@@ -2,6 +2,39 @@ import type { Activity } from './types';
 
 const NESTED_BRANCHES=['then','else','body','catch','finally','default'] as const;
 
+/** Deep-copy one activity and place it beside its source, remapping every descendant ID. */
+export function duplicateNestedActivity(items:Activity[],id:string,makeId:()=>string=()=>crypto.randomUUID().slice(0,8)):{items:Activity[];activityId?:string}{
+  let duplicatedId:string|undefined;
+  const clone=(activity:Activity):Activity=>{
+    const copy=structuredClone(activity);
+    const remap=(item:Activity):Activity=>{
+      const next:Activity={...item,id:makeId()};
+      if(item.id===activity.id)duplicatedId=next.id;
+      for(const key of NESTED_BRANCHES)if(Array.isArray(item[key]))next[key]=((item[key] as Activity[]).map(remap)) as never;
+      if(item.type==='switch'&&Array.isArray(item.cases))next.cases=(item.cases as {value:unknown;activities:Activity[]}[]).map(entry=>({...entry,activities:entry.activities.map(remap)}));
+      return next;
+    };
+    return remap(copy);
+  };
+  const visit=(sequence:Activity[]):Activity[]=>{
+    const index=sequence.findIndex(item=>item.id===id);
+    if(index>=0){const cloned=clone(sequence[index]);duplicatedId=cloned.id;return [...sequence.slice(0,index+1),cloned,...sequence.slice(index+1)]}
+    let changed=false;
+    const next=sequence.map(item=>{
+      let updated=item;
+      for(const key of NESTED_BRANCHES){const branch=item[key];if(Array.isArray(branch)){const result=visit(branch as Activity[]);if(result!==branch){updated={...updated,[key]:result};changed=true;break}}}
+      if(item.type==='switch'&&!changed&&Array.isArray(item.cases)){
+        const cases=item.cases as {value:unknown;activities:Activity[]}[];
+        for(let i=0;i<cases.length;i++){const result=visit(cases[i].activities);if(result!==cases[i].activities){updated={...updated,cases:cases.map((entry,j)=>j===i?{...entry,activities:result}:entry)};changed=true;break}}
+      }
+      return updated;
+    });
+    return changed?next:sequence;
+  };
+  const result=visit(items);
+  return result===items?{items}:{items:result,activityId:duplicatedId};
+}
+
 function switchCaseIndex(branch:string):number|undefined{
   const match=branch.match(/^case:(\d+)$/);
   return match?Number(match[1]):undefined;

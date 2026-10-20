@@ -1,4 +1,10 @@
 # Changelog
+## 0.1.15 — Duplicate activity subtrees
+
+- Duplicate an activity beside its source from the canvas toolbar or Ctrl/Cmd+D. Nested branch and switch descendants are deep-copied with fresh IDs, avoiding collisions in selection, breakpoints and execution state.
+- Supports sequence trees, state-machine activity sequences and flowchart action nodes.
+- Refreshed the repository screenshot with the duplicate control and resulting copied step visible.
+- Verification: 29 frontend tests, including nested branch and switch remapping; 125 Python tests; production Vite build; offline Cargo check; Playwright browser-preview duplication increased the activity count from two to three; 59.92 MiB Windows x64 NSIS installer built and silently installed in an isolated directory; the installed bridge passed reusable-workflow argument acceptance. Installer SHA-256: `8ee7a431d2c70dd6ba751ea27426bd2182172659c1c7e3b38c90055a7e0b8500`. CycloneDX SBOM: 475 locked dependency components.
 
 ## 0.1.14 — Bounded workflow undo and redo
 
