@@ -14,7 +14,7 @@ The unsigned Windows development installer is available in the [Open RPA Studio 
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.9 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5825bb260dda5f220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`. Verify the file before running it:
+The v0.1.9 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5825bb260ddaf5c220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`. Verify the file before running it:
 
 ```powershell
 Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.9-x64.exe -Algorithm SHA256

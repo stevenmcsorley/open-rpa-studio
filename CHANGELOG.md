@@ -108,5 +108,5 @@ This remains an unsigned development release. State-machine workflows do not pro
 - Use `/v1/responses` with schema-constrained workflow drafts, `store: false`, and refusal/incomplete response handling.
 - Keep other compatible providers on Chat Completions.
 - Refresh the README application screenshot.
-- Windows installer SHA-256: `5825bb260dda5f220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`.
+- Windows installer SHA-256: `5825bb260ddaf5c220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`.
 - Verification: 119 Python tests, 22 frontend tests, Vite production build, Rust check, and isolated NSIS install passed. The installed bridge exposed and round-tripped the Responses profile across processes. Installed bridge SHA-256: `d67c9efa97fbc7f1035beaf1ce8c13fb129e2205594aa80474050c500b2916ea`.
