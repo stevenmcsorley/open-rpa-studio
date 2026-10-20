@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10 — Project package workflows
+
+- Add desktop toolbar actions for deterministic `.orpa` project package export and import.
+- Export saves current in-memory changes first, validates every workflow, emits a digest, and uses the existing secret-file exclusions.
+- Import verifies package paths, manifest entries, sizes and SHA-256 hashes before extracting into an empty selected folder; it asks before replacing the open Studio project.
+- Correct the README's Linux accessibility note to reflect the implemented AT-SPI support.
+- Verification: 121 Python tests, 22 frontend tests, production build and Rust check passed. Windows NSIS installer built and silently installed in an isolated directory; installed bridge successfully exported, hash-verified and imported a project package. Installer SHA-256: `f73a8d8b8a0b51c0e2dc8b215e856e35b0d4b7ecde2cbf58492fadf7d701a89e`; installed bridge SHA-256: `f620d597b1ef0290eb164b96865b885a3f37015cd5e2fee60c2af2e5e4b383c4`.
+
 ## 0.1.8 — Saved AI provider connections
 
 - Added persistent, named AI connection profiles for local and hosted providers. Profiles remember provider, endpoint, model and OS-vault references across app launches.

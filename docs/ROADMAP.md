@@ -16,6 +16,7 @@
 - Browser interaction recording for uniquely identified, named controls. Recording preserves action order and selector metadata, excludes password/email/payment/file/hidden fields, never reads typed values, and requires review before insertion; recorded fill/select values are left blank for explicit author completion.
 - Flowchart palette insertion splices activities into the selected path, preserves downstream transitions, routes Decision insertions through True, and inserts before End nodes without leaving unreachable nodes.
 - Example CSV automation and engine/UI verification.
+- Desktop toolbar import/export for deterministic, integrity-checked `.orpa` project packages, with export workflow validation and safe empty-folder extraction.
 
 ## Next release gates
 

@@ -132,6 +132,14 @@ def handle(request: dict[str, Any]) -> None:
             atomic_json(root / "project.json", project)
             history.audit("project.save",{"project":project.get("name",""),"workflowCount":len(project.get("workflows",{}))})
             result = {"saved": True}
+        elif method == "project.package.export":
+            from .package import pack_project
+            result=pack_project(params["root"],params["destination"])
+            history.audit("project.package.export",{"fileCount":result["files"],"sha256":result["sha256"]})
+        elif method == "project.package.import":
+            from .package import unpack_project
+            result=unpack_project(params["package"],params["destination"])
+            history.audit("project.package.import",{"fileCount":result["files"],"projectName":result.get("name",""),"sha256":result["sha256"]})
         elif method == "workflow.validate":
             project = params["project"]
             problems = validate_workflow(params["workflow"], set(project["workflows"]))

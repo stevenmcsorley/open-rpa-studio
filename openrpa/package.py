@@ -120,7 +120,7 @@ def unpack_project(package_path: str|Path,destination: str|Path,max_uncompressed
         load_project(staging/"project.json")
         if target.exists():target.rmdir()
         staging.replace(target)
-        return {"path":str(target),"files":len(declared),"name":manifest.get("name")}
+        return {"path":str(target),"files":len(declared),"name":manifest.get("name"),"sha256":_digest(source)}
     except Exception:
         shutil.rmtree(staging,ignore_errors=True)
         raise

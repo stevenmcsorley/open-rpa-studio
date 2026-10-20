@@ -10,14 +10,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.9 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.9). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.10 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.10). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.9 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5825bb260ddaf5c220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`. Verify the file before running it:
+The v0.1.10 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `f73a8d8b8a0b51c0e2dc8b215e856e35b0d4b7ecde2cbf58492fadf7d701a89e`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.9-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.10-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -47,6 +47,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 ### Visual authoring
 
 - Project and workflow files use versioned JSON formats (`openrpa.project` and `openrpa.workflow`, format version 1).
+- Export and import deterministic `.orpa` project packages from the desktop toolbar. Exports validate workflows and exclude secret files; imports verify the manifest, file hashes and paths before extracting to an empty folder.
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
 - Search a categorized activity catalog, configure activity properties, reorder sequence actions, and edit nested control-flow branches.
 - Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file.
@@ -99,7 +100,7 @@ uv sync --locked --extra dev --extra browser
 uv run playwright install chromium
 ```
 
-Windows UI Automation is available through the optional `desktop` extra and the Studio's **Inspect UI → Inspect Desktop UIA** picker. It reads visible control metadata only, excludes password controls, rejects ambiguous selectors, and creates ordinary editable workflow activities. Every desktop inspection and interaction requires explicit desktop permission. Linux coordinate-based desktop actions use optional PyAutoGUI; Linux AT-SPI/AT-SPI2 semantic inspection is not implemented yet. Coordinate automation is less resilient than semantic selectors and should be used only where an accessible interface is unavailable.
+Windows UI Automation is available through the optional `desktop` extra and the Studio's **Inspect UI → Inspect Desktop UIA** picker. It reads visible control metadata only, excludes password controls, rejects ambiguous selectors, and creates ordinary editable workflow activities. Every desktop inspection and interaction requires explicit desktop permission. Linux semantic inspection and interaction are implemented through AT-SPI/AT-SPI2; their availability depends on the distribution bindings and an active accessibility bus. Linux coordinate-based fallback uses optional PyAutoGUI and is less resilient than semantic selectors.
 
 ## Safety and security model
 
