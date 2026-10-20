@@ -31,3 +31,19 @@ export function insertFlowchartAction(graph: Flowchart, selectedId: string, acti
   }
   return { ...graph, nodes: [...graph.nodes, node], transitions };
 }
+
+/** Replace or remove one outgoing transition while preserving graph node identities. */
+export function reconnectFlowchartTransition(graph: Flowchart, from: string, when: 'always'|'true'|'false', to: string|null): Flowchart {
+  const source=graph.nodes.find(node=>node.id===from);
+  if(!source)throw new Error(`Unknown flowchart source node: ${from}`);
+  if(source.kind==='end')throw new Error('End nodes cannot have outgoing transitions.');
+  if((source.kind==='decision'&&when==='always')||(source.kind!=='decision'&&when!=='always'))throw new Error(`${source.kind==='decision'?'Decision':'Non-decision'} nodes need a compatible transition branch.`);
+  if(to!==null){
+    const target=graph.nodes.find(node=>node.id===to);
+    if(!target)throw new Error(`Unknown flowchart destination node: ${to}`);
+    if(target.kind==='start')throw new Error('Transitions cannot target the Start node.');
+  }
+  const transitions=graph.transitions.filter(edge=>!(edge.from===from&&(edge.when??'always')===when));
+  if(to!==null)transitions.push({from,to,when});
+  return{...graph,transitions};
+}

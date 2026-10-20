@@ -10,14 +10,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.12 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.12). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.13 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.13). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.12 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `404cace5effd4dad4c4e3392b8afa05f6e4bc8d47f92e25bc22f41e85970eb39`. Verify the file before running it:
+The v0.1.13 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5cfdf06dc1d355a3309b37e9610822061a4c678363b0c03d3b3eea8a78e001ed`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.12-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.13-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -55,6 +55,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - See the [workflow format and state-machine example](docs/WORKFLOW-FORMAT.md) and the [architecture notes](docs/ARCHITECTURE.md).
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
+- Pan a large flowchart with Space+drag or middle-drag, center the selected node, and reconnect a transition by dragging its connector handle onto a destination node. The accessible destination selector remains available for keyboard editing.
 - Use the visible, permission-gated Playwright inspector to discover named page controls and add editable click, fill, select, check, uncheck, and read-text actions.
 - On Windows, inspect visible application windows and accessible controls with UI Automation; on Linux, inspect controls through the AT-SPI accessibility bus. Both adapters add editable click, set-text, read-text, and wait activities using exact window titles and accessible names/IDs. Ambiguous selectors fail closed, and password controls are omitted.
 - Generate a candidate workflow from an optional AI provider, review the validation output, then explicitly insert the draft. Generated workflows are not run automatically.

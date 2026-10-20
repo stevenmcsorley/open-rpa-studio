@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.13 — Flowchart canvas navigation and edge editing
+
+- Pan large flowcharts with Space+drag or middle-button drag and center the selected node without changing graph coordinates.
+- Reconnect an existing True, False or Next edge by dragging its connector handle onto a destination node; keep the destination selector for keyboard and accessible editing.
+- Validate graph identities, node kinds and branch compatibility centrally before saving edge changes.
+- Refreshed the README screenshot with a valid branched workflow and the current canvas controls.
+- Verification: 25 frontend tests, 125 Python tests, Vite production build, offline Cargo check, SBOM generation (475 components), and a fresh silent Windows installation passed. The installed bridge passed the reusable argument/output binding acceptance fixture. Installer (59.92 MiB) SHA-256: `5cfdf06dc1d355a3309b37e9610822061a4c678363b0c03d3b3eea8a78e001ed`; installed bridge SHA-256: `ffddc7858b03b9937fa49ccc13708a025efb0b2102a30b8c2bf74a34464e86e4`. The flowchart preview was validated and a drag operation completed without client errors.
+
 ## 0.1.12 — Reusable workflow argument mapping
 
 - Added a dedicated Invoke Workflow properties editor that lists project workflows and their declared inputs/outputs, supports typed input bindings, per-call output destinations and new-variable result collection.

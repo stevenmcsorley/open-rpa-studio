@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ActivitySequence } from './App';
 import { draggedPosition, FlowchartEditor } from './FlowchartEditor';
 import { appendNestedActivity, findNestedActivity, removeNestedActivity, reorderNestedActivity, updateNestedActivity } from './workflowTree';
-import { insertFlowchartAction } from './flowchartEditing';
+import { insertFlowchartAction, reconnectFlowchartTransition } from './flowchartEditing';
 import { validate as validateWebWorkflow } from './webEngine';
 import type { Activity } from './types';
 
@@ -111,6 +111,16 @@ describe('nested visual workflow editing',()=>{
     expect(updated.transitions).toContainEqual({from:'decision',to:'node-notify',when:'true'});
     expect(updated.transitions).toContainEqual({from:'node-notify',to:'true-end',when:'always'});
     expect(updated.transitions).toContainEqual({from:'decision',to:'false-end',when:'false'});
+  });
+
+  it('reconnects or removes a flowchart branch with node and branch validation',()=>{
+    const graph:any={start:'start',nodes:[{id:'start',kind:'start'},{id:'decision',kind:'decision',condition:'ready'},{id:'yes',kind:'end'},{id:'no',kind:'end'},{id:'other',kind:'end'}],transitions:[{from:'start',to:'decision'},{from:'decision',to:'yes',when:'true'},{from:'decision',to:'no',when:'false'}]};
+    const reconnected=reconnectFlowchartTransition(graph,'decision','true','other');
+    expect(reconnected.transitions).toContainEqual({from:'decision',to:'other',when:'true'});
+    expect(reconnected.transitions).toContainEqual({from:'decision',to:'no',when:'false'});
+    expect(reconnectFlowchartTransition(reconnected,'decision','true',null).transitions).not.toContainEqual({from:'decision',to:'other',when:'true'});
+    expect(()=>reconnectFlowchartTransition(graph,'decision','true','start')).toThrow('Transitions cannot target the Start node.');
+    expect(()=>reconnectFlowchartTransition(graph,'decision','always','yes')).toThrow('compatible transition branch');
   });
 
   it('inserts before an End node and reconnects all incoming paths',()=>{
