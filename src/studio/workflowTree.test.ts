@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ActivitySequence } from './App';
 import { draggedPosition, FlowchartEditor } from './FlowchartEditor';
-import { appendNestedActivity, duplicateNestedActivity, findNestedActivity, removeNestedActivity, reorderNestedActivity, updateNestedActivity } from './workflowTree';
+import { appendNestedActivity, duplicateNestedActivity, findNestedActivity, insertNestedActivityAfter, reidentifyActivity, removeNestedActivity, reorderNestedActivity, updateNestedActivity } from './workflowTree';
 import { insertFlowchartAction, reconnectFlowchartTransition } from './flowchartEditing';
 import { validate as validateWebWorkflow } from './webEngine';
 import type { Activity } from './types';
@@ -36,6 +36,19 @@ describe('nested visual workflow editing',()=>{
     expect(result.activityId).toBe('switch-copy-1');
     expect((((result.items[1].cases as any[])[0].activities[0]) as Activity).id).toBe('switch-copy-3');
     expect(((result.items[1].default as Activity[])[0]).id).toBe('switch-copy-2');
+  });
+
+  it('pastes after a nested selection and remaps every copied ID on each paste',()=>{
+    let counter=0;
+    const source=tree[0];
+    const clipboard=reidentifyActivity(source,()=>`paste-${++counter}`);
+    expect(clipboard.id).toBe('paste-1');
+    expect((clipboard.then as Activity[])[0].id).toBe('paste-2');
+    const result=insertNestedActivityAfter(tree,'last',clipboard);
+    expect(result.map(item=>item.id)).toEqual(['branch','last','paste-1']);
+    const inserted=insertNestedActivityAfter(result,'second',{id:'pasted-sibling',type:'log'});
+    expect((((inserted[0].then as Activity[])[0].body as Activity[]).map(item=>item.id))).toEqual(['first','second','pasted-sibling']);
+    expect(tree.map(item=>item.id)).toEqual(['branch','last']);
   });
 
   it('appends a new activity to the selected nested branch without changing the source tree',()=>{

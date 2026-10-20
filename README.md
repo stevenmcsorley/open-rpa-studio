@@ -4,20 +4,20 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-![Open RPA Studio browser preview showing the visual workflow editor and duplicated activity](docs/assets/studio-overview.png)
+![Open RPA Studio browser preview showing the visual workflow editor with activity copy and paste](docs/assets/studio-overview.png)
 
 *The screenshot shows the isolated browser preview. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.15 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.15). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.16 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.16). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.15 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `8ee7a431d2c70dd6ba751ea27426bd2182172659c1c7e3b38c90055a7e0b8500`. Verify the file before running it:
+The v0.1.16 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5cb79721f8fdc605c5a52c2c437e2a226de159fd9ee63b45582d644aee36883d`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.15-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.16-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -58,6 +58,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Pan a large flowchart with Space+drag or middle-drag, center the selected node, and reconnect a transition by dragging its connector handle onto a destination node. The accessible destination selector remains available for keyboard editing.
 - Undo and redo workflow edits across sequence, flowchart, state-machine, activity properties, variables and arguments using the toolbar or Ctrl+Z/Ctrl+Y (Cmd+Z/Cmd+Y on macOS). Each workflow keeps a bounded 100-step edit history; loading another project clears the prior project's history.
 - Duplicate a selected activity beside its source with Ctrl/Cmd+D or the canvas toolbar. Control-flow descendants and switch cases receive fresh activity IDs, so duplicated breakpoints and execution results remain independent. Works in sequences, state-machine states and flowchart action paths.
+- Copy and paste activity subtrees within the Studio clipboard using Ctrl/Cmd+C and Ctrl/Cmd+V or the canvas controls. Paste inserts after the current selection, remaps IDs on every paste, works across workflows and does not access the system clipboard.
 - Use the visible, permission-gated Playwright inspector to discover named page controls and add editable click, fill, select, check, uncheck, and read-text actions.
 - On Windows, inspect visible application windows and accessible controls with UI Automation; on Linux, inspect controls through the AT-SPI accessibility bus. Both adapters add editable click, set-text, read-text, and wait activities using exact window titles and accessible names/IDs. Ambiguous selectors fail closed, and password controls are omitted.
 - Generate a candidate workflow from an optional AI provider, review the validation output, then explicitly insert the draft. Generated workflows are not run automatically.

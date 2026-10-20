@@ -2,19 +2,41 @@ import type { Activity } from './types';
 
 const NESTED_BRANCHES=['then','else','body','catch','finally','default'] as const;
 
+export function reidentifyActivity(activity:Activity,makeId:()=>string=()=>crypto.randomUUID().slice(0,8)):Activity{
+  const remap=(item:Activity):Activity=>{
+    const next:Activity={...item,id:makeId()};
+    for(const key of NESTED_BRANCHES)if(Array.isArray(item[key]))next[key]=(item[key] as Activity[]).map(remap) as never;
+    if(item.type==='switch'&&Array.isArray(item.cases))next.cases=(item.cases as {value:unknown;activities:Activity[]}[]).map(entry=>({...entry,activities:entry.activities.map(remap)}));
+    return next;
+  };
+  return remap(structuredClone(activity));
+}
+
+export function insertNestedActivityAfter(items:Activity[],targetId:string,activity:Activity):Activity[]{
+  let inserted=false;
+  const visit=(sequence:Activity[]):Activity[]=>{
+    const index=sequence.findIndex(item=>item.id===targetId);
+    if(index>=0){inserted=true;return [...sequence.slice(0,index+1),activity,...sequence.slice(index+1)]}
+    for(let i=0;i<sequence.length&&!inserted;i++){
+      const item=sequence[i];
+      for(const key of NESTED_BRANCHES){const branch=item[key];if(Array.isArray(branch)){const result=visit(branch as Activity[]);if(result!==branch){const next=[...sequence];next[i]={...item,[key]:result};return next}}}
+      if(item.type==='switch'&&Array.isArray(item.cases)){
+        const cases=item.cases as {value:unknown;activities:Activity[]}[];
+        for(let j=0;j<cases.length&&!inserted;j++){const result=visit(cases[j].activities);if(result!==cases[j].activities){const next=[...sequence];next[i]={...item,cases:cases.map((entry,index)=>index===j?{...entry,activities:result}:entry)};return next}}
+      }
+    }
+    return sequence;
+  };
+  return visit(items);
+}
+
 /** Deep-copy one activity and place it beside its source, remapping every descendant ID. */
 export function duplicateNestedActivity(items:Activity[],id:string,makeId:()=>string=()=>crypto.randomUUID().slice(0,8)):{items:Activity[];activityId?:string}{
   let duplicatedId:string|undefined;
   const clone=(activity:Activity):Activity=>{
-    const copy=structuredClone(activity);
-    const remap=(item:Activity):Activity=>{
-      const next:Activity={...item,id:makeId()};
-      if(item.id===activity.id)duplicatedId=next.id;
-      for(const key of NESTED_BRANCHES)if(Array.isArray(item[key]))next[key]=((item[key] as Activity[]).map(remap)) as never;
-      if(item.type==='switch'&&Array.isArray(item.cases))next.cases=(item.cases as {value:unknown;activities:Activity[]}[]).map(entry=>({...entry,activities:entry.activities.map(remap)}));
-      return next;
-    };
-    return remap(copy);
+    const result=reidentifyActivity(activity,makeId);
+    duplicatedId=result.id;
+    return result;
   };
   const visit=(sequence:Activity[]):Activity[]=>{
     const index=sequence.findIndex(item=>item.id===id);

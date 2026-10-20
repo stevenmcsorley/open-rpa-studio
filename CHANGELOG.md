@@ -1,4 +1,10 @@
 # Changelog
+## 0.1.16 — Internal activity clipboard
+
+- Copy and paste complete activity subtrees with toolbar controls or Ctrl/Cmd+C and Ctrl/Cmd+V. Paste inserts after the current selection; every inserted activity and descendant gets fresh IDs.
+- The Studio clipboard works across workflows and stays inside the application; it does not read or modify the operating-system clipboard. Sequence, state-machine and flowchart action paths are supported.
+- Refreshed the README screenshot with the copy and paste controls and resulting workflow steps.
+- Verification: 30 frontend tests, including recursive subtree ID remapping; 125 Python tests; production Vite build; offline Cargo check; Playwright browser-preview toolbar copy/paste and Ctrl+C/Ctrl+V raised the activity count from two to four with no console errors; 59.92 MiB Windows x64 NSIS installer built and silently installed; bundled bridge passed reusable-workflow acceptance. Installer SHA-256: `5cb79721f8fdc605c5a52c2c437e2a226de159fd9ee63b45582d644aee36883d`. CycloneDX SBOM: 475 dependency components.
 ## 0.1.15 — Duplicate activity subtrees
 
 - Duplicate an activity beside its source from the canvas toolbar or Ctrl/Cmd+D. Nested branch and switch descendants are deep-copied with fresh IDs, avoiding collisions in selection, breakpoints and execution state.
