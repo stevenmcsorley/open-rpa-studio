@@ -45,6 +45,7 @@ export async function getAdapterStatus():Promise<any>{return rpc('adapter.status
 export async function getAuditHistory(limit=200):Promise<any[]>{const value=await rpc('audit.history',{limit});return value.events??[];}
 export type AiConfig={provider:string;baseUrl?:string;credentialService?:string;credentialUsername?:string};
 export async function listAiProviders():Promise<{id:string;name:string;local:boolean;defaultBaseUrl:string;requiresCredential:boolean}[]>{return (await rpc('ai.providers')).providers??[];}
+export async function storeAiCredential(service:string,username:string,secret:string):Promise<void>{if(!inDesktop())throw new Error('Credential storage is available only in the installed desktop app.');await rpc('credential.store',{service,username,secret});}
 export async function listAiModels(config:AiConfig):Promise<string[]>{const result=await rpc('ai.models',{...config});return result.models??[];}
 export async function draftWithAi(config:AiConfig,model:string,prompt:string,workflows:string[],executionModel:'sequence'|'flowchart'|'state_machine'='sequence'):Promise<{explanation:string;workflow:Workflow;valid:boolean;problems:{code:string;message:string;activityId?:string}[]}>{return rpc('ai.draft',{...config,model,prompt,workflows,executionModel});}
 /** @deprecated Ollama alias retained for callers using the previous bridge API. */

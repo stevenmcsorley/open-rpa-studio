@@ -10,14 +10,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.6](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.6). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.6-x64.exe` after running the build command below.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.7 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.7). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `95c6f70894ee9e5abca021efc8a44c1b066b5793cdb979974e41b5bd23c1b8c2`. Verify the file before running it:
+The v0.1.7 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `a0e16e982b86e0751cff9801af42deca7fa8d32a62b6157964fb3d51e73a6df4`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.6-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.7-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -85,7 +85,7 @@ The core editor and execution engine work without an AI model or network access.
 - OpenRouter.
 - Compatible remote HTTPS endpoints configured by the user.
 
-Provider credentials are references into the operating-system credential vault (Windows Credential Manager, macOS Keychain, or Linux Secret Service). Secrets are never placed in workflow files or AI prompts. Remote prompts disclose the provider route before a request. AI output is treated as untrusted, parsed as a bounded schema, validated by the workflow validator, and requires user review before insertion. Local models are optional; unavailable providers do not disable non-AI features.
+Provider credentials are references into the operating-system credential vault (Windows Credential Manager, macOS Keychain, or Linux Secret Service). In the desktop AI panel, enter a key into the password field and choose **Store API key securely**; the key is sent to the local bridge, stored in the OS vault, then cleared from the form. Alternatively, use `openrpa credential SERVICE USERNAME`. Secrets are never placed in workflow files or audit records. Remote prompts disclose the provider route before a request. AI output is treated as untrusted, parsed as a bounded schema, validated by the workflow validator, and requires user review before insertion. Local models are optional; unavailable providers do not disable non-AI features.
 
 This is a set of provider-protocol adapters, not a promise that every model endpoint implements tool calling or structured output identically. Some compatible servers may reject schema-constrained requests.
 

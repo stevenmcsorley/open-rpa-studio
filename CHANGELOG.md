@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.7 — In-app AI credential setup
+
+- Added secure API-key onboarding to the desktop AI panel for Anthropic, OpenAI, OpenRouter and compatible remote providers. Keys are sent to the local bridge, stored through the approved OS credential vault and cleared from the form.
+- Added bounded input validation and an audit record that retains only the vault service/account reference. Vault write errors are sanitized so keyring exceptions cannot echo credential values.
+- Added regression tests for secure storage, unsafe-vault rejection, invalid values and secret-free audit/error output.
+
+### Verification
+
+- Provider and credential bridge tests: 24 passed; full Python suite 106 passed, frontend suite 22 passed, production frontend build passed.
+- Windows x64 NSIS installer built (59.89 MiB), SHA-256 `a0e16e982b86e0751cff9801af42deca7fa8d32a62b6157964fb3d51e73a6df4`.
+- Fresh silent install passed. Installed bridge SHA-256 `f4d32756a0ead9dbb3ad102971af211c8459cc296735148c0ab1b9b99b8bf716` matched the build resource. The installed bridge stored and retrieved a temporary acceptance key through the Windows credential vault; the test entry was deleted after verification.
+- Refreshed Studio screenshot captured for this increment.
+
 ## 0.1.6 — Linux desktop accessibility
 
 - Added a platform-neutral semantic desktop accessibility interface shared by workflow activities, the desktop inspector and adapter status.

@@ -299,6 +299,24 @@ def handle(request: dict[str, Any]) -> None:
             result={"closed":True}
         elif method == "ai.providers":
             result={"providers":ai_providers.catalog()}
+        elif method == "credential.store":
+            service=params.get("service")
+            username=params.get("username")
+            secret=params.get("secret")
+            if not isinstance(service,str) or not service.strip() or len(service)>200:
+                raise ValueError("Credential vault service must contain 1–200 characters")
+            if not isinstance(username,str) or not username.strip() or len(username)>200:
+                raise ValueError("Credential vault username must contain 1–200 characters")
+            if not isinstance(secret,str) or not secret or len(secret)>8192:
+                raise ValueError("Credential must contain 1–8,192 characters")
+            from .credentials import get_safe_keyring
+            vault=get_safe_keyring()
+            try:
+                vault.set_password(service.strip(),username.strip(),secret)
+            except Exception as exc:
+                raise ValueError(f"OS credential vault refused to store the credential ({type(exc).__name__})") from None
+            history.audit("credential.store",{"service":service.strip(),"username":username.strip(),"secretStored":True})
+            result={"stored":True,"service":service.strip(),"username":username.strip()}
         elif method == "ai.models":
             provider=str(params.get("provider","ollama"))
             history.audit("ai.models",{"provider":provider,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})

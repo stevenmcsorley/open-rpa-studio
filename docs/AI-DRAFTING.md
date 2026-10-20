@@ -22,4 +22,8 @@ The v0.1.4 development build was exercised against the installed local Ollama mo
 
 These are smoke tests, not a quality evaluation across tasks or models. A larger local model (`qwen3.5:9b-q4_K_M`) produced a valid sequence but hit the bridge's 180-second provider timeout for graph-shaped requests in this environment. The smaller 4B model completed the tested graph drafts in a few seconds. Model, hardware, prompt complexity, and schema support affect latency and correctness. Invalid output is rejected by the editor; timeouts surface as provider errors.
 
+## Provider credentials
+
+Remote provider keys can be stored from the desktop AI drafting panel. The app sends the value to its local Python bridge over the Tauri command channel, which accepts only an approved OS credential vault backend. The secret is not returned in the RPC response, audit entry, project, or workflow. It is held in the UI only while the form is open and cleared after a successful store or when the panel closes. If the OS vault is unavailable or uses an unsupported plaintext backend, storage fails closed. Local providers such as Ollama and LM Studio do not require credentials by default.
+
 Remote providers require HTTPS and credentials stored through the OS credential-vault flow. Prompts sent to remote providers leave the computer. The core Studio remains usable without an AI provider.
