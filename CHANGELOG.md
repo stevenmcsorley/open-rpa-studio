@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.8 — Saved AI provider connections
+
+- Added persistent, named AI connection profiles for local and hosted providers. Profiles remember provider, endpoint, model and OS-vault references across app launches.
+- Added strict profile schema validation, URL security checks, unique names/IDs, a 100-profile cap, one-megabyte file cap, atomic local writes and update/delete controls. The profile format rejects credential values and unknown fields.
+- Added native bridge operations and metadata-only audit events. Removing a profile does not remove its OS-vault credential.
+- Refreshed the public Studio screenshot.
+
+### Verification
+
+- AI profile tests: 10 passed; provider tests: 14 passed; full Python suite: 116 passed; frontend suite: 22 passed; production build, locked Rust check, dependency lock check and SBOM generation passed.
+- Windows x64 NSIS installer built (59.90 MiB), SHA-256 `1f25240d0f30308e052961e78d61422b780c6bf95b38a041600afa8f19207367`.
+- Fresh silent install passed. Installed bridge SHA-256 `39035b54dc0ce025dd3fde49a87a45757757308a56511e4385f0a5a7bdb7edc3` matched the build resource.
+- Installed-bridge regression saved a provider profile, restarted the bridge, listed the persisted profile, deleted it, and confirmed it was gone. No API-key field was stored.
+
 ## 0.1.7 — In-app AI credential setup
 
 - Added secure API-key onboarding to the desktop AI panel for Anthropic, OpenAI, OpenRouter and compatible remote providers. Keys are sent to the local bridge, stored through the approved OS credential vault and cleared from the form.

@@ -44,8 +44,12 @@ export async function getRunHistory(limit=50):Promise<any[]>{const value=await r
 export async function getAdapterStatus():Promise<any>{return rpc('adapter.status');}
 export async function getAuditHistory(limit=200):Promise<any[]>{const value=await rpc('audit.history',{limit});return value.events??[];}
 export type AiConfig={provider:string;baseUrl?:string;credentialService?:string;credentialUsername?:string};
+export type AiConnectionProfile={id:string;name:string;provider:string;baseUrl:string;model:string;credentialService:string;credentialUsername:string};
 export async function listAiProviders():Promise<{id:string;name:string;local:boolean;defaultBaseUrl:string;requiresCredential:boolean}[]>{return (await rpc('ai.providers')).providers??[];}
 export async function storeAiCredential(service:string,username:string,secret:string):Promise<void>{if(!inDesktop())throw new Error('Credential storage is available only in the installed desktop app.');await rpc('credential.store',{service,username,secret});}
+export async function listAiConnections():Promise<AiConnectionProfile[]>{if(!inDesktop())return [];return (await rpc('ai.connections.list')).profiles??[];}
+export async function saveAiConnection(profile:Partial<AiConnectionProfile>):Promise<AiConnectionProfile>{return (await rpc('ai.connections.save',{profile})).profile;}
+export async function deleteAiConnection(profileId:string):Promise<void>{await rpc('ai.connections.delete',{profileId});}
 export async function listAiModels(config:AiConfig):Promise<string[]>{const result=await rpc('ai.models',{...config});return result.models??[];}
 export async function draftWithAi(config:AiConfig,model:string,prompt:string,workflows:string[],executionModel:'sequence'|'flowchart'|'state_machine'='sequence'):Promise<{explanation:string;workflow:Workflow;valid:boolean;problems:{code:string;message:string;activityId?:string}[]}>{return rpc('ai.draft',{...config,model,prompt,workflows,executionModel});}
 /** @deprecated Ollama alias retained for callers using the previous bridge API. */

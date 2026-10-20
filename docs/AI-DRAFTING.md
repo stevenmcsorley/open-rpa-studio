@@ -27,3 +27,7 @@ These are smoke tests, not a quality evaluation across tasks or models. A larger
 Remote provider keys can be stored from the desktop AI drafting panel. The app sends the value to its local Python bridge over the Tauri command channel, which accepts only an approved OS credential vault backend. The secret is not returned in the RPC response, audit entry, project, or workflow. It is held in the UI only while the form is open and cleared after a successful store or when the panel closes. If the OS vault is unavailable or uses an unsupported plaintext backend, storage fails closed. Local providers such as Ollama and LM Studio do not require credentials by default.
 
 Remote providers require HTTPS and credentials stored through the OS credential-vault flow. Prompts sent to remote providers leave the computer. The core Studio remains usable without an AI provider.
+
+## Saved provider connections
+
+The desktop AI panel can save and select multiple named connection profiles. The app stores provider ID, endpoint, model choice and OS-vault service/username references in the per-user `ai-connections.json` file alongside local application history. It rejects unknown fields, unsupported providers, unsafe local/remote URLs, duplicate IDs/names, oversized files and more than 100 profiles. API keys are never accepted as profile fields. Deleting a profile removes only that local configuration; it does not delete a credential from the OS vault.

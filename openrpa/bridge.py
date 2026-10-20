@@ -14,6 +14,7 @@ from .engine import RunOptions, run_project
 from .model import load_project, validate_workflow
 from .history import RunHistory
 from . import ai_providers
+from . import ai_connections
 from .debugger import DebugController
 from .browser_inspector import BrowserInspector
 
@@ -34,6 +35,9 @@ def _history_path() -> Path:
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
     return base / "OpenRPAStudio" / "run-history.sqlite3"
+
+def _ai_connections_path() -> Path:
+    return _history_path().parent / "ai-connections.json"
 
 history = RunHistory(_history_path())
 
@@ -299,6 +303,17 @@ def handle(request: dict[str, Any]) -> None:
             result={"closed":True}
         elif method == "ai.providers":
             result={"providers":ai_providers.catalog()}
+        elif method == "ai.connections.list":
+            result={"profiles":ai_connections.list_profiles(_ai_connections_path())}
+        elif method == "ai.connections.save":
+            profile=ai_connections.save_profile(_ai_connections_path(),params.get("profile"))
+            history.audit("ai.connection.save",{"profileId":profile["id"],"provider":profile["provider"],"local":bool(ai_providers.PROVIDERS[profile["provider"]]["local"])})
+            result={"profile":profile}
+        elif method == "ai.connections.delete":
+            profile_id=params.get("profileId")
+            ai_connections.delete_profile(_ai_connections_path(),profile_id)
+            history.audit("ai.connection.delete",{"profileId":profile_id})
+            result={"deleted":True,"profileId":profile_id}
         elif method == "credential.store":
             service=params.get("service")
             username=params.get("username")
