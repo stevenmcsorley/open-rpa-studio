@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+import datetime
 import shutil
 import time
 import tempfile
 import os
 import io
 import copy as copy_module
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -659,6 +661,82 @@ class WorkflowEngine:
             encoded=rendered.getvalue().encode(a.get("encoding", "utf-8"))
             if len(encoded)>self._max_file_bytes: raise WorkflowError("CSV output exceeds configured file size limit",a["id"],"file-size-limit")
             self._atomic_write(self._path(a["path"], v, True),encoded)
+        elif kind == "xlsx_read":
+            path=self._path(a["path"],v)
+            if path.suffix.lower()!='.xlsx': raise WorkflowError("Spreadsheet Read supports .xlsx files only",a["id"],"spreadsheet-format")
+            if path.stat().st_size>self._max_file_bytes: raise WorkflowError("Spreadsheet exceeds configured read limit",a["id"],"file-size-limit")
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    infos=archive.infolist()
+                    if len(infos)>2_000 or sum(info.file_size for info in infos)>min(self._max_file_bytes*10,200_000_000):
+                        raise WorkflowError("Spreadsheet expands beyond its archive quota",a["id"],"file-size-limit")
+                    for info in infos:
+                        if not info.filename.lower().endswith((".xml",".rels")):continue
+                        tail=b""
+                        with archive.open(info) as stream:
+                            while chunk:=stream.read(65_536):
+                                self._check_cancel()
+                                probe=(tail+chunk).upper()
+                                if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+                                    raise WorkflowError("Spreadsheet XML must not contain DTD or entity declarations",a["id"],"spreadsheet-xml-entity")
+                                tail=probe[-16:]
+                from openpyxl import load_workbook
+                workbook=load_workbook(path,read_only=True,data_only=bool(a.get("dataOnly",True)))
+            except WorkflowError: raise
+            except Exception as exc: raise WorkflowError(f"Cannot open XLSX spreadsheet: {exc}",a["id"],"spreadsheet-read-error") from exc
+            try:
+                sheet_name=str(a.get("sheetName") or workbook.sheetnames[0])
+                if sheet_name not in workbook.sheetnames: raise WorkflowError(f"Worksheet not found: {sheet_name}",a["id"],"spreadsheet-sheet")
+                sheet=workbook[sheet_name];header_row=int(a.get("headerRow",1))
+                if header_row>sheet.max_row:raise WorkflowError("Spreadsheet headerRow is beyond the worksheet data",a["id"],"spreadsheet-header")
+                headers=[cell.value for cell in next(sheet.iter_rows(min_row=header_row,max_row=header_row))]
+                while headers and headers[-1] is None:headers.pop()
+                if not headers or len(headers)>2_000 or any(not isinstance(value,(str,int,float)) or not str(value).strip() for value in headers):
+                    raise WorkflowError("Spreadsheet header row needs 1–2,000 non-empty text or numeric headers",a["id"],"spreadsheet-header")
+                headers=[str(value).strip() for value in headers]
+                if len(headers)!=len(set(headers)): raise WorkflowError("Spreadsheet header names must be unique",a["id"],"spreadsheet-header-duplicate")
+                rows=[];text_bytes=0
+                for values in sheet.iter_rows(min_row=header_row+1,max_col=len(headers),values_only=True):
+                    self._check_cancel()
+                    if all(value is None for value in values):continue
+                    if len(rows)>=100_000:raise WorkflowError("Spreadsheet exceeds 100,000 data rows",a["id"],"spreadsheet-row-limit")
+                    if (len(rows)+1)*len(headers)>2_000_000:raise WorkflowError("Spreadsheet exceeds two million cells",a["id"],"spreadsheet-cell-limit")
+                    row={}
+                    for name,value in zip(headers,values):
+                        if isinstance(value,(datetime.date,datetime.datetime,datetime.time)):value=value.isoformat()
+                        if isinstance(value,str):text_bytes+=len(value.encode("utf-8"))
+                        if text_bytes>self._max_file_bytes:raise WorkflowError("Spreadsheet cell text exceeds configured data limit",a["id"],"file-size-limit")
+                        row[name]=value
+                    rows.append(row)
+                v[a.get("result","rows")]=rows
+            finally:workbook.close()
+        elif kind == "xlsx_write":
+            if Path(str(interpolate(a["path"],v))).suffix.lower()!='.xlsx':raise WorkflowError("Spreadsheet Write supports .xlsx output only",a["id"],"spreadsheet-format")
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str):rows=evaluate(rows,v)
+            if not isinstance(rows,list) or any(not isinstance(row,dict) for row in rows):raise WorkflowError("Spreadsheet Write rows must be a list of objects",a["id"],"spreadsheet-input")
+            if len(rows)>100_000:raise WorkflowError("Spreadsheet output exceeds 100,000 rows",a["id"],"spreadsheet-row-limit")
+            fields=a.get("fields") or list(dict.fromkeys(key for row in rows for key in row))
+            if not fields or len(fields)>2_000 or any(not isinstance(name,str) or not name.strip() for name in fields) or len(fields)!=len(set(fields)):
+                raise WorkflowError("Spreadsheet Write needs 1–2,000 unique text column names",a["id"],"spreadsheet-fields")
+            if any(not isinstance(key,str) for row in rows for key in row) or any(key not in fields for row in rows for key in row):raise WorkflowError("Spreadsheet row contains a column not listed in fields",a["id"],"spreadsheet-fields")
+            if sum(len(str(value).encode("utf-8")) for row in rows for value in row.values())>self._max_file_bytes:raise WorkflowError("Spreadsheet cell data exceeds configured write limit",a["id"],"file-size-limit")
+            if len(rows)*len(fields)>2_000_000:raise WorkflowError("Spreadsheet exceeds two million cells",a["id"],"spreadsheet-cell-limit")
+            from openpyxl import Workbook
+            workbook=Workbook();sheet=workbook.active;sheet.title=str(a.get("sheetName") or "Sheet1");sheet.append(fields)
+            for row in rows:
+                self._check_cancel()
+                values=[]
+                for name in fields:
+                    value=row.get(name)
+                    if isinstance(value,(dict,list,tuple,set)):raise WorkflowError("Spreadsheet cells must be scalar values",a["id"],"spreadsheet-cell-type")
+                    values.append(value)
+                sheet.append(values)
+                for cell in sheet[sheet.max_row]:
+                    if isinstance(cell.value,str) and cell.value.startswith("="):cell.data_type="s"
+            output=io.BytesIO();workbook.save(output);workbook.close();encoded=output.getvalue()
+            if len(encoded)>self._max_file_bytes:raise WorkflowError("Spreadsheet exceeds configured write limit",a["id"],"file-size-limit")
+            self._atomic_write(self._path(a["path"],v,True),encoded)
         elif kind == "json_parse":
             value = interpolate(a.get("text", ""), v)
             if not isinstance(value, str):
@@ -713,11 +791,11 @@ class WorkflowEngine:
         else:
             raise WorkflowError(f"Unsupported activity: {kind}", a.get("id"), "activity-unsupported")
 
-        if kind in {"file_read_text","csv_read","file_list"}:
+        if kind in {"file_read_text","csv_read","xlsx_read","file_list"}:
             raw_path=a.get("path",a.get("directory",""))
             target=self._path(raw_path,v) if raw_path else self.root
             self.options.audit("file.read", {"activityId":a["id"],"path":str(target.relative_to(self.root))})
-        elif kind in {"file_write_text","csv_write","json_write"}:
+        elif kind in {"file_write_text","csv_write","xlsx_write","json_write"}:
             raw_path=a.get("path")
             if raw_path:
                 target=self._path(raw_path,v)

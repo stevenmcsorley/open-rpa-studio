@@ -18,7 +18,7 @@ uv run --locked --extra browser --extra desktop --extra credentials pyinstaller 
   --noconfirm --clean --onefile --name openrpa-bridge `
   --distpath $resourceDir --workpath $workDir --specpath $workDir `
   --paths $appRoot --collect-submodules openrpa --collect-all regex `
-  --collect-all playwright --collect-all pyautogui --collect-all pywinauto --collect-all comtypes --collect-all keyring `
+  --collect-all playwright --collect-all pyautogui --collect-all pywinauto --collect-all comtypes --collect-all keyring --collect-all openpyxl --collect-all defusedxml `
   (Join-Path $appRoot 'scripts\bridge_entry.py')
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed to create the bundled workflow engine.' }
 $bridgePath = Join-Path $resourceDir 'openrpa-bridge.exe'

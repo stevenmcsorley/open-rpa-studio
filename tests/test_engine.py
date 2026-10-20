@@ -7,6 +7,9 @@ from openrpa.model import WorkflowError, load_project, validate_workflow
 from openrpa.package import pack_project, unpack_project
 from openrpa.expressions import ExpressionError, evaluate
 import hashlib
+from openpyxl import Workbook, load_workbook
+from openpyxl.xml.functions import fromstring
+from defusedxml.common import EntitiesForbidden
 
 EXAMPLE = Path(__file__).parents[1] / "examples" / "csv-cleanup"
 
@@ -24,6 +27,62 @@ def test_real_csv_workflow_reads_transforms_and_writes(tmp_path: Path):
     assert result.variables["rows"][0]["name"] == "Ada"
     assert "Grace" in (tmp_path/"out.csv").read_text()
     assert result.activities["write"]["status"] == "succeeded"
+
+def test_xlsx_activities_round_trip_with_literal_formula_text_and_audit(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Excel","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Excel","variables":[{"name":"records","type":"array","value":[{"name":"=2+2","count":4},{"name":"Ada","count":7}]}],"arguments":[],"activities":[
+        {"id":"write","type":"xlsx_write","path":"out.xlsx","sheetName":"Packages","rows":"records"},
+        {"id":"read","type":"xlsx_read","path":"out.xlsx","sheetName":"Packages","result":"loaded"},
+    ]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    audits=[]
+    result=run_project(project,tmp_path,options=RunOptions(audit=lambda action,details:audits.append((action,details))))
+    assert result.status=="succeeded",result.error
+    assert result.variables["loaded"]==[{"name":"=2+2","count":4},{"name":"Ada","count":7}]
+    assert result.activities["write"]["status"]=="succeeded" and result.activities["read"]["status"]=="succeeded"
+    wb=load_workbook(tmp_path/"out.xlsx",data_only=False)
+    assert wb["Packages"]["A2"].data_type=="s"
+    wb.close()
+    assert [(action,row["path"]) for action,row in audits if action in {"file.read","file.write"}]==[("file.write","out.xlsx"),("file.read","out.xlsx")]
+
+def test_xlsx_read_uses_explicit_sheet_and_header_row(tmp_path: Path):
+    wb=Workbook();sheet=wb.active;sheet.title="Orders";sheet.append(["Export"]);sheet.append(["order_id","amount"]);sheet.append(["O-1",12.5]);wb.save(tmp_path/"input.xlsx");wb.close()
+    project={"format":"openrpa.project","formatVersion":1,"name":"Excel","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Excel","variables":[],"arguments":[],"activities":[{"id":"read","type":"xlsx_read","path":"input.xlsx","sheetName":"Orders","headerRow":2,"result":"orders"}]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded",result.error
+    assert result.variables["orders"]==[{"order_id":"O-1","amount":12.5}]
+
+def test_xlsx_rejects_oversized_expanded_archives_and_invalid_schema(tmp_path: Path):
+    import zipfile
+    archive=tmp_path/"bomb.xlsx"
+    with zipfile.ZipFile(archive,"w",compression=zipfile.ZIP_DEFLATED) as zf:zf.writestr("xl/worksheets/sheet1.xml","A"*100_000)
+    project={"format":"openrpa.project","formatVersion":1,"name":"Excel","main":"Main","workflows":{"Main":"main.json"},"limits":{"maxFileBytes":1000}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Excel","variables":[],"arguments":[],"activities":[{"id":"read","type":"xlsx_read","path":"bomb.xlsx"}]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="failed" and result.error and result.error["code"]=="file-size-limit"
+    invalid={**workflow,"activities":[{"id":"read","type":"xlsx_read","path":"input.xlsx","headerRow":0,"sheetName":"bad/name"}]}
+    problems=validate_workflow(invalid)
+    assert {problem["code"] for problem in problems}>={"spreadsheet-header-row","spreadsheet-sheet-name"}
+    invalid_writer={**workflow,"activities":[{"id":"write","type":"xlsx_write","path":"out.xlsx","rows":"records","fields":[]}]}
+    assert any(problem["code"]=="spreadsheet-fields" for problem in validate_workflow(invalid_writer))
+
+def test_openpyxl_uses_defused_xml_parser_for_workbook_content():
+    with pytest.raises(EntitiesForbidden):
+        fromstring(b'<!DOCTYPE x [<!ENTITY secret SYSTEM "file:///private-data">]><x>&secret;</x>')
+
+def test_xlsx_rejects_dtd_and_entity_declarations_before_openpyxl(tmp_path: Path):
+    import zipfile
+    with zipfile.ZipFile(tmp_path/"entity.xlsx","w",compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml",b'<!DOCTYPE x [<!ENTITY e "expanded">]><x>&e;</x>')
+    project={"format":"openrpa.project","formatVersion":1,"name":"Excel","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Excel","variables":[],"arguments":[],"activities":[{"id":"read","type":"xlsx_read","path":"entity.xlsx"}]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="failed" and result.error and result.error["code"]=="spreadsheet-xml-entity"
+
 
 def test_while_activity_updates_values_and_stops_on_condition(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"While","main":"Main","workflows":{"Main":"main.json"}}

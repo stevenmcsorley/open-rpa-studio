@@ -1,4 +1,11 @@
 # Changelog
+## 0.1.17 — Local Excel workbook activities
+
+- Added executable XLSX Read and Write activities for local desktop workflows, including worksheet selection, header rows, data-only formula values, audit records, atomic writes, and formula-like text safety.
+- Enforced workbook size, row, column, cell and ZIP expansion limits; reject non-unique headers, invalid worksheet names and unsupported cell types. The browser preview lists these activities but clearly refuses execution without filesystem access.
+- Made defusedxml a locked runtime dependency and configured openpyxl to use its hardened parser; an entity-expansion regression test verifies this runtime behavior, and the XLSX archive preflight rejects DTD/entity declarations before parsing.
+- Added documentation, a live desktop-engine workbook round trip, malicious archive and configuration tests, plus an installed-bridge packaging acceptance fixture.
+- Verification: 130 Python tests, 31 frontend tests, production build, offline Cargo check, hardened openpyxl parser check, browser editor screenshot and activity insertion, and a 60.77 MiB Windows x64 installer silently installed to an isolated directory. The installed bridge completed an XLSX write/read round trip and rejected an XML entity declaration before parser execution. Installer SHA-256: 3741d81354aae2c602c392d867a520870d5b804dfc54628b014a3d47bf218b59. The SBOM contains 478 locked components. GitHub CI follows this commit.
 ## 0.1.16 — Internal activity clipboard
 
 - Copy and paste complete activity subtrees with toolbar controls or Ctrl/Cmd+C and Ctrl/Cmd+V. Paste inserts after the current selection; every inserted activity and descendant gets fresh IDs.

@@ -4,20 +4,20 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-![Open RPA Studio browser preview showing the visual workflow editor with activity copy and paste](docs/assets/studio-overview.png)
+![Open RPA Studio browser preview with the Excel workbook activity selected and configured](docs/assets/studio-overview.png)
 
 *The screenshot shows the isolated browser preview. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.16 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.16). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.17 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.17). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.16 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5cb79721f8fdc605c5a52c2c437e2a226de159fd9ee63b45582d644aee36883d`. Verify the file before running it:
+The v0.1.17 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `3741d81354aae2c602c392d867a520870d5b804dfc54628b014a3d47bf218b59`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.16-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.17-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -54,6 +54,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Author a state machine with named states, per-state activity sequences, ordered boolean guards, an explicit initial state, and terminal states. State visits obey the workflow execution quota; interrupted workflows are not automatically replayed.
 - See the [workflow format and state-machine example](docs/WORKFLOW-FORMAT.md) and the [architecture notes](docs/ARCHITECTURE.md).
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
+- Use Excel workbook activities to read .xlsx sheets into records and write records to new workbooks. See [Excel workbook activities](docs/EXCEL-ACTIVITIES.md) for limits, formula handling, archive protections and unsupported features.
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
 - Pan a large flowchart with Space+drag or middle-drag, center the selected node, and reconnect a transition by dragging its connector handle onto a destination node. The accessible destination selector remains available for keyboard editing.
 - Undo and redo workflow edits across sequence, flowchart, state-machine, activity properties, variables and arguments using the toolbar or Ctrl+Z/Ctrl+Y (Cmd+Z/Cmd+Y on macOS). Each workflow keeps a bounded 100-step edit history; loading another project clears the prior project's history.
@@ -69,7 +70,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON and CSV transforms; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
 
 ### Debugging and run history
 

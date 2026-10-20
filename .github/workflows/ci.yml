@@ -41,7 +41,7 @@ jobs:
             --noconfirm --clean --onefile --name openrpa-bridge `
             --distpath src-tauri/resources --workpath .build/pyinstaller --specpath .build/pyinstaller `
             --paths . --collect-submodules openrpa --collect-all regex `
-            --collect-all playwright --collect-all pyautogui --collect-all keyring `
+            --collect-all playwright --collect-all pyautogui --collect-all keyring --collect-all openpyxl --collect-all defusedxml `
             scripts/bridge_entry.py
       - name: Check Windows desktop host
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml

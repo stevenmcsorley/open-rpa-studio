@@ -135,7 +135,7 @@ export async function run(w:Workflow,allowNetwork:boolean,emitExternal:(e:any)=>
       case'wait':await new Promise(r=>setTimeout(r,Math.min(300000,Number(val(a.seconds,variables))*1000)));break;
       case'http_request':if(!allowNetwork)throw Error('Network access requires run permission');throw Error('HTTP in browser preview is disabled; use the desktop engine');
       case'browser_wait':case'browser_assert':throw Error(`${a.type} requires the desktop Playwright engine`);
-      case'file_read_text':case'file_write_text':case'file_copy':case'file_list':case'file_move':case'file_delete':case'csv_read':case'csv_write':case'json_parse':case'json_write':case'regex_replace':case'regex_match':throw Error(`${a.type} requires the desktop filesystem engine`);
+      case'file_read_text':case'file_write_text':case'file_copy':case'file_list':case'file_move':case'file_delete':case'csv_read':case'csv_write':case'xlsx_read':case'xlsx_write':case'json_parse':case'json_write':case'regex_replace':case'regex_match':throw Error(`${a.type} requires the desktop filesystem engine`);
       default:throw Error(`Unsupported activity ${a.type}`)
     }
     activities[a.id]={status:'succeeded',type:a.type};emit({event:'activity-completed',activityId:a.id,type:a.type});

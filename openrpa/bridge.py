@@ -414,6 +414,8 @@ ACTIVITY_CATALOG = [
     {"type":"file_list","title":"List Files","category":"Files","description":"List files in an approved project directory.","defaults":{"directory":".","pattern":"*","result":"files"}},
     {"type":"csv_read","title":"Read CSV","category":"Data","description":"Read CSV rows as dictionaries.","defaults":{"path":"input.csv","delimiter":",","result":"rows"}},
     {"type":"csv_write","title":"Write CSV","category":"Data","description":"Write a list of records to CSV.","defaults":{"path":"output.csv","rows":"rows"}},
+    {"type":"xlsx_read","title":"Read Excel Workbook","category":"Data","description":"Read an .xlsx worksheet as dictionaries using its header row.","defaults":{"path":"input.xlsx","sheetName":"Sheet1","headerRow":1,"dataOnly":True,"result":"rows"}},
+    {"type":"xlsx_write","title":"Write Excel Workbook","category":"Data","description":"Write records to a new .xlsx workbook; cell strings are written as literal data.","defaults":{"path":"output.xlsx","sheetName":"Sheet1","rows":"rows"}},
     {"type":"transform_field","title":"Transform Field","category":"Data","description":"Trim, change case, or regex-replace a field across records.","defaults":{"rows":"rows","field":"name","operation":"trim","result":"rows"}},
     {"type":"json_parse","title":"Parse JSON","category":"Data","description":"Parse JSON text, optionally selecting a dotted path.","defaults":{"text":"{}","result":"data"}},
     {"type":"json_write","title":"Write JSON","category":"Data","description":"Serialize a variable as JSON.","defaults":{"value":"data","path":"output.json"}},

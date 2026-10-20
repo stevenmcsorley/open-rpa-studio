@@ -199,6 +199,22 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"argument-inputs","message":"Invoke Workflow inputs must be an object","activityId":str(aid or "")})
                 if "outputs" in item and not isinstance(item["outputs"],dict):
                     problems.append({"code":"argument-outputs","message":"Invoke Workflow outputs must be an object","activityId":str(aid or "")})
+            elif typ == "xlsx_read":
+                if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
+                result=item.get("result","rows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"spreadsheet-result","message":"Spreadsheet Read result must be a variable name","activityId":str(aid or "")})
+                header=item.get("headerRow",1)
+                if not isinstance(header,int) or isinstance(header,bool) or not 1<=header<=1000:problems.append({"code":"spreadsheet-header-row","message":"Spreadsheet headerRow must be between 1 and 1,000","activityId":str(aid or "")})
+                if "dataOnly" in item and not isinstance(item["dataOnly"],bool):problems.append({"code":"spreadsheet-data-only","message":"Spreadsheet dataOnly must be a boolean","activityId":str(aid or "")})
+                sheet=item.get("sheetName")
+                if sheet is not None and (not isinstance(sheet,str) or not sheet.strip() or len(sheet)>31 or any(char in sheet for char in "[]:?*/" + chr(92))):problems.append({"code":"spreadsheet-sheet-name","message":"Spreadsheet sheetName must be a valid Excel worksheet name of up to 31 characters","activityId":str(aid or "")})
+            elif typ == "xlsx_write":
+                if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Write needs a non-empty path","activityId":str(aid or "")})
+                if not isinstance(item.get("rows"),(str,list)):problems.append({"code":"spreadsheet-input","message":"Spreadsheet Write rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                fields=item.get("fields")
+                if fields is not None and (not isinstance(fields,list) or not 1<=len(fields)<=2000 or any(not isinstance(name,str) or not name.strip() for name in fields) or len(set(fields))!=len(fields)):problems.append({"code":"spreadsheet-fields","message":"Spreadsheet fields must be 1–2,000 unique non-empty text names","activityId":str(aid or "")})
+                sheet=item.get("sheetName")
+                if sheet is not None and (not isinstance(sheet,str) or not sheet.strip() or len(sheet)>31 or any(char in sheet for char in "[]:?*/" + chr(92))):problems.append({"code":"spreadsheet-sheet-name","message":"Spreadsheet sheetName must be a valid Excel worksheet name of up to 31 characters","activityId":str(aid or "")})
             elif typ not in ACTIVITY_TYPES:
                 problems.append({"code": "activity-unsupported", "message": f"Unsupported activity type: {typ}", "activityId": str(aid or "")})
             if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_wait","browser_assert"}:
@@ -496,7 +512,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
-    "regex_replace", "regex_match", "csv_read", "csv_write", "json_parse", "json_write",
+    "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "json_parse", "json_write",
     "wait", "http_request", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",

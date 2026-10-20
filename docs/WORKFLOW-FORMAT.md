@@ -14,6 +14,10 @@ The optional AI drafting panel can request each of the three models. Provider-sp
 
 The desktop validator checks the call against the project's declared workflows before save/run. Expression result types can only be confirmed at runtime. Calls cannot be cyclic, and child execution shares the enclosing run's quotas and cancellation.
 
+## Excel workbook activities
+
+The xlsx_read and xlsx_write activities operate on local .xlsx files in the desktop engine. They use the normal project file-root permissions and audit trail. Limits, supported cell values, formula-cache behavior, and workbook-format constraints are documented in [Excel workbook activities](EXCEL-ACTIVITIES.md). The browser preview has no filesystem access and cannot execute them.
+
 ## State machine
 
 State-machine workflows store ordered activity lists per state. After the activities finish, guarded transitions are checked in file order. A guard must evaluate to a Boolean. A transition without `condition` is the optional, last fallback. Each non-final state needs at least one outgoing transition; a final state has none. The initial state and every state must be reachable, and at least one state must be final. Repeated visits use the normal project execution quota.
