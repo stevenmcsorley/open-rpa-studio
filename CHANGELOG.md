@@ -102,3 +102,11 @@ This remains an unsigned development release. State-machine workflows do not pro
 - `cargo check --locked --manifest-path src-tauri/Cargo.toml`: passed.
 - Installed Windows bridge smoke run: succeeded, selected the guarded approval path, returned `result=approved`, and recorded run ID `5f76395e-de6c-46ba-bc43-947266821a8e`.
 - Installer was installed into a fresh isolated directory. The installed `openrpa-bridge.exe` SHA-256 matched the build resource byte for byte.
+## 0.1.9 — OpenAI Responses API
+
+- Add an explicitly selectable OpenAI Responses API provider alongside the existing OpenAI Chat Completions adapter.
+- Use `/v1/responses` with schema-constrained workflow drafts, `store: false`, and refusal/incomplete response handling.
+- Keep other compatible providers on Chat Completions.
+- Refresh the README application screenshot.
+- Windows installer SHA-256: `5825bb260dda5f220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`.
+- Verification: 119 Python tests, 22 frontend tests, Vite production build, Rust check, and isolated NSIS install passed. The installed bridge exposed and round-tripped the Responses profile across processes. Installed bridge SHA-256: `d67c9efa97fbc7f1035beaf1ce8c13fb129e2205594aa80474050c500b2916ea`.

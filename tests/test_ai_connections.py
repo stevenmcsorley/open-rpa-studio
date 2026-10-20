@@ -30,6 +30,14 @@ def test_remote_profile_persists_only_os_vault_references(tmp_path):
     assert "work-key" in text and "openai/gpt-4o-mini" in text
 
 
+def test_openai_responses_profile_is_distinct_and_round_trips(tmp_path):
+    path=tmp_path/"ai-connections.json"
+    profile=ai_connections.save_profile(path,{"name":"OpenAI Responses","provider":"openai_responses",
+        "credentialService":"openrpa-openai_responses","credentialUsername":"work-key"})
+    assert profile["provider"]=="openai_responses"
+    assert ai_connections.list_profiles(path)==[profile]
+
+
 @pytest.mark.parametrize("profile,match",[
     ({"name":"Missing key","provider":"openai"},"vault service and username"),
     ({"name":"Remote HTTP","provider":"openai_compatible","baseUrl":"http://api.example/v1","credentialService":"s","credentialUsername":"u"},"HTTPS"),

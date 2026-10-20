@@ -18,6 +18,7 @@ PROVIDERS = {
     "ollama": {"name":"Ollama","local":True,"defaultBaseUrl":"http://127.0.0.1:11434","requiresCredential":False,"kind":"ollama"},
     "lm_studio": {"name":"LM Studio","local":True,"defaultBaseUrl":"http://127.0.0.1:1234/v1","requiresCredential":False,"kind":"openai"},
     "openai": {"name":"OpenAI API","local":False,"defaultBaseUrl":"https://api.openai.com/v1","requiresCredential":True,"kind":"openai"},
+    "openai_responses": {"name":"OpenAI API (Responses)","local":False,"defaultBaseUrl":"https://api.openai.com/v1","requiresCredential":True,"kind":"openai_responses"},
     "claude": {"name":"Claude (Anthropic API)","local":False,"defaultBaseUrl":"https://api.anthropic.com","requiresCredential":True,"kind":"anthropic"},
     "openrouter": {"name":"OpenRouter","local":False,"defaultBaseUrl":"https://openrouter.ai/api/v1","requiresCredential":True,"kind":"openai"},
     "openai_compatible": {"name":"OpenAI-compatible HTTPS endpoint","local":False,"defaultBaseUrl":"","requiresCredential":True,"kind":"openai"},
@@ -172,6 +173,26 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
         block=next((item for item in response.get("content",[]) if isinstance(item,dict) and item.get("type")=="tool_use" and item.get("name")=="create_workflow"),None)
         if not block or not isinstance(block.get("input"),dict): raise ValueError("Claude did not return the required structured workflow tool result")
         return block["input"]
+    if spec["kind"]=="openai_responses":
+        endpoint,local=_endpoint(provider,base_url,"/responses")
+        response=_call(endpoint,local,"POST",body={"model":model,"instructions":instructions,
+            "input":"Create a draft using the task description supplied in the developer instructions.","store":False,
+            "text":{"format":{"type":"json_schema","name":"open_rpa_workflow","strict":False,"schema":schema}}},
+            timeout=180,secret=secret,provider=provider)
+        if response.get("status") not in (None,"completed"):
+            reason=response.get("incomplete_details") or response.get("error") or response.get("status")
+            raise ValueError(f"OpenAI Responses API did not complete the draft: {reason}")
+        chunks=[]
+        for item in response.get("output",[]):
+            if not isinstance(item,dict) or item.get("type")!="message": continue
+            for content in item.get("content",[]):
+                if isinstance(content,dict) and content.get("type")=="refusal":
+                    raise ValueError("OpenAI Responses API refused to draft this workflow")
+                if isinstance(content,dict) and content.get("type")=="output_text" and isinstance(content.get("text"),str):
+                    chunks.append(content["text"])
+        text=response.get("output_text") if isinstance(response.get("output_text"),str) else "".join(chunks)
+        try: return json.loads(text)
+        except (TypeError,json.JSONDecodeError) as exc: raise ValueError("OpenAI Responses API returned malformed structured output") from exc
     endpoint,local=_endpoint(provider,base_url,"/chat/completions")
     response=_call(endpoint,local,"POST",body={"model":model,"temperature":0,"messages":[{"role":"system","content":instructions},{"role":"user","content":prompt}],
         "response_format":{"type":"json_schema","json_schema":{"name":"open_rpa_workflow","strict":False,"schema":schema}}},timeout=180,secret=secret,provider=provider)

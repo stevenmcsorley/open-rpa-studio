@@ -27,13 +27,15 @@ def main() -> None:
     if data_dir.exists() and any(data_dir.iterdir()):
         raise SystemExit(f"Refusing non-empty acceptance directory: {data_dir}")
     data_dir.mkdir(parents=True,exist_ok=True)
-    profile={"name":"Acceptance profile","provider":"openai_compatible","baseUrl":"https://api.example/v1",
-        "model":"test-model","credentialService":"openrpa-acceptance","credentialUsername":"test-key"}
-    saved=request(executable,data_dir,"ai.connections.save",{"profile":profile},1)["profile"]
-    listed=request(executable,data_dir,"ai.connections.list",{},2)["profiles"]
+    providers=request(executable,data_dir,"ai.providers",{},1)["providers"]
+    assert any(row["id"]=="openai_responses" for row in providers),"Installed bridge does not expose the OpenAI Responses API adapter"
+    profile={"name":"Acceptance profile","provider":"openai_responses","baseUrl":"https://api.openai.com/v1",
+        "model":"test-model","credentialService":"openrpa-openai-responses-acceptance","credentialUsername":"test-key"}
+    saved=request(executable,data_dir,"ai.connections.save",{"profile":profile},2)["profile"]
+    listed=request(executable,data_dir,"ai.connections.list",{},3)["profiles"]
     assert listed==[saved],"Profile did not persist across separate bridge processes"
-    assert request(executable,data_dir,"ai.connections.delete",{"profileId":saved["id"]},3)["deleted"] is True
-    assert request(executable,data_dir,"ai.connections.list",{},4)["profiles"]==[]
+    assert request(executable,data_dir,"ai.connections.delete",{"profileId":saved["id"]},4)["deleted"] is True
+    assert request(executable,data_dir,"ai.connections.list",{},5)["profiles"]==[]
     document=json.loads((data_dir/"ai-connections.json").read_text(encoding="utf-8"))
     assert "apiKey" not in str(document) and "secret" not in str(document).lower()
     print("PASS: installed bridge saved profile, persisted across process restart, listed and deleted it; no API-key field stored")

@@ -10,14 +10,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.8 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.8). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.9 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.9). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.8 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `1f25240d0f30308e052961e78d61422b780c6bf95b38a041600afa8f19207367`. Verify the file before running it:
+The v0.1.9 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `5825bb260dda5f220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.8-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.9-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -81,6 +81,7 @@ The core editor and execution engine work without an AI model or network access.
 - LM Studio.
 - OpenAI-compatible local servers on loopback.
 - OpenAI API (including API access to OpenAI models; a ChatGPT subscription is not an API credential).
+- OpenAI API through either Chat Completions or the Responses API, selectable as separate profiles.
 - Anthropic Claude API.
 - OpenRouter.
 - Compatible remote HTTPS endpoints configured by the user.

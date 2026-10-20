@@ -6,6 +6,8 @@ The optional AI panel can ask a connected provider to draft one of the workflow 
 - **Flowchart** — a start node, action or decision nodes, transitions, and an end node.
 - **State machine** — an initial state, state-local activities, guarded transitions, and final states.
 
+For OpenAI, choose either **OpenAI API** (Chat Completions) or **OpenAI API (Responses)**. The Responses adapter uses `/v1/responses`, sends schema-constrained output via `text.format`, disables response storage, and handles refusal/incomplete responses explicitly. This protocol is only for the OpenAI API profile; OpenRouter, LM Studio and compatible endpoints retain their own Chat Completions behavior. API model and feature availability depends on the selected model/account.
+
 The selected provider returns structured output. The bridge applies the ordinary workflow validator before the editor enables **Review and replace current workflow**. Drafting never starts execution. The user should inspect each activity, expression, selector, file path, destination, and permission before running it. Structural validation cannot prove that a model understood the task or that the resulting automation is safe for a specific system.
 
 Activity settings belong directly on each activity object. Graph control nodes cannot contain activities; node IDs and activity IDs must not collide. The schema and prompt state these constraints explicitly, and the workflow validator remains the final check.
@@ -26,7 +28,7 @@ These are smoke tests, not a quality evaluation across tasks or models. A larger
 
 Remote provider keys can be stored from the desktop AI drafting panel. The app sends the value to its local Python bridge over the Tauri command channel, which accepts only an approved OS credential vault backend. The secret is not returned in the RPC response, audit entry, project, or workflow. It is held in the UI only while the form is open and cleared after a successful store or when the panel closes. If the OS vault is unavailable or uses an unsupported plaintext backend, storage fails closed. Local providers such as Ollama and LM Studio do not require credentials by default.
 
-Remote providers require HTTPS and credentials stored through the OS credential-vault flow. Prompts sent to remote providers leave the computer. The core Studio remains usable without an AI provider.
+Remote providers require HTTPS and credentials stored through the OS credential-vault flow. Prompts sent to remote providers leave the computer. The core Studio remains usable without an AI provider. The OpenAI Responses adapter follows the [official Responses API reference](https://platform.openai.com/docs/api-reference/responses) and [structured outputs documentation](https://platform.openai.com/docs/guides/structured-outputs).
 
 ## Saved provider connections
 

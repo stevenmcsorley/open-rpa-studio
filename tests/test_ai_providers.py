@@ -7,7 +7,7 @@ from openrpa import ai_providers as ai
 
 def test_provider_catalog_includes_local_and_remote_families():
     ids={item["id"] for item in ai.catalog()}
-    assert {"ollama","lm_studio","local_openai_compatible","openai","claude","openrouter","openai_compatible"} <= ids
+    assert {"ollama","lm_studio","local_openai_compatible","openai","openai_responses","claude","openrouter","openai_compatible"} <= ids
 
 
 @pytest.mark.parametrize("provider,url",[
@@ -48,6 +48,33 @@ def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
     assert result["activities"][0]["type"]=="log"
     assert seen["url"].endswith("/chat/completions") and seen["method"]=="POST"
     assert seen["body"]["response_format"]["type"]=="json_schema"
+
+
+def test_openai_responses_draft_uses_responses_schema_and_extracts_text(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    seen={}
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    def call(url,local,method="GET",**kwargs):
+        seen.update(url=url,method=method,body=kwargs["body"],secret=kwargs["secret"])
+        return {"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":json.dumps(draft)}]}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("openai_responses","model-x","make a log",["log"],credential_service="s",credential_username="u")
+    assert result==draft
+    assert seen["url"]=="https://api.openai.com/v1/responses"
+    assert seen["method"]=="POST" and seen["secret"]=="secret-token"
+    assert seen["body"]["store"] is False
+    assert seen["body"]["text"]["format"]["type"]=="json_schema"
+    assert seen["body"]["text"]["format"]["schema"]["required"]==["explanation","activities"]
+
+
+def test_openai_responses_refusal_and_incomplete_are_reported(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    monkeypatch.setattr(ai,"_call",lambda *a,**k:{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"no"}]}]})
+    with pytest.raises(ValueError,match="refused"):
+        ai.draft("openai_responses","model-x","do a thing",["log"],credential_service="s",credential_username="u")
+    monkeypatch.setattr(ai,"_call",lambda *a,**k:{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}})
+    with pytest.raises(ValueError,match="did not complete"):
+        ai.draft("openai_responses","model-x","do a thing",["log"],credential_service="s",credential_username="u")
 
 @pytest.mark.parametrize("execution_model,payload_key",[("flowchart","flowchart"),("state_machine","stateMachine")])
 def test_openai_draft_uses_selected_workflow_structure_schema(monkeypatch,execution_model,payload_key):
