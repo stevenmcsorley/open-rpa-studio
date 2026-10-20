@@ -796,8 +796,8 @@ class WorkflowEngine:
         kind=a["type"]
         if kind.startswith("desktop_ui_"):
             try:
-                from . import windows_uia
-                runtime=windows_uia.status()
+                from . import desktop_accessibility
+                runtime=desktop_accessibility.status()
                 if not runtime.get("available"):
                     raise WorkflowError(runtime.get("reason") or "Windows UI Automation is unavailable",a["id"],"runtime-unavailable")
                 title=str(interpolate(a.get("windowTitle",""),v))
@@ -808,7 +808,7 @@ class WorkflowEngine:
                 timeout=min(max(float(a.get("timeoutSeconds",10)),1),120)
                 def state() -> dict[str,bool] | None:
                     self._check_cancel()
-                    return windows_uia.control_state(title,name,automation_id,control_type,process_id)
+                    return desktop_accessibility.control_state(title,name,automation_id,control_type,process_id)
                 desired={"desktop_ui_wait":a.get("state","exists"),
                          "desktop_ui_click":"enabled","desktop_ui_fill":"enabled",
                          "desktop_ui_text":"exists"}[kind]
@@ -826,14 +826,14 @@ class WorkflowEngine:
                         raise WorkflowError(f"Timed out after {timeout:g}s waiting for UIA {desired}: {selector}",a["id"],"desktop-uia-timeout")
                     time.sleep(min(0.2,remaining))
                 if kind=="desktop_ui_wait":return
-                if kind=="desktop_ui_click":windows_uia.click(title,name,automation_id,control_type,process_id)
-                elif kind=="desktop_ui_fill":windows_uia.fill(title,name,automation_id,control_type,str(interpolate(a.get("value",""),v)),process_id)
-                elif kind=="desktop_ui_text":v[a.get("result","text")]=windows_uia.read_text(title,name,automation_id,control_type,process_id)
+                if kind=="desktop_ui_click":desktop_accessibility.click(title,name,automation_id,control_type,process_id)
+                elif kind=="desktop_ui_fill":desktop_accessibility.fill(title,name,automation_id,control_type,str(interpolate(a.get("value",""),v)),process_id)
+                elif kind=="desktop_ui_text":v[a.get("result","text")]=desktop_accessibility.read_text(title,name,automation_id,control_type,process_id)
                 return
             except WorkflowError:
                 raise
             except Exception as exc:
-                raise WorkflowError(f"Windows UI Automation failed: {type(exc).__name__}: {exc}",a["id"],"desktop-uia-error") from exc
+                raise WorkflowError(f"Desktop accessibility failed: {type(exc).__name__}: {exc}",a["id"],"desktop-uia-error") from exc
         try:
             import pyautogui
         except ImportError as exc:

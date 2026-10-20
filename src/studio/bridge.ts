@@ -37,7 +37,7 @@ export async function startBrowserRecording(allowNetwork:boolean):Promise<{recor
 export async function stopBrowserRecording():Promise<{recording:boolean;url:string;events:Record<string,unknown>[];truncated:boolean}>{return rpc('browser.inspect.record.stop');}
 export async function closeBrowserInspector():Promise<void>{await rpc('browser.inspect.close');}
 export type DesktopWindow={title:string;processId:number;controlType:string};
-export type DesktopControl={name:string;automationId:string;controlType:string;matchCount:number;enabled:boolean};
+export type DesktopControl={name:string;automationId:string;controlType:string;matchCount:number;enabled:boolean;actions:string[]};
 export async function listDesktopWindows(allowDesktop:boolean):Promise<DesktopWindow[]>{return (await rpc('desktop.inspect.windows',{allowDesktop})).windows??[];}
 export async function listDesktopControls(windowTitle:string,processId:number,allowDesktop:boolean):Promise<DesktopControl[]>{return (await rpc('desktop.inspect.controls',{windowTitle,processId,allowDesktop})).controls??[];}
 export async function getRunHistory(limit=50):Promise<any[]>{const value=await rpc('run.history',{limit});return value.runs??[];}

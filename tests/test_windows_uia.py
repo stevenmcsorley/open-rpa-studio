@@ -83,8 +83,15 @@ def test_uia_inspection_excludes_password_controls_and_never_returns_values(monk
     controls=[Control("Customer name","name","Edit"),Control("Password","password","Edit",password=True)]
     monkeypatch.setattr(windows_uia,"_desktop",lambda:Desktop([Window(controls=controls)]))
     rows=windows_uia.list_controls("Research Editor",73)
-    assert rows==[{"name":"Customer name","automationId":"name","controlType":"Edit","matchCount":1,"enabled":True}]
+    assert rows==[{"name":"Customer name","automationId":"name","controlType":"Edit","matchCount":1,"enabled":True,"actions":["wait","fill","text"]}]
     assert "live-value" not in json.dumps(rows)
+
+
+def test_uia_inspection_counts_duplicate_controls_before_paging(monkeypatch):
+    duplicate=Control("Save","save","Button")
+    monkeypatch.setattr(windows_uia,"_desktop",lambda:Desktop([Window(controls=[duplicate,Control("Save","save","Button")])]))
+    rows=windows_uia.list_controls("Research Editor",73,limit=1)
+    assert rows[0]["name"]=="Save" and rows[0]["matchCount"]==2
 
 
 def test_uia_fill_requires_edit_and_read_blocks_password(monkeypatch):
@@ -102,6 +109,8 @@ def test_uia_activity_schema_requires_bounded_exact_selector():
     base={"format":"openrpa.workflow","formatVersion":1,"name":"UIA","variables":[],"arguments":[],"activities":[]}
     good={**base,"activities":[{"id":"click","type":"desktop_ui_click","windowTitle":"Editor","automationId":"save","controlType":"Button","timeoutSeconds":10}]}
     assert validate_workflow(good)==[]
+    linux_entry={**base,"activities":[{"id":"fill","type":"desktop_ui_fill","windowTitle":"Editor","automationId":"name","controlType":"Entry","value":"Ada"}]}
+    assert validate_workflow(linux_entry)==[]
     bad={**base,"activities":[{"id":"bad","type":"desktop_ui_fill","windowTitle":"","name":"","controlType":"Button","value":1,"timeoutSeconds":121}]}
     codes={problem["code"] for problem in validate_workflow(bad)}
     assert {"desktop-uia-window","desktop-uia-selector","desktop-uia-timeout","desktop-uia-fill"}<=codes
@@ -120,13 +129,13 @@ def test_desktop_inspector_rpc_returns_metadata_and_audits_counts(monkeypatch):
     replies=[];events=[]
     monkeypatch.setattr(bridge,"send",replies.append)
     monkeypatch.setattr(bridge.history,"audit",lambda action,details:events.append((action,details)))
-    monkeypatch.setattr(windows_uia,"list_windows",lambda:[{"title":"Editor","processId":7,"controlType":"Window"}])
+    monkeypatch.setattr(windows_uia,"list_windows",lambda *_args:[{"title":"Editor","processId":7,"controlType":"Window"}])
     monkeypatch.setattr(windows_uia,"list_controls",lambda *_args:[{"name":"Save","automationId":"save","controlType":"Button","matchCount":1,"enabled":True}])
     bridge.handle({"id":31,"method":"desktop.inspect.windows","params":{"allowDesktop":True}})
     assert replies[-1]["result"]["windows"][0]["processId"]==7
     bridge.handle({"id":32,"method":"desktop.inspect.controls","params":{"allowDesktop":True,"windowTitle":"Editor","processId":7}})
     assert replies[-1]["result"]["controls"][0]["automationId"]=="save"
-    assert events==[("desktop.uia_windows_inspected",{"count":1}),("desktop.uia_controls_inspected",{"count":1})]
+    assert events==[("desktop.accessibility_windows_inspected",{"count":1}),("desktop.accessibility_controls_inspected",{"count":1})]
 
 
 @pytest.mark.parametrize("activity,expected_call",[

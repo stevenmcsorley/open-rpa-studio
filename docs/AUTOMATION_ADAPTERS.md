@@ -22,9 +22,13 @@ The UIA adapter was exercised against a local WinForms fixture: the workflow wai
 
 PyAutoGUI activities can click coordinates, type into the current focus, press keys/hotkeys, and capture screenshots. These operations depend on screen layout and foreground focus. The desktop action capability must be enabled for each run. PyAutoGUI's fail-safe remains enabled.
 
-### Linux accessibility
+### Linux AT-SPI
 
-Linux coordinate-based desktop actions use PyAutoGUI when a graphical session is available. AT-SPI/AT-SPI2 semantic inspection and actions are not implemented. The capability check reports this limitation instead of treating the bindings as a working adapter.
+On Linux, the same permission-gated desktop inspector and editable click, set-text, read-text and wait activities use AT-SPI through the distribution's `python3-pyatspi` bindings and an active AT-SPI D-Bus session. The adapter resolves exact accessible window names and control names or `id` attributes, rejects ambiguous matches, and uses AT-SPI Action, EditableText and Text interfaces. Protected/password entries are excluded from inspection and cannot be read or written. Linux editable controls use the workflow `controlType: "Entry"`; Windows UIA continues to use `"Edit"`.
+
+Install the platform packages with your distribution. On Debian or Ubuntu, install `python3-pyatspi`, `gir1.2-atspi-2.0` and `at-spi2-core`; run the engine with a Python interpreter that can import those system bindings and has access to the graphical user's D-Bus session. The bundled Windows bridge is unaffected; Linux currently launches the system `python3`, which can use distribution-managed AT-SPI bindings.
+
+Live Linux acceptance ran on Ubuntu 22.04 under WSL with the GTK3 toolkit, AT-SPI D-Bus registry and Xvfb. The native GTK fixture exposed a window, an editable Entry, buttons and a Label; the inspector excluded a GTK password entry. A saved workflow ran through `openrpa.bridge`, waited for the Entry, set text, invoked Save and read back `Saved Northshire Council`. All four activities succeeded; run ID: `cc30318d-6e73-4092-9b46-a604e6927ad9`. This verifies the GTK3/Ubuntu path only; other desktop environments, GTK versions, Qt applications and WSL configurations need separate acceptance. The runtime probe reports the missing dependency or bus instead of claiming support when unavailable.
 
 ## Availability and limits
 

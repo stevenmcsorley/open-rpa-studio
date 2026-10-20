@@ -10,14 +10,14 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ## Download and install
 
-The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.5](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.5). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.5-x64.exe` after running the build command below.
+The Windows setup executable built and smoke-installed during development is published as the unsigned development pre-release [Open RPA Studio v0.1.6](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.6). The installer is also present locally at `release/Open-RPA-Studio-Setup-0.1.6-x64.exe` after running the build command below.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `4e46a7a6b51284f33235d74eccdec51e446ce7cf734ca03f99dadd14fb634121`. Verify the file before running it:
+The installer is unsigned in this development build. Windows SmartScreen may show an unknown-publisher prompt. Published installer SHA-256: `95c6f70894ee9e5abca021efc8a44c1b066b5793cdb979974e41b5bd23c1b8c2`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.5-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.6-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -55,7 +55,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
 - Use the visible, permission-gated Playwright inspector to discover named page controls and add editable click, fill, select, check, uncheck, and read-text actions.
-- On Windows, inspect visible application windows and accessible controls with UI Automation, then add editable click, set-text, read-text, and wait activities. Exact window titles plus Automation IDs/names identify controls; ambiguous selectors fail closed and password controls are omitted from inspection.
+- On Windows, inspect visible application windows and accessible controls with UI Automation; on Linux, inspect controls through the AT-SPI accessibility bus. Both adapters add editable click, set-text, read-text, and wait activities using exact window titles and accessible names/IDs. Ambiguous selectors fail closed, and password controls are omitted.
 - Generate a candidate workflow from an optional AI provider, review the validation output, then explicitly insert the draft. Generated workflows are not run automatically.
 - Choose whether AI drafts an activity sequence, connected flowchart, or state machine. Model-specific schemas and the same local workflow validator are applied before a draft can replace the current workflow.
 
@@ -63,7 +63,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON and CSV transforms; wait; HTTP requests; browser actions; Windows semantic desktop UI Automation; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON and CSV transforms; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
 
 ### Debugging and run history
 
@@ -168,7 +168,7 @@ Build and smoke-install the Windows release using `npm run build:windows-install
 
 ## Known gaps
 
-This project has not yet reached the stated beyond-UiPath parity goal. The editor supports sequences, flowcharts, and state machines, but major unfinished areas include editable selector healing, accessibility-first Linux desktop automation, production-grade plug-in/package signing, upgrade/uninstall and clean-machine installer testing, workflow collaboration, unattended scheduling/orchestration, and adversarial security review. The included installer is a development artifact, unsigned, and not production-certified. The `examples/` workflows are fixtures and should be reviewed before execution.
+This project has not yet reached the stated beyond-UiPath parity goal. The editor supports sequences, flowcharts, and state machines, but major unfinished areas include editable selector healing, broader cross-toolkit accessibility acceptance, production-grade plug-in/package signing, upgrade/uninstall and clean-machine installer testing, workflow collaboration, unattended scheduling/orchestration, and adversarial security review. The included installer is a development artifact, unsigned, and not production-certified. The `examples/` workflows are fixtures and should be reviewed before execution.
 
 The current Windows installer bundles the engine bridge and its Python dependencies, but not a Playwright browser binary. Browser adapter readiness is detected at runtime; install a matching browser binary separately if browser automation is required. Windows Desktop automation via PyAutoGUI may require interactive session access and explicit user permissions.
 

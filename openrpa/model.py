@@ -255,7 +255,7 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 timeout=item.get("timeoutSeconds",10)
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
                     problems.append({"code":"desktop-uia-timeout","message":"UIA timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
-                if typ=="desktop_ui_fill" and (not isinstance(item.get("value"),str) or (control_type and control_type!="Edit")):
+                if typ=="desktop_ui_fill" and (not isinstance(item.get("value"),str) or (control_type and control_type not in {"Edit","Entry"})):
                     problems.append({"code":"desktop-uia-fill","message":"UIA Set Text needs a string value and an Edit control","activityId":str(aid or "")})
                 if typ=="desktop_ui_text" and (not isinstance(item.get("result","text"),str) or not item.get("result","text").strip()):
                     problems.append({"code":"desktop-uia-result","message":"UIA Read Text needs a non-empty result variable name","activityId":str(aid or "")})

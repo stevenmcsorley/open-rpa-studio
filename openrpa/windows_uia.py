@@ -112,11 +112,14 @@ def list_windows(limit: int = 200) -> list[dict[str, Any]]:
 def list_controls(window_title: str, process_id: int | None = None, limit: int = 300) -> list[dict[str, Any]]:
     """List interactive controls, filtering passwords and omitting all values."""
     window = _window(window_title, process_id)
-    allowed = {"Button", "Edit", "ComboBox", "CheckBox", "RadioButton", "TabItem", "MenuItem",
+    allowed = {"Button", "Edit", "Text", "ComboBox", "CheckBox", "RadioButton", "TabItem", "MenuItem",
                "Hyperlink", "ListItem", "TreeItem", "Slider", "Spinner", "SplitButton"}
     grouped: dict[tuple[str, str, str], int] = {}
     objects: list[tuple[Any, tuple[str, str, str]]] = []
-    for control in window.descendants():
+    all_controls=window.descendants()
+    if len(all_controls)>5000:
+        raise UIAutomationError("The window accessibility tree exceeds the safe 5,000-control selector limit")
+    for control in all_controls:
         info = control.element_info
         control_type = str(getattr(info, "control_type", ""))
         try:
@@ -130,13 +133,20 @@ def list_controls(window_title: str, process_id: int | None = None, limit: int =
         if not name and not automation_id:
             continue
         signature = (control_type, name, automation_id)
+        if signature not in grouped:
+            objects.append((control, signature))
         grouped[signature] = grouped.get(signature, 0) + 1
-        objects.append((control, signature))
-        if len(objects) >= max(1, min(int(limit), 300)):
-            break
-    return [{"name": signature[1], "automationId": signature[2], "controlType": signature[0],
-             "matchCount": grouped[signature], "enabled": bool(getattr(control, "is_enabled", lambda: False)())}
-            for control, signature in objects]
+    result=[]
+    for control,signature in objects[:max(1,min(int(limit),300))]:
+        control_type=signature[0]
+        actions=["wait"]
+        if control_type=="Edit": actions.extend(["fill","text"])
+        elif control_type=="Text": actions.append("text")
+        else: actions.insert(0,"click")
+        result.append({"name":signature[1],"automationId":signature[2],"controlType":control_type,
+                       "matchCount":grouped[signature],"enabled":bool(getattr(control,"is_enabled",lambda:False)()),
+                       "actions":actions})
+    return result
 
 
 def click(window_title: str, name: str | None, automation_id: str | None,

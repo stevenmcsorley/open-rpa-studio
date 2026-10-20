@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.6 — Linux desktop accessibility
+
+- Added a platform-neutral semantic desktop accessibility interface shared by workflow activities, the desktop inspector and adapter status.
+- Implemented Linux AT-SPI discovery and interaction using the system `python3-pyatspi` binding and the active accessibility D-Bus bus. Linux Entry, Action and Text interfaces now map to the existing editable click, set-text, read-text and wait activities.
+- The inspector exposes only actions supported by each control, reads accessible labels, and excludes password controls by AT-SPI PasswordText role or explicit toolkit password metadata.
+- Added Windows regression checks and a reproducible GTK3 acceptance fixture. On Ubuntu 22.04/WSL with Xvfb and AT-SPI, the installed system Python inspected the fixture and a workflow executed through the real JSON-RPC bridge: wait, fill, click and read all succeeded. Run IDs: `cc30318d-6e73-4092-9b46-a604e6927ad9`, `5eba2c3b-8bac-4a46-aebf-ff1b40693eb2`, and selector-bound regression `284e0eb6-a4a3-4508-8fc7-484d92c7309a`; latest result `Saved Northshire Council`.
+- Refreshed the README screenshot and generated `docs/SBOM-0.1.6.cdx.json`.
+
+The Linux path was verified with one GTK3 fixture and Ubuntu's system Python. Other toolkits and distributions remain unverified. Linux users need distribution-installed `python3-pyatspi`, AT-SPI D-Bus services, and a Python interpreter that can import the system bindings. The Windows installer remains unsigned and development-only.
+
+### Verification
+
+- Python suite: 100 passed; browser-preview suite: 22 passed; frontend production build and Rust check: passed.
+- Ubuntu AT-SPI live workflow through `openrpa.bridge`: passed three times; four activities succeeded each run; password field omitted.
+- Windows x64 installer: 59.89 MiB; SHA-256 `95c6f70894ee9e5abca021efc8a44c1b066b5793cdb979974e41b5bd23c1b8c2`. Fresh silent install passed. Installed bridge SHA-256 `003ad1467cbbde26fcbdf0ef8a25811d2b80b42ea294cfcc7af3a03b0d586c6c` matched its build resource.
+- Installed Windows UIA workflow run `fd1cb76e-3378-4b60-90a4-1c86d56624b6`: four activities succeeded and read back `Saved Grace Hopper`.
+
 ## 0.1.5 — Windows UI Automation
 
 - Added an optional Windows UI Automation adapter using pywinauto, alongside the existing coordinate-based desktop fallback.
