@@ -7,6 +7,7 @@ function expr(s:string,v:Record<string,any>):any{
   if(/^\w+$/.test(x)&&x in v)return v[x];return x;
 }
 function val(x:any,v:Record<string,any>):any{if(typeof x==='string'){const m=x.match(/^\{\{(.*?)\}\}$/);return m?expr(m[1],v):x.replace(/\{\{(.*?)\}\}/g,(_,e)=>String(expr(e,v)));}return x;}
+function matchesArgumentType(value:any,type:string):boolean{return type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value)}
 export function validate(w:Workflow):any[]{
   if(!w||w.format!=='openrpa.workflow')return[{code:'format',message:'Unsupported workflow format'}];
   const ids=new Set<string>();const problems:any[]=[];
@@ -82,13 +83,49 @@ export function validate(w:Workflow):any[]{
     }
   }else walk(w.activities||[]);return problems;
 }
-export async function run(w:Workflow,allowNetwork:boolean,emit:(e:any)=>void):Promise<any>{
+export function validateBindings(workflows:Record<string,Workflow>,owner:string):any[]{
+  const problems:any[]=[];const current=workflows[owner];if(!current)return problems;
+  const matches=(value:any,type:string)=>type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value);
+  const visit=(items:any[])=>{for(const item of items||[]){if(!item||typeof item!=='object')continue;
+    if(item.type==='invoke_workflow'){
+      const target=String(item.workflow||'');const child=workflows[target];const add=(code:string,message:string)=>problems.push({code,message,activityId:item.id});
+      if(!child){add('workflow-ref',`Unknown reusable workflow '${target}'`);continue}
+      const args=child.arguments||[];const inputs=item.inputs&&typeof item.inputs==='object'?item.inputs:{};const outputs=item.outputs&&typeof item.outputs==='object'?item.outputs:{};
+      for(const name of Object.keys(inputs))if(!args.some(arg=>arg.name===name&&arg.direction!=='out'))add('argument-unknown',`'${target}' has no input argument '${name}'`);
+      for(const arg of args)if(Object.hasOwn(inputs,arg.name)&&arg.direction!=='out'&&!(typeof inputs[arg.name]==='string'&&/^\\{\\{\\s*.+?\\s*\\}\\}$/s.test(String(inputs[arg.name])))&&!matches(inputs[arg.name],arg.type||'any'))add('argument-type',`Literal input '${arg.name}' does not match type ${arg.type}`);
+      for(const arg of args)if(arg.direction!=='out'&&arg.required!==false&&!Object.hasOwn(arg,'default')&&!Object.hasOwn(inputs,arg.name))add('argument-missing',`Required input '${arg.name}' is not mapped for '${target}'`);
+      for(const [name,destination] of Object.entries(outputs))if(!args.some(arg=>arg.name===name&&(arg.direction==='out'||arg.direction==='inout')))add('argument-output',`'${name}' is not an output argument of '${target}'`);else if(typeof destination!=='string'||!/^[$A-Z_a-z][$\w]{0,255}$/.test(destination))add('argument-output-target',`Output '${name}' needs a valid caller variable name`);
+    }
+    for(const key of ['then','else','body','catch','finally','default'])if(Array.isArray(item[key]))visit(item[key]);
+    for(const entry of item.cases||[])if(Array.isArray(entry.activities))visit(entry.activities);
+  }};
+  visit(current.activities||[]);for(const node of current.flowchart?.nodes||[])if(node.activity)visit([node.activity]);for(const state of current.stateMachine?.states||[])visit(state.activities||[]);return problems;
+}
+export async function run(w:Workflow,allowNetwork:boolean,emitExternal:(e:any)=>void,workflows:Record<string,Workflow>={[w.name]:w},workflowName=w.name,inputs:Record<string,any>={},callStack:string[]=[]):Promise<any>{
+  const emit=(event:any)=>emitExternal({...event,workflow:workflowName});
+  if(callStack.includes(workflowName)||callStack.length>=40)return{status:'failed',variables:{},logs:[],activities:{},error:{code:'workflow-cycle',message:`Workflow invocation cycle or depth limit at ${workflowName}`}};
   const variables:any=Object.fromEntries((w.variables||[]).map(x=>[x.name,x.value]));
+  for(const spec of w.arguments||[]){if(Object.hasOwn(inputs,spec.name))variables[spec.name]=inputs[spec.name];else if(Object.hasOwn(spec,'default'))variables[spec.name]=spec.default;else if((spec.direction==='in'||spec.direction==='inout'||!spec.direction)&&spec.required!==false)return{status:'failed',variables,logs:[],activities:{},error:{code:'argument-missing',message:`Missing required input argument '${spec.name}'`}};if(Object.hasOwn(variables,spec.name)&&!matchesArgumentType(variables[spec.name],spec.type||'any'))return{status:'failed',variables,logs:[],activities:{},error:{code:'argument-type',message:`Argument '${spec.name}' does not match declared type ${spec.type}`}}}
   const logs:any[]=[];const activities:any={};let error:any;
   const seq=async(items:any[])=>{for(const a of items){if(error)return;emit({event:'activity-started',activityId:a.id,type:a.type});try{
     switch(a.type){
       case'assign':variables[a.target]=val(a.value,variables);break;
       case'log':{const entry={event:'log',activityId:a.id,message:String(val(a.message,variables)),level:a.level||'info'};logs.push(entry);emit(entry);break}
+      case'invoke_workflow':{
+        const target=String(a.workflow||'');const child=workflows[target];if(!child)throw Error(`Unknown reusable workflow '${target}'`);
+        const supplied=a.inputs&&typeof a.inputs==='object'?a.inputs:{};const childInputs:any={};
+        for(const spec of child.arguments||[]){if(spec.direction==='out')continue;if(Object.hasOwn(supplied,spec.name))childInputs[spec.name]=val(supplied[spec.name],variables);else if(Object.hasOwn(spec,'default'))childInputs[spec.name]=spec.default;else if(spec.required!==false)throw Object.assign(new Error(`Missing required input '${spec.name}' for workflow '${target}'`),{code:'argument-missing'});}
+        for(const name of Object.keys(supplied))if(!(child.arguments||[]).some(spec=>spec.name===name&&spec.direction!=='out'))throw Object.assign(new Error(`Unknown input '${name}' for workflow '${target}'`),{code:'argument-unknown'});
+        const before=new Set(Object.keys(variables));const childResult=await run(child,allowNetwork,event=>emitExternal({...event,workflow:target,parentWorkflow:workflowName}),workflows,target,childInputs,[...callStack,workflowName]);
+        if(childResult.status!=='succeeded')throw Object.assign(new Error(childResult.error?.message||`Workflow '${target}' failed`),{code:childResult.error?.code||'workflow-failed'});
+        const mapped=a.outputs&&typeof a.outputs==='object'?a.outputs:{};
+        for(const spec of child.arguments||[])if(spec.direction==='out'||spec.direction==='inout'){
+          const destination=String(mapped[spec.name]??spec.target??spec.name);if(!/^[A-Za-z_]\w{0,255}$/.test(destination))throw Object.assign(new Error(`Output '${spec.name}' needs a valid caller variable name`),{code:'argument-output-target'});
+          if(Object.hasOwn(childResult.variables,spec.name))variables[destination]=childResult.variables[spec.name];
+        }
+        if(a.resultTarget)variables[a.resultTarget]=Object.fromEntries(Object.entries(childResult.variables).filter(([name])=>!before.has(name)));
+        break;
+      }
       case'if':await seq(expr(a.condition,variables)?a.then||[]:a.else||[]);break;
       case'switch':{const actual=expr(a.expression,variables);const selected=(a.cases||[]).find((entry:any)=>typeof entry.value===typeof actual&&entry.value===actual);await seq(selected?.activities||a.default||[]);break}
       case'for_each':{const values=expr(a.items,variables);if(!Array.isArray(values))throw Error('For Each expects a list');if(values.length>100000)throw Error('For Each exceeded the 100,000 item preview limit');const had=Object.hasOwn(variables,a.itemName),old=variables[a.itemName];for(const item of values){variables[a.itemName]=item;await seq(a.body||[]);if(error)break}if(had)variables[a.itemName]=old;else delete variables[a.itemName];break}
@@ -102,7 +139,7 @@ export async function run(w:Workflow,allowNetwork:boolean,emit:(e:any)=>void):Pr
       default:throw Error(`Unsupported activity ${a.type}`)
     }
     activities[a.id]={status:'succeeded',type:a.type};emit({event:'activity-completed',activityId:a.id,type:a.type});
-  }catch(e){activities[a.id]={status:'failed',type:a.type,error:e instanceof Error?e.message:String(e)};error={code:'activity-failed',message:activities[a.id].error,activityId:a.id};emit({event:'activity-failed',activityId:a.id,type:a.type,error:activities[a.id].error});}}
+  }catch(e){activities[a.id]={status:'failed',type:a.type,error:e instanceof Error?e.message:String(e)};error={code:(e as any)?.code||'activity-failed',message:activities[a.id].error,activityId:a.id};emit({event:'activity-failed',activityId:a.id,type:a.type,error:activities[a.id].error});}}
   };
   if((w as any).executionModel==='flowchart'){
     const graph=(w as any).flowchart;const nodes=new Map(graph.nodes.map((node:any)=>[node.id,node]));const transitions=graph.transitions as any[];let current=graph.start;let steps=0;

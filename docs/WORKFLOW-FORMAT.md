@@ -4,6 +4,16 @@ Workflow files are UTF-8 JSON documents with `format: "openrpa.workflow"` and `f
 
 The optional AI drafting panel can request each of the three models. Provider-specific structured-output schemas constrain the outer workflow shape; the local workflow validator then checks activity types, identifiers, graph rules, transitions and expression settings. Invalid drafts remain review-only and cannot be applied from the panel. Validation checks structure and supported settings, not whether the model understood the task or whether the automation is safe for a particular environment. Review every activity and permission before execution.
 
+## Reusable workflow arguments
+
+`invoke_workflow` references another name in `project.workflows`. `inputs` maps child input argument names to JSON values or safe expressions; use a full string expression such as `"{{ customerId }}"` when the caller should pass a typed value. `outputs` maps child `out` and `inout` arguments to caller variable names. Output mappings are per invocation. Unmapped outputs use the argument's legacy `target` property, then the argument name.
+
+```json
+{"id":"normalize","type":"invoke_workflow","workflow":"NormalizeOrder","inputs":{"order":"{{ currentOrder }}"},"outputs":{"normalized":"normalizedOrder"}}
+```
+
+The desktop validator checks the call against the project's declared workflows before save/run. Expression result types can only be confirmed at runtime. Calls cannot be cyclic, and child execution shares the enclosing run's quotas and cancellation.
+
 ## State machine
 
 State-machine workflows store ordered activity lists per state. After the activities finish, guarded transitions are checked in file order. A guard must evaluate to a Boolean. A transition without `condition` is the optional, last fallback. Each non-final state needs at least one outgoing transition; a final state has none. The initial state and every state must be reachable, and at least one state must be final. Repeated visits use the normal project execution quota.

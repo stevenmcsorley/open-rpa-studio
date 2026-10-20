@@ -14,7 +14,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from .expressions import evaluate, interpolate
-from .model import WorkflowError, validate_workflow
+from .model import WorkflowError, validate_workflow, validate_workflow_bindings
 from .network import request as restricted_http_request, EgressDenied, assert_public_url
 from .credentials import get_safe_keyring
 
@@ -148,6 +148,10 @@ class WorkflowEngine:
         states: dict[str, dict[str, Any]] = {}
         variables: dict[str, Any] = {}
         try:
+            binding_problems=validate_workflow_bindings(self.workflows)
+            if binding_problems:
+                first=binding_problems[0]
+                raise WorkflowError(first["message"],first.get("activityId"),first["code"])
             if workflow_name not in self.workflows:
                 raise WorkflowError(f"Unknown workflow '{workflow_name}'", code="workflow-not-found")
             if inputs is not None and not isinstance(inputs,dict):
@@ -531,6 +535,9 @@ class WorkflowEngine:
             raw_inputs=a.get("inputs",{})
             if not isinstance(raw_inputs,dict):
                 raise WorkflowError("Invoked workflow inputs must be an object",a["id"],"argument-inputs")
+            raw_outputs=a.get("outputs",{})
+            if not isinstance(raw_outputs,dict):
+                raise WorkflowError("Invoked workflow outputs must be an object",a["id"],"argument-outputs")
             child_args = {k: interpolate(value, v) for k, value in raw_inputs.items()}
             child_wf = self.workflows[target]
             child_vars = {item["name"]: item.get("value") for item in child_wf.get("variables", [])}
@@ -538,6 +545,9 @@ class WorkflowEngine:
             unknown=set(child_args)-set(child_specs)
             if unknown:
                 raise WorkflowError(f"Unknown invoked workflow input(s): {', '.join(sorted(map(str,unknown)))}",a["id"],"argument-unknown")
+            invalid_outputs=set(raw_outputs)-{name for name,arg in child_specs.items() if arg.get("direction","in") in {"out","inout"}}
+            if invalid_outputs:
+                raise WorkflowError(f"Unknown invoked workflow output(s): {', '.join(sorted(map(str,invalid_outputs)))}",a["id"],"argument-output")
             for arg in child_specs.values():
                 direction=arg.get("direction","in")
                 if arg["name"] in child_args:
@@ -559,7 +569,10 @@ class WorkflowEngine:
                 self._sequence(child_wf["activities"], child_vars, logs, states, target,depth+1)
             for arg in child_specs.values():
                 if arg.get("direction") in {"out", "inout"} and arg["name"] in child_vars:
-                    v[arg.get("target", arg["name"])] = child_vars[arg["name"]]
+                    destination=raw_outputs.get(arg["name"],arg.get("target",arg["name"]))
+                    if not isinstance(destination,str) or not destination.isidentifier() or len(destination)>256:
+                        raise WorkflowError(f"Output '{arg['name']}' needs a valid caller variable name",a["id"],"argument-output-target")
+                    v[destination] = child_vars[arg["name"]]
             if a.get("resultTarget"):
                 v[a["resultTarget"]] = {k: value for k, value in child_vars.items() if k not in before}
         elif kind == "file_read_text":

@@ -11,7 +11,7 @@ import atexit
 from pathlib import Path
 from typing import Any
 from .engine import RunOptions, run_project
-from .model import load_project, validate_workflow
+from .model import load_project, validate_workflow, validate_workflow_bindings
 from .history import RunHistory
 from . import ai_providers
 from . import ai_connections
@@ -127,6 +127,9 @@ def handle(request: dict[str, Any]) -> None:
         elif method == "project.save":
             root = Path(params["root"]).resolve()
             project = params["project"]
+            binding_problems=validate_workflow_bindings(params["workflows"])
+            if binding_problems:
+                raise ValueError(binding_problems[0]["message"])
             for key, workflow in params["workflows"].items():
                 problems = validate_workflow(workflow, set(project["workflows"]))
                 if problems:
@@ -146,6 +149,9 @@ def handle(request: dict[str, Any]) -> None:
         elif method == "workflow.validate":
             project = params["project"]
             problems = validate_workflow(params["workflow"], set(project["workflows"]))
+            if isinstance(params.get("workflows"),dict):
+                owner=params.get("workflowName",params["workflow"].get("name"))
+                problems.extend(item for item in validate_workflow_bindings(params["workflows"]) if item.get("workflow")==owner)
             result = {"valid": not problems, "problems": problems}
         elif method == "workflow.run":
             project = params["project"]

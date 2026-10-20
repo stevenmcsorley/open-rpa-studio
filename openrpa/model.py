@@ -197,6 +197,8 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code": "workflow-ref", "message": f"Unknown workflow reference: {target}", "activityId": str(aid or "")})
                 if "inputs" in item and not isinstance(item["inputs"],dict):
                     problems.append({"code":"argument-inputs","message":"Invoke Workflow inputs must be an object","activityId":str(aid or "")})
+                if "outputs" in item and not isinstance(item["outputs"],dict):
+                    problems.append({"code":"argument-outputs","message":"Invoke Workflow outputs must be an object","activityId":str(aid or "")})
             elif typ not in ACTIVITY_TYPES:
                 problems.append({"code": "activity-unsupported", "message": f"Unsupported activity type: {typ}", "activityId": str(aid or "")})
             if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_wait","browser_assert"}:
@@ -427,6 +429,69 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
             if isinstance(arg,dict) and arg.get("required",True) is not True and arg.get("required",True) is not False:
                 problems.append({"code":"argument-required","message":f"Argument '{arg.get('name')}' required must be a boolean"})
     return problems
+
+
+def validate_workflow_bindings(workflows: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+    """Validate reusable-workflow argument bindings across a whole project."""
+    problems: list[dict[str, str]] = []
+
+    def visit(items: Any, owner: str) -> None:
+        if not isinstance(items, list):
+            return
+        for activity in items:
+            if not isinstance(activity, dict):
+                continue
+            if activity.get("type") == "invoke_workflow":
+                target = activity.get("workflow")
+                child = workflows.get(target) if isinstance(target, str) else None
+                if child is not None:
+                    declared=child.get("arguments", [])
+                    if not isinstance(declared,list): declared=[]
+                    arguments = {arg.get("name"): arg for arg in declared if isinstance(arg, dict) and isinstance(arg.get("name"), str)}
+                    inputs = activity.get("inputs", {})
+                    outputs = activity.get("outputs", {})
+                    if isinstance(inputs, dict):
+                        for name in inputs:
+                            spec = arguments.get(name)
+                            if spec is None:
+                                problems.append({"workflow": owner, "activityId": str(activity.get("id", "")), "code": "argument-unknown", "message": f"{owner}: Invoke Workflow '{target}' has no argument named '{name}'"})
+                            elif spec.get("direction", "in") == "out":
+                                problems.append({"workflow": owner, "activityId": str(activity.get("id", "")), "code": "argument-direction", "message": f"{owner}: Output-only argument '{name}' cannot be supplied to '{target}'"})
+                            elif not (isinstance(inputs[name],str) and inputs[name].startswith("{{") and inputs[name].endswith("}}")) and not _argument_value_matches(inputs[name],spec.get("type","any")):
+                                problems.append({"workflow": owner, "activityId": str(activity.get("id", "")), "code": "argument-type", "message": f"{owner}: Literal input '{name}' does not match the declared type {spec.get('type','any')}"})
+                    for name, spec in arguments.items():
+                        if spec.get("direction", "in") in {"in", "inout"} and spec.get("required", True) and "default" not in spec and isinstance(inputs, dict) and name not in inputs:
+                            problems.append({"workflow": owner, "activityId": str(activity.get("id", "")), "code": "argument-missing", "message": f"{owner}: Required input '{name}' is not mapped for '{target}'"})
+                    if isinstance(outputs, dict):
+                        for name, destination in outputs.items():
+                            spec = arguments.get(name)
+                            if spec is None or spec.get("direction", "in") not in {"out", "inout"}:
+                                problems.append({"workflow": owner, "activityId": str(activity.get("id", "")), "code": "argument-output", "message": f"{owner}: '{name}' is not an output argument of '{target}'"})
+                            elif not isinstance(destination, str) or not destination.isidentifier() or len(destination) > 256:
+                                problems.append({"workflow": owner, "activityId": str(activity.get("id", "")), "code": "argument-output-target", "message": f"{owner}: Output '{name}' needs a valid caller variable name"})
+            for branch in ("then", "else", "body", "catch", "finally", "default"):
+                visit(activity.get(branch), owner)
+            for case in activity.get("cases", []) if isinstance(activity.get("cases", []), list) else []:
+                if isinstance(case, dict):
+                    visit(case.get("activities"), owner)
+
+    for owner, workflow in workflows.items():
+        visit(workflow.get("activities"), owner)
+        graph = workflow.get("flowchart", {})
+        for node in graph.get("nodes", []) if isinstance(graph, dict) else []:
+            if isinstance(node, dict) and isinstance(node.get("activity"), dict):
+                visit([node["activity"]], owner)
+        machine = workflow.get("stateMachine", {})
+        for state in machine.get("states", []) if isinstance(machine, dict) else []:
+            if isinstance(state, dict):
+                visit(state.get("activities"), owner)
+    return problems
+
+
+def _argument_value_matches(value: Any, declared: str) -> bool:
+    return {"any":lambda:True,"string":lambda:isinstance(value,str),"integer":lambda:isinstance(value,int) and not isinstance(value,bool),
+        "number":lambda:isinstance(value,(int,float)) and not isinstance(value,bool),"boolean":lambda:isinstance(value,bool),
+        "object":lambda:isinstance(value,dict),"array":lambda:isinstance(value,list)}.get(declared,lambda:False)()
 
 
 ACTIVITY_TYPES = {

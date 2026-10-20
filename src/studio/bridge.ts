@@ -27,7 +27,7 @@ export async function createProject(path:string,name:string):Promise<BridgeResul
 export async function saveProject(root:string,project:Project,workflows:Record<string,Workflow>):Promise<void>{await rpc('project.save',{root,project,workflows});}
 export async function exportProjectPackage(root:string,destination:string):Promise<{path:string;files:number;sha256:string}>{return rpc('project.package.export',{root,destination});}
 export async function importProjectPackage(packagePath:string,destination:string):Promise<{path:string;files:number;name:string;sha256:string}>{return rpc('project.package.import',{package:packagePath,destination});}
-export async function validateWorkflow(project:Project,workflow:Workflow):Promise<{valid:boolean;problems:{message:string;code:string;activityId?:string}[]}>{return rpc('workflow.validate',{project,workflow});}
+export async function validateWorkflow(project:Project,workflow:Workflow,workflows:Record<string,Workflow>,workflowName=workflow.name):Promise<{valid:boolean;problems:{message:string;code:string;activityId?:string}[]}>{return rpc('workflow.validate',{project,workflow,workflows,workflowName});}
 export async function runWorkflow(project:Project,root:string,workflow:string,allowNetwork:boolean,allowDesktop=false,debug=false):Promise<RunResult>{return rpc('workflow.run',{project,root,workflow,allowNetwork,allowDesktop,debug});}
 export async function cancelWorkflow():Promise<void>{await rpc('workflow.cancel');}
 export async function debugControl(action:'pause'|'resume'|'step_over'|'step_into'|'step_out'):Promise<void>{await rpc(`debug.${action}`);}

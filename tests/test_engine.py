@@ -204,6 +204,30 @@ def test_invoke_workflow_rejects_bad_argument_names_directions_and_types(tmp_pat
         assert result.status=="failed"
         assert result.error["code"]==code
 
+def test_invoke_workflow_maps_outputs_per_call_site(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Output mapping","main":"Main","workflows":{"Main":"main.json","Child":"child.json"}}
+    main={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[{"name":"callerValue","type":"integer","value":0}],"arguments":[],"activities":[
+        {"id":"call","type":"invoke_workflow","workflow":"Child","outputs":{"answer":"callerValue"}}]}
+    child={"format":"openrpa.workflow","formatVersion":1,"name":"Child","variables":[],"arguments":[{"name":"answer","type":"integer","direction":"out"}],"activities":[
+        {"id":"set-answer","type":"assign","target":"answer","value":42}]}
+    (tmp_path/"main.json").write_text(json.dumps(main),encoding="utf-8")
+    (tmp_path/"child.json").write_text(json.dumps(child),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded"
+    assert result.variables["callerValue"]==42
+
+def test_cross_workflow_binding_validation_checks_required_unknown_and_output_names():
+    from openrpa.model import validate_workflow_bindings
+    workflows={
+        "Main":{"name":"Main","activities":[{"id":"call","type":"invoke_workflow","workflow":"Child","inputs":{"extra":"x"},"outputs":{"amount":"other","answer":"bad-name"}}]},
+        "Child":{"name":"Child","arguments":[{"name":"amount","type":"integer","direction":"in"},{"name":"answer","type":"integer","direction":"out"}],"activities":[]},
+    }
+    problems=validate_workflow_bindings(workflows)
+    codes={item["code"] for item in problems}
+    assert {"argument-unknown","argument-missing","argument-output","argument-output-target"} <= codes
+    workflows["Main"]["activities"][0]["inputs"]={"amount":"not-an-integer"}
+    assert any(item["code"]=="argument-type" for item in validate_workflow_bindings(workflows))
+
 
 def test_nested_workflow_failure_reports_origin_and_bounded_call_path(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Error path","main":"Main","workflows":{

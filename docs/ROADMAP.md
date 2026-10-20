@@ -17,6 +17,7 @@
 - Flowchart palette insertion splices activities into the selected path, preserves downstream transitions, routes Decision insertions through True, and inserts before End nodes without leaving unreachable nodes.
 - Example CSV automation and engine/UI verification.
 - Desktop toolbar import/export for deterministic, integrity-checked `.orpa` project packages, with export workflow validation and safe empty-folder extraction.
+- Reusable workflow argument mapping with per-call-site outputs and preflight validation.
 
 ## Next release gates
 

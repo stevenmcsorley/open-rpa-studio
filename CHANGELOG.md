@@ -1,10 +1,19 @@
 # Changelog
 
+## 0.1.12 — Reusable workflow argument mapping
+
+- Added a dedicated Invoke Workflow properties editor that lists project workflows and their declared inputs/outputs, supports typed input bindings, per-call output destinations and new-variable result collection.
+- Added project-level binding checks for missing required inputs, unknown names, invalid directions and output target names before save and run.
+- Added per-invocation `outputs` mappings to the Python engine while preserving existing argument-level output targets for old workflow files.
+- Brought nested reusable-workflow execution and typed argument transfer to the browser preview; run events now identify their workflow.
+- Verification: 125 Python engine tests, 24 frontend tests, production build and offline Rust check passed. A fresh isolated silent NSIS installation succeeded; the installed bridge passed typed input preflight plus two independent output mappings through real workflow execution. Installer SHA-256: `404cace5effd4dad4c4e3392b8afa05f6e4bc8d47f92e25bc22f41e85970eb39`.
+
 ## 0.1.11 — Nested workflow error context
 
 - Preserve the original failing workflow/activity and add a bounded call path for nested `invoke_workflow` failures.
 - Include the structured origin and up to 40 workflow-call frames in run results and durable history; redact known credential values from all frame text.
 - Show the call path in the Studio's existing Problems panel so failures inside reusable workflows can be traced to the caller.
+- Verification: 123 Python tests, 22 frontend tests, production build, offline Rust check and installed Windows bridge call-path/history acceptance passed. The v0.1.11 installer was unsigned; its SHA-256 was `c4bd507eb828da19712504c4eb26572f82c57c83ced387e1736d92d1f14bdafe`.
 - Verification: 123 Python tests, 22 frontend tests, frontend production build and offline Rust check passed. Windows x64 NSIS installer built and silently installed in an isolated directory. The installed bridge completed a nested-workflow failure scenario, returned the original failing workflow/activity and two caller frames, and persisted the same diagnostic in run history. A regression also confirms Unicode call-path text survives the Windows bridge protocol. Installer SHA-256: `c4bd507eb828da19712504c4eb26572f82c57c83ced387e1736d92d1f14bdafe`.
 
 ## 0.1.10 — Project package workflows
