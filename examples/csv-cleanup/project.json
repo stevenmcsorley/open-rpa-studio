@@ -1,0 +1,1 @@
+{"format":"openrpa.project","formatVersion":1,"name":"CSV cleanup","main":"Main","workflows":{"Main":"workflows/main.workflow.json"}}

@@ -1,0 +1,11 @@
+export type Activity = { id: string; type: string; [key: string]: unknown };
+export type FlowNode = {id:string;kind:'start'|'action'|'decision'|'end';label?:string;condition?:string;breakpoint?:boolean;x?:number;y?:number;activity?:Activity};
+export type FlowTransition = {from:string;to:string;when?:'always'|'true'|'false'};
+export type Flowchart = {start:string;nodes:FlowNode[];transitions:FlowTransition[]};
+export type Workflow = { format: 'openrpa.workflow'; formatVersion: 1; name: string; variables: Variable[]; arguments: Argument[]; activities: Activity[]; executionModel?:'sequence'|'flowchart'; flowchart?:Flowchart };
+export type Variable = { name: string; type: string; value: unknown };
+export type Argument = { name: string; type: string; direction: 'in'|'out'|'inout'; required?: boolean; default?: unknown };
+export type Project = { format: 'openrpa.project'; formatVersion: 1; name: string; main: string; workflows: Record<string,string> };
+export type CatalogEntry = { type: string; title: string; category: string; description: string; defaults: Record<string, unknown> };
+export type BridgeResult = { project: Project; root: string; workflows: Record<string, Workflow> };
+export type RunResult = { runId?:string; status: string; variables: Record<string, unknown>; logs: Record<string, unknown>[]; activities: Record<string,{status:string;type:string;durationMs?:number;error?:string}>; error?: {message:string;activityId?:string;code:string} };
