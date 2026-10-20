@@ -183,7 +183,15 @@ class WorkflowEngine:
             return RunResult("cancelled", self._redact_value(variables), logs, self._redact_value(states))
         except Exception as exc:
             aid = getattr(exc, "activity_id", None)
-            error = {"code": getattr(exc, "code", "activity-failed"), "message": self._redact_text(str(exc)), "activityId": aid, "type": type(exc).__name__}
+            frames=getattr(exc,"workflow_stack",[])
+            safe_frames=[{"workflow":self._redact_text(str(frame.get("workflow","")))[:200],"activityId":self._redact_text(str(frame.get("activityId","")))[:128],"targetWorkflow":self._redact_text(str(frame.get("targetWorkflow","")))[:200]}
+                for frame in frames[:40] if isinstance(frame,dict)] if isinstance(frames,list) else []
+            message=self._redact_text(str(exc))
+            if safe_frames:
+                path=" → ".join(f"{frame['workflow']}/{frame['activityId']} → {frame['targetWorkflow']}" for frame in safe_frames)
+                message=f"{message} · Call path: {path}"
+            error = {"code": getattr(exc, "code", "activity-failed"), "message": message, "activityId": aid,
+                "workflow":getattr(exc,"workflow",workflow_name),"workflowStack":safe_frames,"type": type(exc).__name__}
             return RunResult("failed", self._redact_value(variables), logs, self._redact_value(states), error)
         finally:
             self._close_browser()
@@ -295,6 +303,16 @@ class WorkflowEngine:
                         setattr(exc, "activity_id", aid)
                     except Exception:
                         pass
+                try:
+                    if not getattr(exc,"workflow",None):
+                        setattr(exc,"workflow",workflow_name)
+                    if kind=="invoke_workflow":
+                        frames=list(getattr(exc,"workflow_stack",[]))
+                        if len(frames)<40:
+                            frames.insert(0,{"workflow":workflow_name,"activityId":aid,"targetWorkflow":str(activity.get("workflow",""))})
+                            setattr(exc,"workflow_stack",frames)
+                except Exception:
+                    pass
                 self._emit({"event": "activity-failed", "activityId": aid, "type": kind, "error": str(exc)}, logs)
                 raise
 

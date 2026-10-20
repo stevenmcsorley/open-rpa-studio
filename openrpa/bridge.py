@@ -94,7 +94,10 @@ def atomic_json(path: Path, value: Any) -> None:
 
 def send(message: dict[str, Any]) -> None:
     with stdout_lock:
-        sys.stdout.write(json.dumps(message, ensure_ascii=False, default=str) + "\n")
+        # The frozen Windows bridge can inherit a legacy console encoding. JSON
+        # Unicode escapes keep every protocol frame pipe-safe while clients
+        # still decode the original Unicode string values normally.
+        sys.stdout.write(json.dumps(message, ensure_ascii=True, default=str) + "\n")
         sys.stdout.flush()
 
 

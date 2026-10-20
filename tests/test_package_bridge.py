@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+
 from openrpa import bridge
 
 
@@ -39,3 +42,12 @@ def test_native_bridge_package_import_rejects_nonempty_destination(tmp_path, mon
     (destination/"keep.txt").write_text("existing",encoding="utf-8")
     bridge.handle({"id":3,"method":"project.package.import","params":{"package":str(archive),"destination":str(destination)}})
     assert "error" in replies[-1] and "empty directory" in replies[-1]["error"]["message"]
+
+
+def test_bridge_protocol_escapes_unicode_for_windows_pipe_encodings(monkeypatch):
+    output=io.StringIO()
+    monkeypatch.setattr(bridge.sys,"stdout",output)
+    bridge.send({"id":7,"result":{"message":"Call path: Main → Child · café"}})
+    encoded=output.getvalue()
+    assert "→" not in encoded and "café" not in encoded
+    assert json.loads(encoded)=={"id":7,"result":{"message":"Call path: Main → Child · café"}}

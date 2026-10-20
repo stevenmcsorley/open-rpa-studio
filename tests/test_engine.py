@@ -204,6 +204,30 @@ def test_invoke_workflow_rejects_bad_argument_names_directions_and_types(tmp_pat
         assert result.status=="failed"
         assert result.error["code"]==code
 
+
+def test_nested_workflow_failure_reports_origin_and_bounded_call_path(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Error path","main":"Main","workflows":{
+        "Main":"main.json","Child":"child.json","Grandchild":"grandchild.json"}}
+    main={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[
+        {"id":"call-child","type":"invoke_workflow","workflow":"Child"}]}
+    child={"format":"openrpa.workflow","formatVersion":1,"name":"Child","variables":[],"arguments":[],"activities":[
+        {"id":"call-grandchild","type":"invoke_workflow","workflow":"Grandchild"}]}
+    grandchild={"format":"openrpa.workflow","formatVersion":1,"name":"Grandchild","variables":[],"arguments":[],"activities":[
+        {"id":"read-missing","type":"file_read_text","path":"missing.txt","result":"text"}]}
+    for filename,value in [("main.json",main),("child.json",child),("grandchild.json",grandchild)]:
+        (tmp_path/filename).write_text(json.dumps(value),encoding="utf-8")
+
+    result=run_project(project,tmp_path)
+
+    assert result.status=="failed"
+    assert result.error["activityId"]=="read-missing"
+    assert result.error["workflow"]=="Grandchild"
+    assert result.error["workflowStack"]==[
+        {"workflow":"Main","activityId":"call-child","targetWorkflow":"Child"},
+        {"workflow":"Child","activityId":"call-grandchild","targetWorkflow":"Grandchild"},
+    ]
+    assert "Call path: Main/call-child → Child → Child/call-grandchild → Grandchild" in result.error["message"]
+
 def test_invocation_cycle_through_switch_case_is_rejected(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Cycle","main":"A","workflows":{"A":"a.json","B":"b.json"}}
     a={"format":"openrpa.workflow","formatVersion":1,"name":"A","variables":[],"arguments":[],"activities":[{"id":"route","type":"switch","expression":"True","cases":[{"value":True,"activities":[{"id":"to-b","type":"invoke_workflow","workflow":"B"}]}],"default":[]}]}

@@ -20,7 +20,7 @@
 
 ## Next release gates
 
-1. **Debugging completion:** add durable debug checkpoints and richer error stack context. Paused variable editing and Step Out are supported at activity boundaries. Mid-activity pause remains adapter-dependent.
+1. **Debugging completion:** workflow invocation failures now carry a bounded, redacted call path and origin workflow/activity through run results and durable history. Add durable debug checkpoints; paused variable editing and Step Out are supported at activity boundaries. Mid-activity pause remains adapter-dependent.
 2. **Visual authoring:** add richer graph navigation, link/reconnect gestures, and improved large-workflow navigation across sequences, flowcharts, and state machines.
 3. **Automation adapters:** add editable selector healing and broaden accessibility acceptance across GTK, Qt, WPF, Win32, WinForms and packaged-app targets. Browser waits/assertions and bounded browser interaction recording are implemented.
 4. **Security:** signed plugin metadata, dependency/SBOM scans, adversarial package and egress tests, threat-model review, safe package verification.
