@@ -42,7 +42,7 @@ export async function getAuditHistory(limit=200):Promise<any[]>{const value=awai
 export type AiConfig={provider:string;baseUrl?:string;credentialService?:string;credentialUsername?:string};
 export async function listAiProviders():Promise<{id:string;name:string;local:boolean;defaultBaseUrl:string;requiresCredential:boolean}[]>{return (await rpc('ai.providers')).providers??[];}
 export async function listAiModels(config:AiConfig):Promise<string[]>{const result=await rpc('ai.models',{...config});return result.models??[];}
-export async function draftWithAi(config:AiConfig,model:string,prompt:string,workflows:string[]):Promise<{explanation:string;workflow:Workflow;valid:boolean;problems:{code:string;message:string;activityId?:string}[]}>{return rpc('ai.draft',{...config,model,prompt,workflows});}
+export async function draftWithAi(config:AiConfig,model:string,prompt:string,workflows:string[],executionModel:'sequence'|'flowchart'|'state_machine'='sequence'):Promise<{explanation:string;workflow:Workflow;valid:boolean;problems:{code:string;message:string;activityId?:string}[]}>{return rpc('ai.draft',{...config,model,prompt,workflows,executionModel});}
 /** @deprecated Ollama alias retained for callers using the previous bridge API. */
 export async function listLocalModels():Promise<string[]>{return listAiModels({provider:'ollama'});}
 /** @deprecated Ollama alias retained for callers using the previous bridge API. */

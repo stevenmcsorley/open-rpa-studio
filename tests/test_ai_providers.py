@@ -49,6 +49,19 @@ def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
     assert seen["url"].endswith("/chat/completions") and seen["method"]=="POST"
     assert seen["body"]["response_format"]["type"]=="json_schema"
 
+@pytest.mark.parametrize("execution_model,payload_key",[("flowchart","flowchart"),("state_machine","stateMachine")])
+def test_openai_draft_uses_selected_workflow_structure_schema(monkeypatch,execution_model,payload_key):
+    seen={}
+    payload={"start":"start","nodes":[{"id":"start","kind":"start"},{"id":"end","kind":"end"}],"transitions":[{"from":"start","to":"end"}]} if execution_model=="flowchart" else {"initial":"begin","states":[{"id":"begin","activities":[]},{"id":"done","final":True,"activities":[]}],"transitions":[{"from":"begin","to":"done"}]}
+    def call(url,local,method="GET",**kwargs):
+        seen["schema"]=kwargs["body"]["response_format"]["json_schema"]["schema"]
+        return {"choices":[{"message":{"content":json.dumps({"explanation":"graph draft",payload_key:payload})}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("openai_compatible","model-x","route a task",["log"],"https://api.example/v1",execution_model=execution_model)
+    assert payload_key in result
+    assert payload_key in seen["schema"]["required"]
+    assert seen["schema"]["additionalProperties"] is False
+
 
 def test_claude_draft_uses_tool_schema(monkeypatch):
     monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
@@ -62,6 +75,41 @@ def test_claude_draft_uses_tool_schema(monkeypatch):
     assert seen["url"]=="https://api.anthropic.com/v1/messages"
     assert seen["body"]["tool_choice"]["name"]=="create_workflow"
     assert seen["secret"]=="secret-token"
+
+def test_claude_state_machine_draft_uses_state_machine_tool_shape(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    machine={"initial":"begin","states":[{"id":"begin","activities":[]},{"id":"done","final":True,"activities":[]}],"transitions":[{"from":"begin","to":"done"}]}
+    seen={}
+    def call(url,local,method="GET",**kwargs):
+        seen["schema"]=kwargs["body"]["tools"][0]["input_schema"]
+        return {"content":[{"type":"tool_use","name":"create_workflow","input":{"explanation":"states","stateMachine":machine}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("claude","claude-test","route a task",["log"],credential_service="s",credential_username="u",execution_model="state_machine")
+    assert result["stateMachine"]==machine
+    assert "stateMachine" in seen["schema"]["required"]
+
+
+def test_graph_schema_requires_discriminated_nodes_and_well_formed_states():
+    flowchart=ai._schema("flowchart")["properties"]["flowchart"]["properties"]["nodes"]["items"]["oneOf"]
+    nodes={row["properties"]["kind"]["const"]:row for row in flowchart}
+    assert "activity" not in nodes["start"]["properties"]
+    assert "activity" in nodes["action"]["required"]
+    assert "condition" in nodes["decision"]["required"]
+    assert "activity" not in nodes["end"]["properties"]
+    machine=ai._schema("state_machine")["properties"]["stateMachine"]["properties"]
+    assert "final" in machine["states"]["items"]["required"]
+    assert machine["transitions"]["items"]["properties"]["condition"]["minLength"]==1
+
+
+def test_draft_prompt_requires_flat_activity_settings_and_avoids_reasoning(monkeypatch):
+    seen={}
+    def call(url,local,method="GET",**kwargs):
+        seen["prompt"]=kwargs["body"]["prompt"]
+        return {"response":json.dumps({"explanation":"Logs hello.","activities":[{"id":"log","type":"log","message":"hello"}]})}
+    monkeypatch.setattr(ai,"_call",call)
+    ai.draft("ollama","model-x","log hello",["log"])
+    assert "never nest them under a settings property" in seen["prompt"]
+    assert "do not include private reasoning" in seen["prompt"]
 
 
 def test_ollama_malformed_draft_fails_closed(monkeypatch):

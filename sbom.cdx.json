@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:e3e6b9d9-cb75-510c-8f17-1a9be1debeed",
+  "serialNumber": "urn:uuid:6022d859-b9ff-5c40-9628-c85078f61033",
   "version": 1,
   "metadata": {
     "component": {
       "type": "application",
       "name": "Open RPA Studio",
-      "version": "0.1.3",
-      "purl": "pkg:generic/open-rpa-studio@0.1.3"
+      "version": "0.1.4",
+      "purl": "pkg:generic/open-rpa-studio@0.1.4"
     },
     "properties": [
       {
@@ -12621,9 +12621,9 @@
     {
       "type": "library",
       "name": "open-rpa-studio-engine",
-      "version": "0.1.3",
-      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.3",
-      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.3",
+      "version": "0.1.4",
+      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.4",
+      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.4",
       "properties": [
         {
           "name": "openrpa:licenseReview",

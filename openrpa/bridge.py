@@ -300,14 +300,18 @@ def handle(request: dict[str, Any]) -> None:
         elif method == "ai.draft":
             provider=str(params.get("provider","ollama"))
             model=str(params.get("model","")).strip()
-            history.audit("ai.draft",{"provider":provider,"model":model[:200],"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
             types=[x["type"] for x in ACTIVITY_CATALOG]
+            execution_model=str(params.get("executionModel","sequence"))
+            history.audit("ai.draft",{"provider":provider,"model":model[:200],"workflowModel":execution_model,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
             draft=ai_providers.draft(provider,model,params.get("prompt",""),types,params.get("baseUrl"),
-                params.get("credentialService"),params.get("credentialUsername"))
-            if not isinstance(draft,dict) or set(draft)-{"explanation","activities"}:
-                raise ValueError("Model output must be an object containing only explanation and activities")
-            activities=draft.get("activities")
-            if not isinstance(activities,list) or len(activities)>300: raise ValueError("Model draft must contain no more than 300 activities")
+                params.get("credentialService"),params.get("credentialUsername"),execution_model)
+            payload_key={"sequence":"activities","flowchart":"flowchart","state_machine":"stateMachine"}.get(execution_model)
+            if payload_key is None:raise ValueError("AI workflow model must be sequence, flowchart, or state_machine")
+            if not isinstance(draft,dict) or set(draft)-{"explanation",payload_key}:
+                raise ValueError(f"Model output must contain explanation and {payload_key} only")
+            payload=draft.get(payload_key)
+            activities=payload if execution_model=="sequence" else ([node.get("activity") for node in payload.get("nodes",[]) if isinstance(node,dict) and node.get("kind")=="action"] if execution_model=="flowchart" and isinstance(payload,dict) else ([state.get("activities",[]) for state in payload.get("states",[]) if isinstance(state,dict)] if execution_model=="state_machine" and isinstance(payload,dict) else []))
+            if execution_model=="sequence" and (not isinstance(activities,list) or len(activities)>300):raise ValueError("Model draft must contain no more than 300 activities")
             def count_activities(items: list[Any]) -> int:
                 total=0
                 for item in items:
@@ -315,10 +319,16 @@ def handle(request: dict[str, Any]) -> None:
                     total+=1
                     for branch in ("then","else","body","catch","finally"):
                         if isinstance(item.get(branch),list): total+=count_activities(item[branch])
+                    if item.get("type")=="switch":
+                        for case in item.get("cases",[]):
+                            if isinstance(case,dict) and isinstance(case.get("activities"),list):total+=count_activities(case["activities"])
+                        if isinstance(item.get("default"),list):total+=count_activities(item["default"])
                     if total>300: return total
                 return total
-            if count_activities(activities)>300: raise ValueError("Model draft contains more than 300 activities including nested branches")
-            workflow={"format":"openrpa.workflow","formatVersion":1,"name":"AI Draft","variables":[],"arguments":[],"activities":activities}
+            activity_lists=[activities] if execution_model in {"sequence","flowchart"} else activities
+            if any(not isinstance(items,list) or count_activities(items)>300 for items in activity_lists):raise ValueError("Model draft contains more than 300 activities including nested branches")
+            workflow={"format":"openrpa.workflow","formatVersion":1,"name":"AI Draft","variables":[],"arguments":[],"activities":[] if execution_model!="sequence" else activities}
+            if execution_model!="sequence":workflow["executionModel"]=execution_model;workflow["flowchart" if execution_model=="flowchart" else "stateMachine"]=payload
             problems=validate_workflow(workflow,set(params.get("workflows",["Main"])))
             result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider}
         else:
