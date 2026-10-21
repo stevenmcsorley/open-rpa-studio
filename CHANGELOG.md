@@ -1,6 +1,8 @@
 # Changelog
 ## Unreleased
 
+- Made sequence-canvas zoom functional with a live percentage, 10% increments, 50–150% bounds, and one-click reset; graph editors retain their own zoom controls. Kept the nested workflow outline pinned to its canvas viewport during scroll so deep-branch navigation remains available after jumping to an activity.
+- Verification: 66 frontend tests pass; TypeScript and production Vite build pass. Browser preview verified zoom in (100%→110%) and reset, then selected a nested branch activity and confirmed the outline remained visible while the activity and its properties were brought into view.
 - Added a navigable workflow outline for sequence workflows. It lists nested activities with their If/Else, loop, Try/Catch/Finally, and Switch branch context; selecting an entry selects the activity, scrolls it into view, and opens its properties. Added nested branch and Switch outline tests plus a public screenshot.
 - Verification: 64 frontend tests pass; TypeScript and the production Vite build pass. Playwright preview confirmed outline expansion, live nested-branch updates, selection, and property inspection without console errors.
 - State-machine graph edges are now directly editable: select an edge to change its destination or guard, reorder guarded routes, remove it, or add a new safe `False`-guarded route. Blank guards remain the final fallback, and duplicate fallbacks are rejected. Added regression tests and a public README screenshot of the actual editor.

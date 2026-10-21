@@ -14,7 +14,7 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 ![Open RPA Studio sequence editor with its navigable nested workflow outline open beside an If branch and a selected branch activity](docs/assets/workflow-outline.png)
 
-*The workflow outline includes branch context for nested activities. Select an entry to focus that activity in the sequence canvas and open its properties.*
+*The workflow outline includes branch context for nested activities and stays pinned while the canvas scrolls. Select an entry to focus that activity and open its properties.*
 
 ![Open RPA Studio state-machine graph with a selected transition and inline guard and destination editor](docs/assets/state-machine-editor.png)
 
@@ -67,7 +67,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Project and workflow files use versioned JSON formats (`openrpa.project` and `openrpa.workflow`, format version 1).
 - Export and import deterministic `.orpa` project packages from the desktop toolbar. Exports validate workflows and exclude secret files; imports verify the manifest, file hashes and paths before extracting to an empty folder.
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
-- Search a categorized activity catalog, configure activity properties, reorder sequence actions, and edit nested control-flow branches.
+- Search a categorized activity catalog, configure activity properties, reorder sequence actions, edit nested control-flow branches, and zoom sequence canvases from 50% to 150% with a reset control.
 - Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file.
 - Author a state machine with named states, per-state activity sequences, ordered boolean guards, an explicit initial state, and terminal states. State visits obey the workflow execution quota; interrupted workflows are not automatically replayed.
 - See the [workflow format and state-machine example](docs/WORKFLOW-FORMAT.md) and the [architecture notes](docs/ARCHITECTURE.md).
