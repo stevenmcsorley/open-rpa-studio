@@ -77,6 +77,11 @@ describe('run impact plan', () => {
     expect(plan.needsNetwork).toBe(false);
   });
 
+  it('shows reading a browser table as a bounded page-data read', () => {
+    const plan = buildExecutionPlan({ ...base, activities: [{ id: 'table', type: 'browser_table_read', selectorKind: 'css', selector: '#results', maxRows: 50, maxColumns: 10 }] });
+    expect(plan.actions).toEqual([expect.objectContaining({ id: 'table', label: 'Read web table', risk: 'read' })]);
+  });
+
   it('covers flowchart nodes and state-machine activities', () => {
     const flowchart = buildExecutionPlan({ ...base, executionModel: 'flowchart', flowchart: {
       start: 's', nodes: [{ id: 's', kind: 'start' }, { id: 'a', kind: 'action', activity: { id: 'web', type: 'browser_navigate', url: 'https://example.org' } }, { id: 'e', kind: 'end' }],

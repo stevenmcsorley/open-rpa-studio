@@ -4,6 +4,8 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
+See the [product roadmap](docs/ROADMAP.md) for the next major capability: a visual API connector builder with reusable credential-backed connections, authentication, pagination, rate limits, and safe response mapping.
+
 ![Open RPA Studio browser preview showing the CSV workflow in the flowchart designer, with the selected node, properties inspector and graph minimap](docs/assets/studio-overview.png)
 
 *The screenshot shows the isolated browser preview and the flowchart minimap. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
@@ -169,6 +171,10 @@ Core activities include variable assignment and logging; credential lookup by va
 
 *OCR Image reads an approved local PNG, JPEG or BMP through Tesseract. The desktop runtime reports whether OCR is installed; the browser preview cannot read local files. See [local image OCR limits and setup](docs/IMAGE-OCR.md).*
 
+![Open RPA Studio with Read Web Table configured in the workflow designer](docs/assets/web-table-activity.png)
+
+*Read Web Table converts one uniquely selected HTML table into bounded workflow records; its desktop Playwright engine enforces row, column, time, and output-size limits.*
+
 ### Debugging and run history
 
 When you run or debug a workflow with input arguments, Studio collects typed values in the run review dialog, validates required fields and JSON values, and passes the inputs to the selected workflow. Output and in/out argument values appear in the execution variables.
@@ -211,7 +217,7 @@ This is a set of provider-protocol adapters, not a promise that every model endp
 
 ### Browser and desktop adapters
 
-Browser activities use Playwright with role, label, text, placeholder, test-id, or CSS selectors. The library includes explicit element waits and visible/hidden/enabled/disabled/checked/text assertions with activity-scoped timeouts. The Browser Inspector uses a visible browser, permission-gated navigation, request destination checks, and editable selector-based actions. Its interaction recorder captures bounded click, fill, selection, and checkbox actions for uniquely identified named controls, including across page navigation in one browser tab. It records selector metadata only: it does not read typed values, and it excludes password, email, payment, file, and hidden fields. Generated fill/select activities have blank values and must be reviewed before use. The bridge checks Playwright and Chromium availability at runtime. Install Chromium for development with:
+Browser activities use Playwright with role, label, text, placeholder, test-id, or CSS selectors. The library includes explicit element waits and visible/hidden/enabled/disabled/checked/text assertions with activity-scoped timeouts. **Read Web Table** turns one uniquely selected HTML table into workflow records, with optional first-row headers and strict row, column, timeout, and total-text limits; it rejects ambiguous selectors and oversized tables instead of silently truncating them. The Browser Inspector uses a visible browser, permission-gated navigation, request destination checks, and editable selector-based actions. Its interaction recorder captures bounded click, fill, selection, and checkbox actions for uniquely identified named controls, including across page navigation in one browser tab. It records selector metadata only: it does not read typed values, and it excludes password, email, payment, file, and hidden fields. Generated fill/select activities have blank values and must be reviewed before use. The bridge checks Playwright and Chromium availability at runtime. Install Chromium for development with:
 
 ```powershell
 uv sync --locked --extra dev --extra browser

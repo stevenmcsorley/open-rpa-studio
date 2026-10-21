@@ -1,6 +1,9 @@
 # Changelog
 ## Unreleased
 
+- Added Read Web Table, a Playwright activity that extracts a unique HTML table into editable workflow records with duplicate-header handling, optional header rows, strict row/column/response-size/time limits, pre-run read classification, and explicit errors instead of silent truncation. Added authoring support in the browser preview, regression coverage, documentation, and a public Studio screenshot.
+- Added a product roadmap that sets the next major capability as a visual API connector builder with reusable OS-vault-backed API connections, API-key and OAuth 2.0 authentication, bounded pagination, rate limits, response mapping, and AI-safe connection references.
+- Verification for Read Web Table: all 227 Python tests and 118 frontend tests pass; the production frontend and Windows release installer build; a real Playwright Chromium run extracts and bounds table data; the freshly installed bridge exposes the activity and accepts its schema. The v0.1.30 NSIS installer is 69.05 MiB, unsigned, SHA-256 `ce0fea0d9d95bc1147f689fe5094b79564b9c7585117634bb2615613520c5f62`.
 - Added OCR Image, an optional local Tesseract activity for PNG, JPEG and BMP files. It probes runtime availability, preflights images with Pillow, enforces 30-megapixel/input/output/time limits, checks cancellation, redacts secret-like environment variables from the subprocess and records local audit evidence. Added an executable packaged-bridge OCR acceptance check and a public Studio screenshot.
 - Added Map Rows, Distinct Rows and Validate Rows for bounded, non-mutating data preparation, typed-key deduplication and explicit schema validation with structured row errors.
 - Verification: 225 Python tests, 116 frontend tests, production frontend build, frozen-bridge Pillow acceptance check and a real Tesseract workflow recognizing `OPEN RPA LOCAL OCR 2026` all pass. Current-source CI is pending.

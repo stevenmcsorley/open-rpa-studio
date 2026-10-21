@@ -208,6 +208,37 @@ def test_browser_wait_and_assert_activities_use_real_page_state_and_clear_errors
         browser.close()
 
 
+def test_browser_table_read_extracts_bounded_records_from_a_real_table():
+    playwright=pytest.importorskip("playwright.sync_api")
+    from openrpa.engine import WorkflowEngine, WorkflowError, RunOptions
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        page=browser.new_page()
+        page.set_content('''<table id="orders"><thead><tr><th>Order</th><th>Status</th><th>Status</th></tr></thead><tbody><tr><td> A-1 </td><td>Ready</td><td>Paid</td></tr><tr><td>A-2</td><td>Queued</td><td>Unpaid</td></tr></tbody></table><div id="not-table">text</div>''')
+        events=[]
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine.options=RunOptions()
+        values={}
+        activity={"id":"read","type":"browser_table_read","selectorKind":"css","selector":"#orders","result":"orders","timeoutSeconds":2}
+        engine._browser_activity(activity,values,events)
+        assert values["orders"]==[{"Order":"A-1","Status":"Ready","Status_2":"Paid"},{"Order":"A-2","Status":"Queued","Status_2":"Unpaid"}]
+        assert events==[{"event":"browser-table-read","activityId":"read","rows":2,"columns":3}]
+        with pytest.raises(WorkflowError,match="limit is 1") as too_many:
+            engine._browser_activity({**activity,"id":"limit","maxRows":1},{})
+        assert too_many.value.code=="browser-table-limit"
+        with pytest.raises(WorkflowError,match="HTML table") as wrong_element:
+            engine._browser_activity({**activity,"id":"div","selector":"#not-table"},{})
+        assert wrong_element.value.code=="browser-table-limit"
+        browser.close()
+
+
+def test_browser_table_read_validation_enforces_css_and_bounded_output():
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Browser table","variables":[],"arguments":[],"activities":[
+        {"id":"read","type":"browser_table_read","selectorKind":"role","selector":"table:Orders","maxRows":100000,"result":"bad-name"}]}
+    codes={problem["code"] for problem in validate_workflow(workflow)}
+    assert {"browser-table-selector","browser-table-limit","browser-table-result"}<=codes
+
+
 def test_browser_wait_and_assert_validation_is_strict():
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Browser checks","variables":[],"arguments":[],"activities":[
         {"id":"wait","type":"browser_wait","selectorKind":"css","selector":"#main","state":"almost-visible","timeoutSeconds":15},

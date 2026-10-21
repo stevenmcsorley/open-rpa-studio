@@ -367,7 +367,7 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:problems.append({"code":"sqlite-timeout","message":"SQLite Query timeoutSeconds must be from 1 to 120","activityId":str(aid or "")})
             elif typ not in ACTIVITY_TYPES:
                 problems.append({"code": "activity-unsupported", "message": f"Unsupported activity type: {typ}", "activityId": str(aid or "")})
-            if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_wait","browser_assert"}:
+            if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_table_read","browser_wait","browser_assert"}:
                 selector_kind=item.get("selectorKind","role")
                 if not isinstance(selector_kind,str) or selector_kind not in {"role","label","text","placeholder","test_id","css"}:
                     problems.append({"code":"browser-selector-kind","message":"Browser selectorKind must be role, label, text, placeholder, test_id, or css","activityId":str(aid or "")})
@@ -400,6 +400,14 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"browser-option-value","message":"Browser Select needs an option value or expression","activityId":str(aid or "")})
                 if typ=="browser_text" and (not isinstance(item.get("result","text"),str) or not item.get("result","text")):
                     problems.append({"code":"browser-result","message":"Browser Text result must be a non-empty variable name","activityId":str(aid or "")})
+                if typ=="browser_table_read":
+                    if selector_kind!="css":problems.append({"code":"browser-table-selector","message":"Read Web Table requires a CSS selector for a table element","activityId":str(aid or "")})
+                    if not isinstance(item.get("result","rows"),str) or not item.get("result","rows").isidentifier():problems.append({"code":"browser-table-result","message":"Read Web Table result must be a variable name","activityId":str(aid or "")})
+                    if not isinstance(item.get("firstRowHeaders",True),bool):problems.append({"code":"browser-table-headers","message":"firstRowHeaders must be a boolean","activityId":str(aid or "")})
+                    limits=(("maxRows",1000,5000),("maxColumns",50,100),("maxOutputChars",1_000_000,10_000_000))
+                    for field,default,maximum in limits:
+                        value=item.get(field,default)
+                        if not isinstance(value,int) or isinstance(value,bool) or not 1<=value<=maximum:problems.append({"code":"browser-table-limit","message":f"{field} must be an integer from 1 to {maximum}","activityId":str(aid or "")})
                 if typ=="browser_wait" and (not isinstance(item.get("state","visible"),str) or item.get("state","visible") not in {"attached","detached","visible","hidden"}):
                     problems.append({"code":"browser-wait-state","message":"Browser Wait state must be attached, detached, visible, or hidden","activityId":str(aid or "")})
                 if typ=="browser_assert":
@@ -693,7 +701,7 @@ ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "image_ocr", "json_parse", "json_write",
     "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
-    "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
+    "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_table_read", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
 }

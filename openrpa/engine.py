@@ -1343,6 +1343,51 @@ class WorkflowEngine:
         elif kind == "browser_check": self._locator(a,logs).check(timeout=timeout)
         elif kind == "browser_uncheck": self._locator(a,logs).uncheck(timeout=timeout)
         elif kind == "browser_text": v[a.get("result", "text")] = self._locator(a,logs).inner_text(timeout=timeout)
+        elif kind == "browser_table_read":
+            if a.get("selectorKind","css")!="css":raise WorkflowError("Read Web Table requires a CSS selector for a table element",a["id"],"browser-table-selector")
+            locator=self._browser_page.locator(str(a.get("selector","")))
+            locator.wait_for(state="visible",timeout=timeout)
+            matches=locator.count()
+            if matches!=1:raise WorkflowError(f"Read Web Table selector must match exactly one table; found {matches}",a["id"],"browser-table-ambiguous")
+            limits={"maxRows":int(a.get("maxRows",1000)),"maxColumns":int(a.get("maxColumns",50)),"maxOutputChars":int(a.get("maxOutputChars",1_000_000)),"firstRowHeaders":bool(a.get("firstRowHeaders",True))}
+            extracted=locator.evaluate("""(table, limits) => {
+              if (!(table instanceof HTMLTableElement)) return {error: 'selector did not identify an HTML table'};
+              const rowCount = table.rows.length;
+              const headerOffset = limits.firstRowHeaders && rowCount ? 1 : 0;
+              const dataRows = rowCount - headerOffset;
+              if (dataRows > limits.maxRows) return {error: `table has ${dataRows} data rows; limit is ${limits.maxRows}`};
+              const sourceRows = Array.from(table.rows);
+              let width = 0;
+              for (const row of sourceRows) width = Math.max(width, row.cells.length);
+              if (width > limits.maxColumns) return {error: `table has ${width} columns; limit is ${limits.maxColumns}`};
+              if (!width) return {rows: []};
+              const clean = (cell) => (cell.innerText || '').replace(/\\s+/g, ' ').trim();
+              let headers = headerOffset
+                ? Array.from({length: width}, (_, index) => clean(sourceRows[0].cells[index] || {innerText: ''}) || `column_${index + 1}`)
+                : Array.from({length: width}, (_, index) => `column_${index + 1}`);
+              const used = new Map();
+              headers = headers.map((header, index) => {
+                const base = header.slice(0, 256) || `column_${index + 1}`;
+                const count = (used.get(base) || 0) + 1; used.set(base, count);
+                return count === 1 ? base : `${base}_${count}`;
+              });
+              let chars = 0;
+              const rows = [];
+              for (const row of sourceRows.slice(headerOffset)) {
+                const record = {};
+                for (let column = 0; column < width; column++) {
+                  const value = clean(row.cells[column] || {innerText: ''});
+                  chars += headers[column].length + value.length;
+                  if (chars > limits.maxOutputChars) return {error: `table text exceeds output limit of ${limits.maxOutputChars} characters`};
+                  record[headers[column]] = value;
+                }
+                rows.push(record);
+              }
+              return {rows};
+            }""",limits)
+            if extracted.get("error"):raise WorkflowError(f"Read Web Table failed: {extracted['error']}",a["id"],"browser-table-limit")
+            v[a.get("result","rows")]=extracted["rows"]
+            if logs is not None:logs.append({"event":"browser-table-read","activityId":a["id"],"rows":len(extracted["rows"]),"columns":len(extracted["rows"][0]) if extracted["rows"] else 0})
         elif kind == "browser_screenshot":
             path = self._path(a["path"], v, True)
             self._browser_page.screenshot(path=str(path), full_page=bool(a.get("fullPage", False)), timeout=timeout)

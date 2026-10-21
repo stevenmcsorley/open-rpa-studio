@@ -28,7 +28,7 @@ const LABELS: Record<string, string> = {
   http_request: 'Send HTTP request', browser_navigate: 'Open browser page', browser_goto: 'Open browser page',
   browser_click: 'Click browser control', browser_fill: 'Fill browser control', browser_select: 'Select browser option',
   browser_check: 'Change browser checkbox', browser_uncheck: 'Change browser checkbox', browser_wait: 'Wait for browser control',
-  browser_assert: 'Check browser page', browser_text: 'Read browser text', browser_record: 'Record browser actions',
+  browser_assert: 'Check browser page', browser_text: 'Read browser text', browser_table_read: 'Read web table', browser_record: 'Record browser actions',
   browser_launch: 'Launch browser', browser_screenshot: 'Capture browser screenshot', browser_close: 'Close browser',
   desktop_ui_click: 'Click desktop control', desktop_ui_fill: 'Set desktop text', desktop_ui_text: 'Read desktop text',
   desktop_ui_wait: 'Wait for desktop control', desktop_click: 'Click screen coordinates', desktop_type: 'Type into desktop app',
@@ -97,7 +97,7 @@ export function buildExecutionPlan(workflow: Workflow, workflows: Record<string,
     else if (FILE_WRITE.has(type)) { risk = 'write'; detail = type === 'file_copy' ? `${valueDetail(source)} → ${valueDetail(destination)}` : valueDetail(path); }
     else if (FILE_READ.has(type)) { risk = 'read'; detail = valueDetail(path); }
     else if (type === 'http_request') { risk = 'external'; detail = `${String(item.method ?? 'GET').toUpperCase()} ${valueDetail(url)}`; }
-    else if (isBrowser) { risk = type === 'browser_text' || type === 'browser_wait' || type === 'browser_assert' ? 'read' : 'external'; detail = type === 'browser_navigate' || type === 'browser_goto' ? valueDetail(url) : 'Interacts with the active browser page'; }
+    else if (isBrowser) { risk = type === 'browser_text' || type === 'browser_table_read' || type === 'browser_wait' || type === 'browser_assert' ? 'read' : 'external'; detail = type === 'browser_navigate' || type === 'browser_goto' ? valueDetail(url) : 'Interacts with the active browser page'; }
     else if (isDesktop) { risk = type.includes('click') || type.includes('fill') || type === 'desktop_type' || type === 'desktop_hotkey' || type === 'desktop_press' ? 'external' : 'read'; detail = typeof item.selector === 'string' ? item.selector : type === 'desktop_screenshot' ? valueDetail(path) : 'Interacts with the selected desktop application'; }
     else if (type === 'credential_get') { risk = 'read'; detail = 'Reads a credential by OS-vault reference'; }
     else { risk = 'external'; detail = 'Review the activity configuration before running'; }

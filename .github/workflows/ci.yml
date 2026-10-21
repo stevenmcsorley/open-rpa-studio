@@ -50,5 +50,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The bundled CLI/MCP command failed its startup check.' }
           uv run --locked python tests/fixtures/packaged_mcp_acceptance.py src-tauri/resources/openrpa-bridge.exe
           uv run --locked python tests/fixtures/packaged_ocr_acceptance.py src-tauri/resources/openrpa-bridge.exe
+          uv run --locked python tests/fixtures/packaged_web_table_acceptance.py src-tauri/resources/openrpa-bridge.exe
       - name: Check Windows desktop host
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml

@@ -43,3 +43,41 @@
 6. **AI (optional):** a reproducible live Ollama smoke acceptance now covers sequence, flowchart and state-machine drafting through validation and execution; per-protocol structured-output fallbacks and bounded cancellation are implemented. Authenticated remote-provider integration acceptance and compatibility across additional local models remain. Typed model IDs now work when a host's model catalogue is unavailable. Core authoring/execution remains available without a model.
 
 “Production” requires passing these operational and security gates for each supported platform; the initial vertical slice is not yet a production-certified release.
+# Product roadmap: next capabilities
+
+Open RPA Studio is independent of Flowbench. This roadmap records upcoming product capabilities; it does not claim completed parity with another automation product.
+
+## Next major capability: visual API connector builder
+
+**Goal:** make API-driven automations approachable without hand-authoring generic HTTP request fields or automating a website's UI.
+
+The connector milestone will build on the existing restricted HTTP client, workflow activities, and OS credential vault. It will provide:
+
+- Reusable, project-local API connection profiles with a visual editor.
+- Secure API-key and OAuth 2.0 client-credentials setup. Secrets and tokens remain in the operating-system vault; workflow files hold references only.
+- Explicit method, base URL, path, query parameters, headers, and JSON request-body configuration.
+- Bounded pagination strategies, request pacing/rate limits, timeouts, response-size quotas, cancellation, and clear partial-failure behavior.
+- Safe response parsing and JSON-path mapping into workflow variables and data rows.
+- Permission review, destination checks, redacted diagnostics, and audit evidence for every external request.
+- AI draft support using the same validated activities and saved-connection references, without granting the model access to secret values.
+
+Delivery gates: connection-profile validation and vault storage; a real authenticated request against a controlled local test server; pagination and retry safety; editable UI authoring; full engine and packaging acceptance. Unsupported OAuth flows, private-network targets, redirects, and provider-specific pagination must be explicit rather than implied to work.
+
+## Differentiated product direction
+
+The product should compete on open, local control and a shorter path from intent to a reliable automation. UiPath already offers agentic automation, integrations, orchestration, and debugging; this project should not market those broad concepts as unique. Its opportunity is to make them easier to inspect, configure, run locally, and extend across providers.
+
+1. **Universal local automation agent.** Discover tools the user explicitly makes available, then prefer a documented API, MCP tool, or CLI over browser or desktop interaction when both can satisfy the task. Generate a normal editable workflow, validate it, show a permission plan, and require review before actions with external effects. Start only after the API connector and tool-discovery contracts are established.
+2. **Automatic API discovery.** Import OpenAPI descriptions or inspect an authorized API documentation page, identify operations and schemas, and generate reusable connector definitions. Auth requirements and unsupported schema constructs must be visible and reviewable.
+3. **Provider-neutral offline AI.** Keep generation, explanation, and repair compatible with local runtimes such as Ollama and LM Studio, while retaining optional user-configured remote providers. Core execution must not depend on an AI provider.
+4. **Workflow trace and replay.** Capture bounded, redacted activity inputs/outputs and UI/API evidence. Replay deterministic local steps from a checkpoint; never imply that a prior external action can be rolled back or safely repeated without idempotency evidence.
+5. **Bidirectional source view.** Make the versioned workflow format readable and diffable in Git, with an editable source view that round-trips to the visual model without lossy conversion.
+6. **Open activity packages.** Support documented, isolated, signed packages with dependency/SBOM evidence before offering a public community registry. Package trust and update safety come before registry scale.
+7. **Cross-platform worker mesh.** Dispatch jobs to explicitly paired Windows, Linux, and macOS workers only after identity, transport security, permissions, updates, and audit semantics are defined.
+8. **Automation cost and reliability view.** Track observed run time, retries, failures, and user-configured API/model cost rates; suggest cheaper paths only when equivalent output can be verified.
+
+The suggested order is API connector and discovery first, then the local tool-selection agent and trace/replay foundation. Worker mesh and a public package registry are later investments because they expand the security and operations surface substantially.
+
+## Current increment
+
+- Bounded web-table extraction turns one selected HTML table into records for subsequent mapping and validation activities.
