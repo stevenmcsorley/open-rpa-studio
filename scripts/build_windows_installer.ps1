@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $appRoot
+$version = (Get-Content (Join-Path $appRoot 'package.json') -Raw | ConvertFrom-Json).version
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required to build the bundled workflow engine.' }
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'Node.js and npm are required to build the desktop application.' }
@@ -23,10 +24,22 @@ uv run --locked --extra browser --extra desktop --extra credentials --extra ocr 
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed to create the bundled workflow engine.' }
 $bridgePath = Join-Path $resourceDir 'openrpa-bridge.exe'
 if (-not (Test-Path $bridgePath)) { throw 'The frozen workflow engine executable is missing.' }
+$versionedBridgeName = "openrpa-bridge-$version.exe"
+$versionedBridgePath = Join-Path $resourceDir $versionedBridgeName
+Copy-Item -LiteralPath $bridgePath -Destination $versionedBridgePath -Force
+$configPath = Join-Path $appRoot 'src-tauri\tauri.conf.json'
+$configJson = Get-Content $configPath -Raw
+$resourceEntry = '"resources":{"../openrpa/":"engine/openrpa/","resources/' + $versionedBridgeName + '":"engine/' + $versionedBridgeName + '"}'
+$configJson = [System.Text.RegularExpressions.Regex]::Replace($configJson, '"resources"\s*:\s*\{[^}]*\}', $resourceEntry, 1)
+[System.IO.File]::WriteAllText($configPath, $configJson, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host 'Checking the frozen engine also exposes the CLI/MCP command...'
 & $bridgePath --help | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'The frozen engine CLI failed its startup check.' }
+
+Write-Host 'Verifying staged MCP workflow updates in the frozen bridge...'
+uv run --locked python (Join-Path $appRoot 'scripts\check_frozen_mcp.py') $versionedBridgePath
+if ($LASTEXITCODE -ne 0) { throw 'The frozen MCP live workflow acceptance check failed.' }
 
 Write-Host 'Building the Windows NSIS installer...'
 $tauri = Join-Path $appRoot 'node_modules\.bin\tauri.cmd'
@@ -34,7 +47,6 @@ if (-not (Test-Path $tauri)) { throw 'Run npm ci before building the Windows ins
 & $tauri build --bundles nsis
 if ($LASTEXITCODE -ne 0) { throw 'Tauri failed to build the NSIS installer.' }
 
-$version = (Get-Content (Join-Path $appRoot 'package.json') -Raw | ConvertFrom-Json).version
 $installer = Get-ChildItem (Join-Path $appRoot 'src-tauri\target\release\bundle\nsis') -Filter "*$version*x64-setup.exe" | Select-Object -First 1
 if (-not $installer) { throw 'Tauri reported success but no NSIS setup executable was produced.' }
 $releaseDir = Join-Path $appRoot 'release'

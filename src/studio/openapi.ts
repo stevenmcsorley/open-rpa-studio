@@ -1,13 +1,17 @@
 import { parse } from 'yaml';
+import type { ApiConnectionProfile } from './bridge';
 
 export type OpenApiParameter={name:string;in:'path'|'query'|'header';required:boolean;variable:string;description?:string};
 export type ApiResponseField={name:string;path:string};
 export type OpenApiResponseMapping={responseCode:string;itemsPointer:string;fields:ApiResponseField[]};
 export type ApiResponseMapping=OpenApiResponseMapping&{result:string;maxItems:number};
-export type OpenApiOperation={key:string;name:string;method:'GET'|'POST'|'PUT'|'PATCH';path:string;server:string;parameters:OpenApiParameter[];headers:Record<string,string>;query:Record<string,string>;body?:string;contentType?:string;responseMapping?:OpenApiResponseMapping};
+export type OpenApiAuthHint={name:string;kind:'bearer'|'api_key_header'|'oauth_client_credentials'|'oauth_authorization_code'|'unsupported';detail:string;headerName?:string;tokenUrl?:string;authorizationUrl?:string;scopes?:string[]};
+export type OpenApiSecurityAlternative={schemes:OpenApiAuthHint[]};
+export type OpenApiOperation={key:string;name:string;method:'GET'|'POST'|'PUT'|'PATCH'|'DELETE';path:string;server:string;parameters:OpenApiParameter[];headers:Record<string,string>;query:Record<string,string>;securityAlternatives?:OpenApiSecurityAlternative[];body?:string;contentType?:string;responseMapping?:OpenApiResponseMapping};
 export type OpenApiImport={title:string;version:string;operations:OpenApiOperation[];warnings:string[]};
+export type OpenApiConnectionSeed=Omit<ApiConnectionProfile,'id'|'credentialStored'|'clientSecretStored'>;
 type Obj=Record<string,any>;
-const METHODS=['get','post','put','patch'] as const;
+const METHODS=['get','post','put','patch','delete'] as const;
 const MAX_SPEC_BYTES=2_000_000;
 
 function obj(value:unknown):value is Obj{return !!value&&typeof value==='object'&&!Array.isArray(value)}
@@ -91,6 +95,36 @@ function responseMapping(operation:Obj,root:Obj,method:string,path:string,warnin
     return {responseCode:code,itemsPointer:arrays[0].itemsPointer,fields};
   }catch(error){warnings.push(`${label}: response mapping was not imported: ${String(error)}`);return}
 }
+function securityAlternatives(operation:Obj,root:Obj,label:string,warnings:string[]):OpenApiSecurityAlternative[]|undefined{
+  const requirements=Array.isArray(operation.security)?operation.security:Array.isArray(root.security)?root.security:undefined;
+  if(requirements===undefined)return;
+  const schemes=obj(root.components)&&obj(root.components.securitySchemes)?root.components.securitySchemes:{};
+  return requirements.slice(0,20).map((requirement,index)=>{
+    if(!obj(requirement)){warnings.push(`${label}: ignored malformed OpenAPI security alternative ${index+1}.`);return {schemes:[]}}
+    const hints:OpenApiAuthHint[]=[];
+    for(const name of Object.keys(requirement).slice(0,20)){
+      let scheme:unknown;
+      try{scheme=resolveRef(root,schemes[name])}catch(error){warnings.push(`${label}: security scheme ${name} could not be resolved: ${String(error)}`);hints.push({name,kind:'unsupported',detail:'Unresolved security scheme'});continue}
+      if(!obj(scheme)){hints.push({name,kind:'unsupported',detail:'Security scheme is missing'});continue}
+      const requiredScopes=Array.isArray(requirement[name])?requirement[name].filter((scope:unknown):scope is string=>typeof scope==='string').slice(0,50):[];
+      if(scheme.type==='http'&&String(scheme.scheme).toLowerCase()==='bearer')hints.push({name,kind:'bearer',detail:'Bearer token'});
+      else if(scheme.type==='apiKey'&&scheme.in==='header'&&typeof scheme.name==='string'&&/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(scheme.name)&&!['authorization','cookie','set-cookie','host','connection','content-length','transfer-encoding','proxy-authorization','content-type'].includes(scheme.name.toLowerCase()))hints.push({name,kind:'api_key_header',detail:`API key in ${scheme.name}`,headerName:scheme.name});
+      else if(scheme.type==='oauth2'&&obj(scheme.flows)&&obj(scheme.flows.clientCredentials)){
+        const flow=scheme.flows.clientCredentials;let validTokenUrl=false;
+        if(typeof flow.tokenUrl==='string'){try{const parsed=new URL(flow.tokenUrl);validTokenUrl=parsed.protocol==='https:'&&!parsed.username&&!parsed.password&&!parsed.search&&!parsed.hash}catch{/* Relative and malformed token URLs need manual resolution before connection setup. */}}
+        if(!validTokenUrl)hints.push({name,kind:'unsupported',detail:'OAuth client-credentials token URL is missing or incompatible with saved connections; configure an absolute public HTTPS URL without query or fragment'});
+        else hints.push({name,kind:'oauth_client_credentials',detail:'OAuth 2.0 client credentials',tokenUrl:flow.tokenUrl,scopes:requiredScopes});
+      }else if(scheme.type==='oauth2'&&obj(scheme.flows)&&obj(scheme.flows.authorizationCode)){
+        const flow=scheme.flows.authorizationCode;let validAuthorizationUrl=false,validTokenUrl=false;
+        if(typeof flow.authorizationUrl==='string'){try{const parsed=new URL(flow.authorizationUrl);validAuthorizationUrl=parsed.protocol==='https:'&&!parsed.username&&!parsed.password&&!parsed.search&&!parsed.hash}catch{/* Dynamic endpoints require manual correction. */}}
+        if(typeof flow.tokenUrl==='string'){try{const parsed=new URL(flow.tokenUrl);validTokenUrl=parsed.protocol==='https:'&&!parsed.username&&!parsed.password&&!parsed.search&&!parsed.hash}catch{/* Dynamic endpoints require manual correction. */}}
+        if(!validAuthorizationUrl||!validTokenUrl)hints.push({name,kind:'unsupported',detail:'OAuth authorization-code URLs are missing or incompatible; configure absolute public HTTPS authorization and token URLs'});
+        else hints.push({name,kind:'oauth_authorization_code',detail:'OAuth 2.0 authorization code with PKCE',authorizationUrl:flow.authorizationUrl,tokenUrl:flow.tokenUrl,scopes:requiredScopes});
+      }else hints.push({name,kind:'unsupported',detail:`${String(scheme.type??'Unknown')} authentication is not supported by saved API connections`});
+    }
+    return {schemes:hints};
+  });
+}
 
 export function parseOpenApi(text:string):OpenApiImport{
   if(typeof text!=='string'||new TextEncoder().encode(text).byteLength>MAX_SPEC_BYTES)throw new Error('OpenAPI file must be no larger than 2 MB');
@@ -98,20 +132,18 @@ export function parseOpenApi(text:string):OpenApiImport{
   if(!obj(root)||typeof root.openapi!=='string'||!/^3\.(0|1)\./.test(root.openapi))throw new Error('Import requires an OpenAPI 3.0 or 3.1 document');
   if(!obj(root.paths))throw new Error('OpenAPI document has no paths object');
   const warnings:string[]=[];const operations:OpenApiOperation[]=[];
-  if(root.security||obj(root.components)&&root.components.securitySchemes)warnings.push('Authentication schemes are not imported; configure authentication on the saved API connection.');
   pathsLoop:for(const [path,pathValue] of Object.entries(root.paths)){
     if(!path.startsWith('/')||path.length>1024||!obj(pathValue))continue;
     let pathItem:Obj;try{pathItem=resolveRef(root,pathValue) as Obj;if(!obj(pathItem))continue}catch(error){warnings.push(String(error));continue;}
     const common=Array.isArray(pathItem.parameters)?pathItem.parameters:[];
     for(const methodKey of METHODS){const raw=pathItem[methodKey];if(!obj(raw))continue;const operation=resolveRef(root,raw) as Obj;if(!obj(operation))continue;
-      if(operation.security)warnings.push('Operation-specific security schemes are not imported; configure authentication on the saved API connection.');
       if(operations.length>=500){warnings.push('Only the first 500 supported operations are imported.');break pathsLoop;}
       const candidates=[...common,...(Array.isArray(operation.parameters)?operation.parameters:[])];const merged=new Map<string,Obj>();
       for(const candidate of candidates){try{const parameter=resolveRef(root,candidate);if(!obj(parameter)||typeof parameter.name!=='string'||!['path','query','header'].includes(parameter.in))continue;merged.set(`${parameter.in}:${parameter.name}`,parameter);}catch(error){warnings.push(`${methodKey.toUpperCase()} ${path}: ${String(error)}`)}}
       const parameters:OpenApiParameter[]=[];const query:Record<string,string>={};const headers:Record<string,string>={};const variableOwners=new Set<string>();
       const locationCounts={path:0,query:0,header:0};
       for(const parameter of merged.values()){
-        if(parameter.in==='header'&&['authorization','cookie','set-cookie','host','proxy-authorization'].includes(parameter.name.toLowerCase())){warnings.push(`${methodKey.toUpperCase()} ${path}: sensitive header parameter ${parameter.name} was not imported; configure credentials on the saved API connection.`);continue;}
+        if(parameter.in==='header'&&(['authorization','cookie','set-cookie','host','proxy-authorization'].includes(parameter.name.toLowerCase())||/(token|secret|api[-_]?key|apikey|password|credential)/i.test(parameter.name))){warnings.push(`${methodKey.toUpperCase()} ${path}: sensitive header parameter ${parameter.name} was not imported; configure credentials on the saved API connection.`);continue;}
         const location=parameter.in as OpenApiParameter['in'];const limit=location==='query'?100:location==='header'?49:50;if(locationCounts[location]>=limit){warnings.push(`${methodKey.toUpperCase()} ${path}: skipped ${location} parameters beyond the ${limit}-parameter import limit.`);continue;}locationCounts[location]++;
         const variableBase=variableName(parameter.name);let variable=`${location==='path'?'path':location==='query'?'query':'header'}${variableBase[0].toUpperCase()}${variableBase.slice(1)}`;let suffix=2;while(variableOwners.has(variable.toLowerCase()))variable=`${variableBase}${suffix++}`;variableOwners.add(variable.toLowerCase());
         const info:OpenApiParameter={name:parameter.name,in:location,required:parameter.required===true||location==='path',variable,...(typeof parameter.description==='string'?{description:parameter.description.slice(0,500)}:{})};parameters.push(info);
@@ -125,10 +157,11 @@ export function parseOpenApi(text:string):OpenApiImport{
       if(body&&contentType)headers['Content-Type']=contentType;
       const method=methodKey.toUpperCase() as OpenApiOperation['method'];const name=String(operation.summary??operation.operationId??`${method} ${path}`).slice(0,200);const key=`${method} ${path}`;
       const mappedResponse=responseMapping(operation,root,methodKey,path,warnings);
-      operations.push({key,name,method,path,server:serverFor(root,pathItem,operation),parameters,headers,query,...(body!==undefined?{body}:{}),...(contentType?{contentType}:{}),...(mappedResponse?{responseMapping:mappedResponse}:{})});
+      const auth=securityAlternatives(operation,root,key,warnings);
+      operations.push({key,name,method,path,server:serverFor(root,pathItem,operation),parameters,headers,query,...(auth?{securityAlternatives:auth}:{}),...(body!==undefined?{body}:{}),...(contentType?{contentType}:{}),...(mappedResponse?{responseMapping:mappedResponse}:{})});
     }
   }
-  if(!operations.length)throw new Error('No supported GET/POST/PUT/PATCH operations were found in this OpenAPI document');
+  if(!operations.length)throw new Error('No supported GET/POST/PUT/PATCH/DELETE operations were found in this OpenAPI document');
   return {title:typeof root.info?.title==='string'?root.info.title:'Imported OpenAPI',version:typeof root.info?.version==='string'?root.info.version:'',operations,warnings:[...new Set(warnings)].slice(0,50)};
 }
 
@@ -147,6 +180,25 @@ export function configureOpenApiOperation(operation:OpenApiOperation,existingVar
   const required=parameters.filter(parameter=>parameter.required);
   let response:ApiResponseMapping|undefined;
   if(operation.responseMapping){let result='apiItems';let suffix=2;while(used.has(result.toLowerCase()))result=`apiItems${suffix++}`;used.add(result.toLowerCase());response={...operation.responseMapping,result,maxItems:10_000};}
-  const patch={...configureFromOpenApi({...operation,parameters:required}),...(response?{responseMapping:response}:{})};
+  const patch={...configureFromOpenApi({...operation,parameters:required}),responseMapping:response,pagination:undefined,...(operation.method!=='GET'||operation.body!==undefined?{retryPolicy:undefined}:{})};
   return {patch,parameters,variables:required.map(parameter=>({name:parameter.variable,type:'string' as const,value:''}))};
+}
+
+export function connectionSeedFromOpenApi(operation:OpenApiOperation,title='Imported API'): {profile:OpenApiConnectionSeed;warning?:string}{
+  let server:URL;
+  try{server=new URL(operation.server)}catch{throw new Error('The OpenAPI operation has no absolute HTTPS server URL to use as a connection base.')}
+  if(server.protocol!=='https:'||server.username||server.password||server.search||server.hash||/[{}]/.test(server.href))throw new Error('The OpenAPI server must be an absolute HTTPS URL without credentials, query, fragment, or template variables.');
+  const profile:OpenApiConnectionSeed={name:`${title.trim()||'Imported API'} (${server.host})`.slice(0,100),baseUrl:server.href.replace(/\/$/,''),authType:'none',apiKeyHeader:'X-API-Key',headers:{},minIntervalSeconds:0,
+    authorizationUrl:'https://auth.example.com/oauth/authorize',tokenUrl:'https://auth.example.com/oauth/token',clientId:'',scope:'',audience:'',clientAuthMethod:'client_secret_basic'};
+  const alternatives=operation.securityAlternatives;
+  if(!alternatives)return {profile};
+  if(alternatives.length===0)return {profile};
+  if(alternatives.length!==1||alternatives[0].schemes.length!==1)return {profile,warning:'The specification declares alternative or combined authentication schemes. No authentication was guessed; choose a supported method in the connection form.'};
+  const scheme=alternatives[0].schemes[0];
+  if(scheme.kind==='bearer')profile.authType='bearer';
+  else if(scheme.kind==='api_key_header'&&scheme.headerName){profile.authType='api_key_header';profile.apiKeyHeader=scheme.headerName;}
+  else if(scheme.kind==='oauth_client_credentials'&&scheme.tokenUrl){profile.authType='oauth_client_credentials';profile.tokenUrl=scheme.tokenUrl;profile.scope=(scheme.scopes??[]).join(' ');}
+  else if(scheme.kind==='oauth_authorization_code'&&scheme.tokenUrl&&scheme.authorizationUrl){profile.authType='oauth_authorization_code';profile.tokenUrl=scheme.tokenUrl;profile.authorizationUrl=scheme.authorizationUrl;profile.scope=(scheme.scopes??[]).join(' ');profile.clientAuthMethod='none';}
+  else return {profile,warning:`The declared ${scheme.detail||'authentication'} scheme cannot be preconfigured. Choose a supported method in the connection form.`};
+  return {profile};
 }

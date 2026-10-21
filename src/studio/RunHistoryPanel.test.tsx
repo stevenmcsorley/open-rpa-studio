@@ -29,6 +29,14 @@ describe('RunHistoryPanel',()=>{
     expect(empty).toContain('No saved runs yet');
   });
 
+  it('identifies Codex MCP runs and distinguishes a live run from shutdown recovery',()=>{
+    const live:RunHistoryDetail={...interrupted,runId:'mcp-run-1234',status:'running',endedAt:null,recoveryNote:null,source:'MCP',result:{status:'running',activities:{'log-hello':{status:'running',type:'log'}}},events:[{event:'activity-started',activityId:'log-hello',type:'log'}]};
+    const html=renderToStaticMarkup(createElement(RunHistoryPanel,{runs:[live],selectedId:live.runId,detail:live,loading:false,onSelect:()=>undefined}));
+    expect(html).toContain('Codex MCP');
+    expect(html).toContain('live run');
+    expect(html).not.toContain('still open at shutdown');
+  });
+
   it('exposes accessible search and status controls',()=>{
     const html=renderToStaticMarkup(createElement(RunHistoryPanel,{runs:[interrupted],selectedId:'',detail:null,loading:false,onSelect:()=>undefined}));
     expect(html).toContain('aria-label="Search run history"');

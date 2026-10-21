@@ -19,7 +19,7 @@ MAX_FILE_BYTES = 1_000_000
 def _normalize(value: Any, *, require_id: bool = False) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError("AI connection profile must be an object")
-    allowed = {"id", "name", "provider", "baseUrl", "model", "credentialService", "credentialUsername"}
+    allowed = {"id", "name", "provider", "baseUrl", "model", "credentialService", "credentialUsername", "credentialMode", "credentialHeader"}
     if set(value) - allowed:
         raise ValueError("AI connection profile contains unsupported fields")
     profile_id = value.get("id")
@@ -56,8 +56,18 @@ def _normalize(value: Any, *, require_id: bool = False) -> dict[str, str]:
         raise ValueError("Credential vault references must be at most 200 characters")
     if spec["requiresCredential"] and (not service.strip() or not username.strip()):
         raise ValueError("Remote provider profiles require OS vault service and username references")
+    credential_mode=value.get("credentialMode","bearer")
+    credential_header=value.get("credentialHeader","api-key")
+    if not isinstance(credential_mode,str) or credential_mode not in {"bearer","api_key_header"}:
+        raise ValueError("AI credential mode must be bearer or api_key_header")
+    if credential_mode!="bearer":
+        from .ai_providers import _provider_auth_header
+        _provider_auth_header(provider,credential_mode,credential_header)
+    elif not isinstance(credential_header,str) or len(credential_header)>80:
+        raise ValueError("AI API-key header name must be at most 80 characters")
     return {"id": profile_id, "name": name.strip(), "provider": provider, "baseUrl": base_url.rstrip("/"),
-            "model": model.strip(), "credentialService": service.strip(), "credentialUsername": username.strip()}
+            "model": model.strip(), "credentialService": service.strip(), "credentialUsername": username.strip(),
+            "credentialMode":credential_mode,"credentialHeader":credential_header.strip()}
 
 
 def _read(path: Path) -> list[dict[str, str]]:
@@ -121,6 +131,16 @@ def save_profile(path: Path, value: Any) -> dict[str, str]:
     if matching is None:
         profiles.append(profile)
     else:
+        previous = profiles[matching]
+        security_binding = ("provider", "baseUrl", "credentialMode", "credentialHeader")
+        same_vault_reference = (previous["credentialService"], previous["credentialUsername"]) == (
+            profile["credentialService"], profile["credentialUsername"])
+        changed_binding = any(previous[key] != profile[key] for key in security_binding)
+        has_vault_reference = bool(previous["credentialService"] and previous["credentialUsername"])
+        if changed_binding and same_vault_reference and has_vault_reference:
+            raise ValueError(
+                "Changing an AI provider, endpoint, or credential header cannot reuse the same vault reference on an existing profile; create a new profile or explicitly choose a different credential reference"
+            )
         profiles[matching] = profile
     _write(path, profiles)
     return profile

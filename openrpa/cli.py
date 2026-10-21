@@ -16,6 +16,7 @@ def main() -> int:
             cmd.add_argument("--workflow")
             cmd.add_argument("--allow-network", action="store_true")
             cmd.add_argument("--allow-desktop", action="store_true")
+            cmd.add_argument("--allow-destructive", action="store_true", help="Permit destructive file and API DELETE activities for this run")
     mcp = sub.add_parser("mcp", help="Expose one local project to an AI client over stdio MCP")
     mcp.add_argument("project", help="Project directory or project.json; fixed for this server process")
     mcp.add_argument("--allow-edit", action="store_true", help="Expose validated workflow replacement with an expected SHA-256")
@@ -23,7 +24,7 @@ def main() -> int:
     mcp.add_argument("--allow-network", action="store_true", help="Permit HTTP activities if execution is enabled")
     mcp.add_argument("--allow-desktop", action="store_true", help="Permit desktop activities if execution is enabled")
     mcp.add_argument("--allow-credentials", action="store_true", help="Permit reading OS-vault credentials if execution is enabled")
-    mcp.add_argument("--allow-destructive", action="store_true", help="Permit file delete/move activities if execution is enabled")
+    mcp.add_argument("--allow-destructive", action="store_true", help="Permit file delete/move and API DELETE activities if execution is enabled")
     pack = sub.add_parser("pack", help="Create a deterministic .orpa project package")
     pack.add_argument("project")
     pack.add_argument("output")
@@ -76,7 +77,7 @@ def main() -> int:
             print(json.dumps({"valid": not problems, "problems": problems}, indent=2))
             return 0 if not problems else 2
         from .engine import RunOptions
-        result = run_project(project, root, args.workflow, options=RunOptions(allow_network=args.allow_network,allow_desktop=args.allow_desktop))
+        result = run_project(project, root, args.workflow, options=RunOptions(allow_network=args.allow_network,allow_desktop=args.allow_desktop,allow_destructive=args.allow_destructive))
         print(json.dumps(result.__dict__, indent=2, ensure_ascii=False, default=str))
         return 0 if result.status == "succeeded" else 1
     except WorkflowError as exc:

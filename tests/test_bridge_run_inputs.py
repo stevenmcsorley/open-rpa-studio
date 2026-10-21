@@ -70,7 +70,23 @@ def test_desktop_bridge_reads_and_clears_validated_mcp_live_draft(tmp_path:Path,
     assert "error" in messages.get_nowait() and target.read_text(encoding="utf-8")=="keep"
 
 
-def test_mcp_staged_snapshot_flows_into_studio_bridge_and_commit_clears_it(tmp_path:Path,monkeypatch):
+def test_opening_project_publishes_the_active_project_for_mcp(tmp_path:Path,monkeypatch):
+    root=tmp_path/"selected-project";root.mkdir();(root/"workflows").mkdir()
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[]}
+    project={"format":"openrpa.project","formatVersion":1,"name":"Selected project","main":"Main","workflows":{"Main":"workflows/main.json"}}
+    (root/"project.json").write_text(json.dumps(project),encoding="utf-8")
+    (root/"workflows/main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    monkeypatch.setenv("OPENRPA_ACTIVE_PROJECT_FILE",str(tmp_path/"app-data"/"active-project.json"))
+    messages=[];monkeypatch.setattr(bridge,"send",messages.append);monkeypatch.setattr(bridge,"history",RunHistory(tmp_path/"history.sqlite3"))
+
+    bridge.handle({"id":1,"method":"project.open","params":{"path":str(root/"project.json")}})
+
+    assert messages[-1]["result"]["project"]["name"]=="Selected project"
+    from openrpa.active_project import read_active_project
+    assert read_active_project()==root.resolve()
+
+
+def test_mcp_staged_snapshot_flows_into_studio_bridge_and_commit_remains_visible(tmp_path:Path,monkeypatch):
     monkeypatch.setenv("OPENRPA_DATA_DIR",str(tmp_path/"app-data"))
     replies=[];monkeypatch.setattr(bridge,"send",replies.append)
     root=tmp_path/"shared";root.mkdir();(root/"workflows").mkdir()
@@ -86,4 +102,6 @@ def test_mcp_staged_snapshot_flows_into_studio_bridge_and_commit_clears_it(tmp_p
     current=server.handle({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"openrpa_read_workflow","arguments":{"name":"Main"}}})["result"]["structuredContent"]
     final={**draft,"activities":[*draft["activities"],{"id":"done","type":"log","level":"info","message":"complete"}]}
     updated=server.handle({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"openrpa_update_workflow","arguments":{"name":"Main","expectedSha256":current["sha256"],"workflow":final}}})["result"]["structuredContent"]
-    assert updated["updated"] is True and not (root/".openrpa/mcp-live-draft.json").exists()
+    assert updated["updated"] is True
+    saved_preview=json.loads((root/".openrpa/mcp-live-draft.json").read_text(encoding="utf-8"))
+    assert saved_preview["status"]=="saved" and saved_preview["workflow"]["activities"][-1]["message"]=="complete"

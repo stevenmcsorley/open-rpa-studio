@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import datetime
+import email.utils
 import math
 import shutil
 import time
@@ -14,6 +15,9 @@ import zipfile
 import sqlite3
 import subprocess
 import base64
+import re
+import unicodedata
+from difflib import SequenceMatcher
 from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
 from pathlib import Path
@@ -45,10 +49,138 @@ def _json_pointer_get(value: Any, pointer: str) -> Any:
     return current
 
 
+def _retry_after_seconds(headers: Any, *, now: datetime.datetime | None = None) -> float | None:
+    """Parse a bounded Retry-After value without exposing the raw header."""
+    if not isinstance(headers, dict):
+        return None
+    raw = next((value for key, value in headers.items()
+                if isinstance(key, str) and key.lower() == "retry-after"), None)
+    if not isinstance(raw, str) or len(raw) > 128:
+        return None
+    value = raw.strip()
+    if value.isascii() and value.isdigit():
+        try:
+            return min(float(int(value)), 30.0)
+        except (ValueError, OverflowError):
+            return None
+    try:
+        retry_at = email.utils.parsedate_to_datetime(value)
+        if retry_at is None:
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=datetime.timezone.utc)
+        current = now or datetime.datetime.now(datetime.timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=datetime.timezone.utc)
+        seconds = (retry_at - current).total_seconds()
+        if not math.isfinite(seconds):
+            return None
+        return min(max(0.0, seconds), 30.0)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _inspect_json_shape(value: Any, *, max_depth: int = 6, max_properties: int = 50,
+                        max_array_samples: int = 3, max_nodes: int = 500) -> dict[str, Any]:
+    """Return a bounded, value-free JSON shape and object-array pointer candidates."""
+    array_pointers: list[str] = []
+    nodes = 0
+    truncated = False
+
+    def escape(token: str) -> str:
+        return token.replace("~", "~0").replace("/", "~1")
+
+    def visit(item: Any, pointer: str, depth: int) -> dict[str, Any]:
+        nonlocal nodes, truncated
+        nodes += 1
+        if nodes > max_nodes:
+            truncated = True
+            return {"type": "truncated"}
+        if item is None:
+            return {"type": "null"}
+        if isinstance(item, bool):
+            return {"type": "boolean"}
+        if isinstance(item, str):
+            return {"type": "string"}
+        if isinstance(item, (int, float)):
+            return {"type": "number"}
+        if depth >= max_depth:
+            if isinstance(item, (dict, list)) and item:
+                truncated = True
+                return {"type": "object" if isinstance(item, dict) else "array", "truncated": True}
+        if isinstance(item, dict):
+            keys = sorted(item, key=lambda key: str(key))
+            if len(keys) > max_properties:
+                truncated = True
+                keys = keys[:max_properties]
+            return {"type": "object", "properties": {
+                str(key): visit(item[key], pointer + "/" + escape(str(key)), depth + 1)
+                for key in keys
+            }}
+        if isinstance(item, list):
+            object_items = [entry for entry in item[:max_array_samples] if isinstance(entry, dict)]
+            if object_items and pointer not in array_pointers:
+                array_pointers.append(pointer)
+            if len(item) > max_array_samples:
+                truncated = True
+            samples = item[:max_array_samples]
+            if not samples:
+                return {"type": "array", "items": {"type": "unknown"}}
+            shapes = [visit(entry, pointer + "/" + str(index), depth + 1) for index, entry in enumerate(samples)]
+            first = merge_shapes(shapes)
+            if first.get("type") == "object":
+                first["presentInAllSamples"] = sorted(set.intersection(*(set(shape.get("properties", {})) for shape in shapes))) if shapes else []
+            return {"type": "array", "items": first, "sampledItems": len(samples)}
+        return {"type": "unknown"}
+
+    def merge_shapes(shapes: list[dict[str, Any]]) -> dict[str, Any]:
+        nonlocal truncated
+        if not shapes:
+            return {"type": "unknown"}
+        kinds={shape.get("type","unknown") for shape in shapes}
+        if kinds=={"object"}:
+            keys=sorted({key for shape in shapes for key in shape.get("properties",{})})
+            if len(keys)>max_properties:
+                truncated=True
+                keys=keys[:max_properties]
+            return {"type":"object","properties":{
+                key:merge_shapes([shape["properties"][key] for shape in shapes if key in shape.get("properties",{})])
+                for key in keys
+            }}
+        if kinds=={"array"}:
+            return {"type":"array","items":merge_shapes([shape.get("items",{"type":"unknown"}) for shape in shapes]),"sampledItems":sum(shape.get("sampledItems",0) for shape in shapes)}
+        if len(kinds)==1:
+            return shapes[0]
+        unique={json.dumps(shape,ensure_ascii=False,sort_keys=True,separators=(",",":")):shape for shape in shapes}
+        return {"type":"mixed","alternatives":[unique[key] for key in sorted(unique)]}
+
+    schema = visit(value, "", 0)
+    return {"schema": schema, "objectArrayPointers": array_pointers, "truncated": truncated}
+
+
+def _normalize_accessible_name(value: str) -> str:
+    normalized=unicodedata.normalize("NFKC",value).casefold()
+    return " ".join(re.findall(r"[\w]+",normalized,flags=re.UNICODE))
+
+
+def _accessible_role_name(snapshot: str, role: str) -> str:
+    if not isinstance(snapshot,str):
+        return ""
+    match=re.match(r"^\s*-\s+"+re.escape(role)+r'\s+"((?:[^"\\]|\\.)*)"(?:\s*:|\s*$)',snapshot)
+    if not match:
+        return ""
+    try:
+        value=json.loads('"'+match.group(1)+'"')
+    except (TypeError,ValueError,json.JSONDecodeError):
+        return ""
+    return value if isinstance(value,str) else ""
+
+
 @dataclass
 class RunOptions:
     allow_network: bool = False
     allow_desktop: bool = False
+    allow_destructive: bool = False
     extra_file_roots: tuple[Path, ...] = ()
     cancel: Callable[[], bool] = lambda: False
     event: Callable[[dict[str, Any]], None] = lambda _e: None
@@ -89,7 +221,12 @@ class WorkflowEngine:
         self._browser_runtime: Any = None
         self._browser: Any = None
         self._browser_context: Any = None
+        self._browser_persistent_profile = False
         self._browser_page: Any = None
+        self._browser_tabs: dict[str, Any] = {}
+        self._browser_unclaimed_popups: list[Any] = []
+        self._browser_popup_counter = 0
+        self._browser_responses: dict[Any, list[dict[str, Any]]] = {}
         self._secret_values: set[str] = set()
         self._api_last_request_at: dict[str, float] = {}
         self._api_tokens: dict[str, tuple[str,float]] = {}
@@ -1374,6 +1511,9 @@ class WorkflowEngine:
             self.options.audit("file.delete",{"activityId":a["id"],"path":self._audit_path(target)})
 
     def _api_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
+        if a.get("pagination") is not None:
+            self._api_paginate(a,v,a["pagination"])
+            return
         if not self.options.allow_network:
             raise WorkflowError("API access requires explicit per-run network permission", a["id"], "network-permission-denied")
         if self.options.api_connections_path is None:
@@ -1407,8 +1547,10 @@ class WorkflowEngine:
             query_items.append((key,"" if resolved is None else str(resolved)))
         url=urlunsplit((target_parts.scheme,target_parts.netloc,target_parts.path,urlencode(query_items,doseq=False),""))
         method=str(a.get("method","GET")).upper()
-        if method not in {"GET","POST","PUT","PATCH"}:
-            raise WorkflowError("API Request supports GET, POST, PUT, and PATCH",a["id"],"api-method-invalid")
+        if method not in {"GET","POST","PUT","PATCH","DELETE"}:
+            raise WorkflowError("API Request supports GET, POST, PUT, PATCH, and DELETE",a["id"],"api-method-invalid")
+        if method=="DELETE" and not self.options.allow_destructive:
+            raise WorkflowError("API DELETE requires explicit destructive permission for this run",a["id"],"destructive-permission-denied")
         raw_headers=a.get("headers",{})
         if not isinstance(raw_headers,dict) or len(raw_headers)>50:
             raise WorkflowError("API request headers must be an object with at most 50 entries",a["id"],"api-headers-invalid")
@@ -1441,16 +1583,67 @@ class WorkflowEngine:
                         token_host=urlsplit(profile["tokenUrl"]).hostname
                         self.options.audit("api.oauth.token",{"connectionId":profile["id"],"host":token_host})
                     self._secret_values.add(token);headers["Authorization"]="Bearer "+token
+            elif profile["authType"]=="oauth_authorization_code":
+                client_secret=api_connections.read_secret(profile["id"]) if profile["clientAuthMethod"]!="none" else ""
+                if client_secret:self._secret_values.add(client_secret)
+                try:token=api_connections.authorization_code_access_token(profile,restricted_http_request,client_secret,min(float(a.get("timeoutSeconds",20)),20.0))
+                except EgressDenied as exc:raise WorkflowError(str(exc),a["id"],"http-egress-denied") from exc
+                except (OSError,TimeoutError,ValueError,RuntimeError) as exc:raise WorkflowError(f"OAuth authorization failed: {exc}",a["id"],"api-oauth-authorization-failed") from exc
+                self._secret_values.add(token);headers["Authorization"]="Bearer "+token
+                self.options.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname,"grant":"authorization_code"})
             body=a.get("body")
             if body is not None:body=str(interpolate(body,v)).encode("utf-8")
-            wait=max(0.0,profile["minIntervalSeconds"]-(time.monotonic()-self._api_last_request_at.get(profile["id"],0.0)))
-            until=time.monotonic()+wait
-            while time.monotonic()<until:
-                self._check_cancel();time.sleep(min(.05,until-time.monotonic()))
-            self._check_cancel()
-            self.options.audit("api.request",{"activityId":a["id"],"connectionId":profile["id"],"method":method,"host":target_parts.hostname})
-            response=restricted_http_request(url,method,headers,body,float(a.get("timeoutSeconds",20)),int(a.get("maxResponseBytes",5_000_000)))
-            self._api_last_request_at[profile["id"]]=time.monotonic()
+            retry=a.get("retryPolicy") or {}
+            if not isinstance(retry,dict):raise WorkflowError("API retryPolicy must be an object",a["id"],"api-retry-policy")
+            attempts_value=retry.get("maxAttempts",1);delay_value=retry.get("delaySeconds",.5);backoff_value=retry.get("backoffFactor",2)
+            if not isinstance(attempts_value,int) or isinstance(attempts_value,bool) or not 1<=attempts_value<=5:
+                raise WorkflowError("API retry maxAttempts must be from 1 to 5",a["id"],"api-retry-policy")
+            if not isinstance(delay_value,(int,float)) or isinstance(delay_value,bool) or not math.isfinite(delay_value) or not 0<=delay_value<=10:
+                raise WorkflowError("API retry delaySeconds must be from 0 to 10",a["id"],"api-retry-policy")
+            if not isinstance(backoff_value,(int,float)) or isinstance(backoff_value,bool) or not math.isfinite(backoff_value) or not 1<=backoff_value<=3:
+                raise WorkflowError("API retry backoffFactor must be from 1 to 3",a["id"],"api-retry-policy")
+            max_attempts=attempts_value;base_delay=float(delay_value);backoff=float(backoff_value)
+            if max_attempts>1 and (method!="GET" or body is not None):
+                raise WorkflowError("Automatic API retries require GET without a request body",a["id"],"api-retry-safety")
+            transient_statuses={408,425,429,500,502,503,504}
+            response=None
+            for attempt in range(1,max_attempts+1):
+                wait=max(0.0,profile["minIntervalSeconds"]-(time.monotonic()-self._api_last_request_at.get(profile["id"],0.0)))
+                until=time.monotonic()+wait
+                while time.monotonic()<until:
+                    self._check_cancel();time.sleep(min(.05,until-time.monotonic()))
+                self._check_cancel()
+                audit={"activityId":a["id"],"connectionId":profile["id"],"method":method,"host":target_parts.hostname}
+                if max_attempts>1:audit.update({"attempt":attempt,"maxAttempts":max_attempts})
+                self.options.audit("api.request",audit)
+                try:
+                    response=restricted_http_request(url,method,headers,body,float(a.get("timeoutSeconds",20)),int(a.get("maxResponseBytes",5_000_000)))
+                    self._api_last_request_at[profile["id"]]=time.monotonic()
+                except EgressDenied:
+                    raise
+                except (OSError,TimeoutError) as exc:
+                    self._api_last_request_at[profile["id"]]=time.monotonic()
+                    if attempt>=max_attempts:
+                        if max_attempts>1:self.options.audit("api.retry.exhausted",{"activityId":a["id"],"attempts":attempt,"reason":"transport-error","errorType":type(exc).__name__})
+                        raise
+                    delay=min(base_delay*(backoff**(attempt-1)),30.0)
+                    self.options.audit("api.retry",{"activityId":a["id"],"attempt":attempt,"maxAttempts":max_attempts,"reason":"transport-error","delaySeconds":delay})
+                    until=time.monotonic()+delay
+                    while time.monotonic()<until:
+                        self._check_cancel();time.sleep(min(.05,until-time.monotonic()))
+                    continue
+                status=response.get("status") if isinstance(response,dict) else None
+                if status not in transient_statuses:break
+                if attempt>=max_attempts:
+                    self.options.audit("api.retry.exhausted",{"activityId":a["id"],"attempts":attempt,"reason":"transient-http-status","status":status})
+                    break
+                retry_after=_retry_after_seconds(response.get("headers") if isinstance(response,dict) else None)
+                delay=retry_after if retry_after is not None else min(base_delay*(backoff**(attempt-1)),30.0)
+                self.options.audit("api.retry",{"activityId":a["id"],"attempt":attempt,"maxAttempts":max_attempts,"reason":"transient-http-status","status":status,"delaySeconds":delay,"delaySource":"retry-after" if retry_after is not None else "exponential-backoff"})
+                until=time.monotonic()+delay
+                while time.monotonic()<until:
+                    self._check_cancel();time.sleep(min(.05,until-time.monotonic()))
+            if response is None:raise WorkflowError("API request did not produce a response",a["id"],"api-request-empty-response")
             v[a.get("result","response")]=response
             mapping=a.get("responseMapping")
             if mapping is not None:
@@ -1497,41 +1690,230 @@ class WorkflowEngine:
             code="http-timeout" if isinstance(exc,TimeoutError) else "http-error"
             raise WorkflowError(f"API request failed: {exc}",a["id"],code) from exc
 
+    def _api_paginate(self, a: dict[str, Any], v: dict[str, Any], config: dict[str, Any]) -> None:
+        """Fetch bounded cursor or next-link pages through the normal connection path."""
+        if not self.options.allow_network:
+            raise WorkflowError("API access requires explicit per-run network permission",a["id"],"network-permission-denied")
+        if self.options.api_connections_path is None:
+            raise WorkflowError("API connections are unavailable in this execution environment",a["id"],"api-connections-unavailable")
+        from . import api_connections
+        try: profile=api_connections.get_profile(self.options.api_connections_path,str(a.get("connectionId","")))
+        except (OSError,ValueError) as exc: raise WorkflowError(str(exc),a["id"],"api-connection-not-found") from exc
+        strategy=config.get("strategy")
+        max_pages=int(config.get("maxPages",10));max_items=int(config.get("maxItems",10000));max_bytes=int(config.get("maxTotalBytes",5000000))
+        base=urlsplit(profile["baseUrl"].rstrip("/")+"/")
+        base_path=base.path.rstrip("/")
+        base_prefix=(base_path+"/") if base_path else "/"
+        page_path=str(a.get("path","/"));page_query=dict(a.get("query",{}));cursor_param=str(config.get("cursorParam",""))
+        current_url=urljoin(profile["baseUrl"].rstrip("/")+"/",page_path.lstrip("/"))
+        current_parts=urlsplit(current_url);initial_query=parse_qsl(current_parts.query,keep_blank_values=True)
+        for key,value in page_query.items():
+            resolved=interpolate(value,v) if isinstance(value,str) else value
+            if not isinstance(resolved,(dict,list,tuple)):initial_query.append((key,"" if resolved is None else str(resolved)))
+        current_url=urlunsplit((current_parts.scheme,current_parts.netloc,current_parts.path,urlencode(initial_query,doseq=False),""))
+        initial_cursor=page_query.get(cursor_param) if strategy=="cursor" else None
+        if isinstance(initial_cursor,str):initial_cursor=interpolate(initial_cursor,v)
+        seen_cursors={str(initial_cursor)} if isinstance(initial_cursor,(str,int)) and not isinstance(initial_cursor,bool) and str(initial_cursor) else set()
+        all_items=[];total_bytes=0;last_response=None;seen_links={current_url};more=False
+        page_result="__openrpa_internal_page_response__"
+        for page_number in range(max_pages):
+            self._check_cancel()
+            page=dict(a);page.pop("pagination",None);page.pop("responseMapping",None)
+            page["method"]="GET";page.pop("body",None);page["result"]=page_result
+            page["path"]=page_path;page["query"]=dict(page_query)
+            page_vars=dict(v)
+            self._api_activity(page,page_vars)
+            response=page_vars.get(page_result)
+            status=response.get("status") if isinstance(response,dict) else None
+            if not isinstance(status,int) or isinstance(status,bool) or not 200<=status<300:
+                raise WorkflowError("API pagination requires successful 2xx responses",a["id"],"api-pagination-status")
+            body_text=response.get("body")
+            if not isinstance(body_text,str):raise WorkflowError("API page response body is missing",a["id"],"api-pagination-json")
+            page_bytes=len(body_text.encode("utf-8"));total_bytes+=page_bytes
+            if total_bytes>max_bytes:raise WorkflowError("API pagination exceeded maxTotalBytes",a["id"],"api-pagination-byte-limit")
+            try:document=json.loads(body_text)
+            except (ValueError,TypeError) as exc:raise WorkflowError("API page response is not valid JSON",a["id"],"api-pagination-json") from exc
+            try:items=_json_pointer_get(document,config.get("itemsPointer",""))
+            except (KeyError,IndexError,ValueError,TypeError) as exc:raise WorkflowError("API pagination itemsPointer did not resolve",a["id"],"api-pagination-items-pointer") from exc
+            if not isinstance(items,list):raise WorkflowError("API pagination itemsPointer must select a JSON array",a["id"],"api-pagination-items-array")
+            if len(all_items)+len(items)>max_items:raise WorkflowError("API pagination exceeded maxItems",a["id"],"api-pagination-item-limit")
+            all_items.extend(items);last_response=response;more=False
+            if strategy=="cursor":
+                try:next_cursor=_json_pointer_get(document,config.get("cursorPointer",""))
+                except (KeyError,IndexError,ValueError,TypeError) as exc:raise WorkflowError("API pagination cursorPointer did not resolve",a["id"],"api-pagination-cursor-pointer") from exc
+                if next_cursor is None or next_cursor=="":break
+                if isinstance(next_cursor,bool) or not isinstance(next_cursor,(str,int)):
+                    raise WorkflowError("API pagination cursor must be a string, integer, or null",a["id"],"api-pagination-cursor-type")
+                token=str(next_cursor)
+                if not token or len(token)>2048:raise WorkflowError("API pagination cursor is empty or exceeds 2,048 characters",a["id"],"api-pagination-cursor-limit")
+                if token in seen_cursors:raise WorkflowError("API pagination detected a repeated cursor",a["id"],"api-pagination-cursor-loop")
+                seen_cursors.add(token);page_query=dict(a.get("query",{}));page_query[cursor_param]=token;more=True
+            elif strategy=="next_link":
+                try:next_link=_json_pointer_get(document,config.get("nextLinkPointer",""))
+                except (KeyError,IndexError,ValueError,TypeError) as exc:raise WorkflowError("API pagination nextLinkPointer did not resolve",a["id"],"api-pagination-next-link-pointer") from exc
+                if next_link is None or next_link=="":break
+                if not isinstance(next_link,str) or len(next_link)>8192:raise WorkflowError("API pagination next link must be text no longer than 8,192 characters",a["id"],"api-pagination-next-link")
+                target=urljoin(current_url,next_link);parts=urlsplit(target)
+                if parts.username is not None or parts.password is not None or parts.fragment or (parts.scheme,parts.hostname,parts.port)!=(base.scheme,base.hostname,base.port):
+                    raise WorkflowError("API next link must remain on the saved connection origin",a["id"],"api-pagination-next-link-origin")
+                decoded_path=unquote(parts.path).replace("\\","/")
+                if any(segment==".." for segment in decoded_path.split("/")):
+                    raise WorkflowError("API next link cannot traverse outside the saved connection path",a["id"],"api-pagination-next-link-path")
+                if base_prefix!="/":
+                    if parts.path==base_path:relative_path=""
+                    elif parts.path.startswith(base_prefix):relative_path=parts.path[len(base_prefix):]
+                    else:raise WorkflowError("API next link must remain within the saved connection base path",a["id"],"api-pagination-next-link-path")
+                else:relative_path=parts.path.lstrip("/")
+                normalized=urlunsplit((parts.scheme,parts.netloc,parts.path,parts.query,""))
+                if normalized in seen_links:raise WorkflowError("API pagination detected a repeated next link",a["id"],"api-pagination-next-link-loop")
+                seen_links.add(normalized);page_path=relative_path+("?"+parts.query if parts.query else "");page_query={};current_url=normalized;more=True
+            else:
+                raise WorkflowError("Unsupported API pagination strategy",a["id"],"api-pagination-strategy")
+            if not more:break
+            if page_number+1>=max_pages:raise WorkflowError("API pagination reached maxPages while another page remained",a["id"],"api-pagination-page-limit")
+        if last_response is not None:
+            v[a.get("result","response")]=last_response
+            v[config.get("result","items")]=all_items
+            metadata_name=config.get("metadataResult","pagination")
+            if metadata_name:v[metadata_name]={"strategy":strategy,"pages":page_number+1,"itemCount":len(all_items),"responseBytes":total_bytes}
+
     def _browser_activity(self, a: dict[str, Any], v: dict[str, Any], logs: list[dict[str, Any]] | None = None) -> None:
         kind = a["type"]
         if kind == "browser_launch":
             if self._browser_page is not None:
                 raise WorkflowError("Browser is already open", a["id"], "browser-state")
+            browser_type=a.get("browserType","chromium")
+            channel=a.get("channel","chromium")
+            profile_name=a.get("profileName","")
+            if profile_name and not self.options.allow_desktop:
+                raise WorkflowError("Reusing a persistent signed-in browser profile requires per-run desktop permission; review the profile and enable Allow desktop control.",a["id"],"desktop-permission-denied")
             try:
                 from playwright.sync_api import sync_playwright
             except ImportError as exc:
                 raise WorkflowError("Browser automation requires optional Playwright and its browser runtime. See docs/AUTOMATION_ADAPTERS.md", a["id"], "runtime-unavailable") from exc
             self._browser_runtime = sync_playwright().start()
-            channel=a.get("channel","chromium")
-            launcher=self._browser_runtime.chromium
+            launcher=getattr(self._browser_runtime,browser_type,None)
+            if launcher is None:
+                raise WorkflowError(f"Playwright browser engine '{browser_type}' is unavailable",a["id"],"browser-engine-unavailable")
             options={"headless":bool(a.get("headless",False))}
-            if channel!="chromium":options["channel"]=channel
+            executable_path=a.get("executablePath","")
+            if browser_type=="chromium":
+                if channel=="custom":
+                    try:
+                        custom_path=Path(str(executable_path)).expanduser().resolve(strict=True)
+                    except (OSError,ValueError) as exc:
+                        raise WorkflowError("Custom Chromium executable does not exist",a["id"],"browser-executable-not-found") from exc
+                    if not custom_path.is_file():
+                        raise WorkflowError("Custom Chromium executable path is not a file",a["id"],"browser-executable-not-found")
+                    options["executable_path"]=str(custom_path)
+                elif channel!="chromium":options["channel"]=channel
             try:
-                self._browser = launcher.launch(**options)
+                if profile_name:
+                    import hashlib
+                    from .app_paths import app_data_dir
+                    project_key=hashlib.sha256(str(self.root).encode("utf-8")).hexdigest()[:24]
+                    data_root=app_data_dir().resolve()
+                    profiles_base=data_root/"browser-profiles"
+                    profiles_base.mkdir(parents=True,exist_ok=True)
+                    profile_root=profiles_base.resolve()/project_key
+                    try:profile_root.relative_to(data_root)
+                    except ValueError as exc:raise WorkflowError("App-managed browser profile folder escapes local app data",a["id"],"browser-profile-path") from exc
+                    profile_path=profile_root/profile_name.casefold()
+                    profile_root.mkdir(parents=True,exist_ok=True)
+                    profile_path.mkdir(parents=True,exist_ok=True)
+                    resolved_profile=profile_path.resolve()
+                    try:resolved_profile.relative_to(profile_root.resolve())
+                    except ValueError as exc:raise WorkflowError("Persistent browser profile path escaped the app-managed profile folder",a["id"],"browser-profile-path") from exc
+                    self._browser_persistent_profile=True
+                    self._browser_context=launcher.launch_persistent_context(str(resolved_profile),**options)
+                    self._browser=self._browser_context.browser
+                else:
+                    self._browser = launcher.launch(**options)
             except Exception as exc:
-                if channel=="chromium" and "Executable doesn't exist" in str(exc):
+                self._browser_persistent_profile=False
+                self._browser=self._browser_context=None
+                if isinstance(exc,WorkflowError):raise
+                if browser_type=="chromium" and channel=="chromium" and "Executable doesn't exist" in str(exc):
                     raise WorkflowError("Playwright Chromium is not installed in this environment. Install it with 'playwright install chromium', or set Browser Launch channel to 'chrome' or 'msedge' to use an installed browser.",a["id"],"browser-runtime-missing") from exc
-                raise WorkflowError(f"Could not launch browser channel '{channel}': {exc}",a["id"],"browser-launch-failed") from exc
-            self._browser_context = self._browser.new_context()
-            self._browser_page = self._browser_context.new_page()
-            self._browser_page.set_default_timeout(30_000)
-            self._browser_page.set_default_navigation_timeout(60_000)
-            def guard_browser_request(route: Any) -> None:
-                try:
-                    assert_public_url(route.request.url)
-                    route.continue_()
-                except Exception:
-                    route.abort()
-            self._browser_page.route("**/*", guard_browser_request)
+                if browser_type in {"firefox","webkit"} and "Executable doesn't exist" in str(exc):
+                    raise WorkflowError(f"Playwright {browser_type.title()} is not installed in this environment. Install it with 'playwright install {browser_type}'.",a["id"],"browser-runtime-missing") from exc
+                raise WorkflowError(f"Could not launch Playwright {browser_type} browser (channel '{channel}'): {exc}",a["id"],"browser-launch-failed") from exc
+            if not profile_name:self._browser_context = self._browser.new_context()
+            pages=list(getattr(self._browser_context,"pages",[]))
+            self._browser_page=pages[0] if pages else self._browser_context.new_page()
+            self._browser_tabs = {}
+            self._browser_unclaimed_popups = []
+            self._browser_popup_counter = 0
+            self._register_browser_page(self._browser_page, "main")
+            self._browser_context.on("page", self._on_browser_popup)
+            if profile_name:
+                profile_id=hashlib.sha256(f"{project_key}:{profile_name.casefold()}".encode("utf-8")).hexdigest()[:16]
+                self._emit({"event":"browser-profile-opened","activityId":a["id"],"profileId":profile_id},logs)
+                self.options.audit("browser.profile_opened",{"activityId":a["id"],"profileId":profile_id,"browserType":browser_type})
             return
         if kind == "browser_close":
             self._close_browser()
             return
+        if kind in {"browser_new_tab","browser_capture_popup","browser_switch_tab","browser_close_tab"} and self._browser_context is None:
+            raise WorkflowError("Launch Browser must run before tab operations", a["id"], "browser-state")
+        if kind == "browser_new_tab":
+            name = str(a.get("name", ""))
+            if name in self._browser_tabs:
+                raise WorkflowError(f"Browser tab name '{name}' is already in use", a["id"], "browser-tab-name")
+            page = self._browser_context.new_page()
+            self._register_browser_page(page, name)
+            self._browser_page = page
+            url = str(interpolate(a.get("url", ""), v)).strip()
+            if url:
+                self._navigate_browser_page(page, url, a, v, timeout_seconds=float(a.get("timeoutSeconds", 15)))
+            return
+        if kind == "browser_capture_popup":
+            name = str(a.get("name", ""))
+            if name in self._browser_tabs:
+                raise WorkflowError(f"Browser tab name '{name}' is already in use", a["id"], "browser-tab-name")
+            deadline = time.monotonic() + float(a.get("timeoutSeconds", 15))
+            while time.monotonic() < deadline:
+                self._check_cancel()
+                for candidate in self._browser_context.pages:
+                    if not candidate.is_closed() and not any(item is candidate for item in self._browser_tabs.values()):
+                        self._on_browser_popup(candidate)
+                if self._browser_unclaimed_popups:
+                    break
+                time.sleep(min(.05, max(0, deadline - time.monotonic())))
+            if not self._browser_unclaimed_popups:
+                raise WorkflowError("No new browser popup opened before the timeout", a["id"], "browser-popup-timeout")
+            page = self._browser_unclaimed_popups.pop(0)
+            self._register_browser_page(page, name)
+            self._browser_page = page
+            return
+        if kind == "browser_switch_tab":
+            name = str(a.get("name", ""))
+            page = self._browser_tabs.get(name)
+            if page is None or page.is_closed():
+                raise WorkflowError(f"Browser tab '{name}' is not open", a["id"], "browser-tab-not-found")
+            self._browser_page = page
+            return
+        if kind == "browser_close_tab":
+            name = str(a.get("name", ""))
+            page = self._browser_tabs.get(name)
+            open_tabs = [(tab_name, tab_page) for tab_name, tab_page in self._browser_tabs.items() if not tab_page.is_closed()]
+            if page is None or page.is_closed():
+                raise WorkflowError(f"Browser tab '{name}' is not open", a["id"], "browser-tab-not-found")
+            if len(open_tabs) <= 1:
+                raise WorkflowError("Cannot close the last browser tab with Close Browser Tab; use Close Browser to end the session", a["id"], "browser-last-tab")
+            page.close()
+            self._browser_tabs.pop(name, None)
+            self._browser_responses.pop(page,None)
+            self._browser_unclaimed_popups = [item for item in self._browser_unclaimed_popups if item is not page]
+            if self._browser_page is page:
+                self._browser_page = next(tab_page for tab_name, tab_page in open_tabs if tab_name != name)
+            return
+        if kind == "browser_wait_response":
+            if self._browser_page is None:
+                raise WorkflowError("Launch Browser must run before waiting for a browser response", a["id"], "browser-state")
+            if not self.options.allow_network:
+                raise WorkflowError("Browser response observation requires explicit per-run network permission", a["id"], "network-permission-denied")
+            return self._wait_browser_response(a, v, logs)
         if self._browser_page is None:
             raise WorkflowError("Launch Browser must run before browser interaction", a["id"], "browser-state")
         timeout = min(max(float(a.get("timeoutSeconds", 15)),1),120) * 1000
@@ -1560,20 +1942,194 @@ class WorkflowEngine:
             return
         if kind == "browser_navigate":
             url = str(interpolate(a["url"], v))
-            if not url.startswith(("https://", "http://")): raise WorkflowError("Browser URL must use http or https", a["id"], "browser-url")
-            if not self.options.allow_network: raise WorkflowError("Browser access requires explicit per-run network permission", a["id"], "network-permission-denied")
-            try: assert_public_url(url)
-            except EgressDenied as exc: raise WorkflowError(str(exc),a["id"],"http-egress-denied") from exc
-            self._browser_page.goto(url, wait_until=a.get("waitUntil", "domcontentloaded"), timeout=timeout)
+            self._navigate_browser_page(self._browser_page, url, a, v, timeout_seconds=timeout/1000)
         elif kind == "browser_click": self._locator(a,logs).click(timeout=timeout)
+        elif kind == "browser_hover": self._locator(a,logs).hover(timeout=timeout)
+        elif kind == "browser_press": self._locator(a,logs).press(str(a.get("key","Enter")),timeout=timeout)
+        elif kind == "browser_upload":
+            raw_paths = a.get("paths", [])
+            paths = [self._path(raw_path, v) for raw_path in raw_paths]
+            sizes = []
+            for path in paths:
+                if not path.is_file():
+                    raise WorkflowError("Browser Upload path must identify an existing file", a["id"], "browser-upload-file")
+                size = path.stat().st_size
+                if size > self._max_file_bytes:
+                    raise WorkflowError("Browser Upload file exceeds the configured file size limit", a["id"], "file-size-limit")
+                sizes.append(size)
+            locator = self._locator(a, logs)
+            if locator.count() != 1:
+                raise WorkflowError("Browser Upload selector must match exactly one file input", a["id"], "browser-upload-selector")
+            is_file_input = locator.evaluate("element => element instanceof HTMLInputElement && element.type === 'file'")
+            if not is_file_input:
+                raise WorkflowError("Browser Upload selector must identify an HTML file input", a["id"], "browser-upload-selector")
+            locator.set_input_files([str(path) for path in paths], timeout=timeout)
+            self.options.audit("browser.upload", {"activityId": a["id"], "fileCount": len(paths), "totalBytes": sum(sizes)})
+            if logs is not None:
+                self._emit({"event": "browser-upload-complete", "activityId": a["id"], "fileCount": len(paths), "totalBytes": sum(sizes)}, logs)
+        elif kind == "browser_download":
+            destination = self._path(a["path"], v, True)
+            overwrite = bool(a.get("overwrite", False))
+            if destination.exists() and not overwrite:
+                raise WorkflowError("Browser Download destination already exists; enable overwrite to replace it", a["id"], "browser-download-exists")
+            try:
+                with self._browser_page.expect_download(timeout=timeout) as pending_download:
+                    self._locator(a, logs).click(timeout=timeout)
+                download = pending_download.value
+                source = Path(download.path())
+            except Exception as exc:
+                error_name = type(exc).__name__
+                if "Timeout" in error_name or "Timeout" in str(exc):
+                    raise WorkflowError("No browser download began before the configured timeout", a["id"], "browser-download-timeout") from exc
+                raise WorkflowError(f"Browser download failed before it could be saved ({error_name})", a["id"], "browser-download-failed") from exc
+            size = source.stat().st_size
+            if size > self._max_file_bytes:
+                try: download.cancel()
+                except Exception: pass
+                raise WorkflowError("Browser Download exceeds the configured file size limit", a["id"], "file-size-limit")
+            descriptor, temporary = tempfile.mkstemp(prefix=".openrpa-download-", dir=destination.parent)
+            copied = 0
+            try:
+                with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_stream:
+                    while True:
+                        self._check_cancel()
+                        chunk = input_stream.read(min(1024 * 1024, self._max_file_bytes - copied + 1))
+                        if not chunk: break
+                        copied += len(chunk)
+                        if copied > self._max_file_bytes:
+                            raise WorkflowError("Browser Download grew beyond the configured file size limit", a["id"], "file-size-limit")
+                        output.write(chunk)
+                    output.flush(); os.fsync(output.fileno())
+                if destination.exists() and not overwrite:
+                    raise WorkflowError("Browser Download destination appeared during the download", a["id"], "browser-download-exists")
+                os.replace(temporary, destination)
+            finally:
+                if os.path.exists(temporary): os.unlink(temporary)
+            result_name = a.get("result", "download")
+            v[result_name] = {"path": self._audit_path(destination), "fileName": str(download.suggested_filename)[:255], "bytes": copied}
+            self.options.audit("browser.download", {"activityId": a["id"], "path": self._audit_path(destination), "bytes": copied})
+            if logs is not None:
+                self._emit({"event": "browser-download-complete", "activityId": a["id"], "bytes": copied}, logs)
         elif kind == "browser_fill": self._locator(a,logs).fill(str(interpolate(a.get("value", ""), v)), timeout=timeout)
         elif kind == "browser_select": self._locator(a,logs).select_option(value=str(interpolate(a.get("value", ""),v)),timeout=timeout)
+        elif kind == "browser_select_many":
+            raw_values=interpolate(a.get("values",[]),v)
+            if isinstance(raw_values,list):values=[interpolate(value,v) for value in raw_values]
+            else:values=raw_values
+            if not isinstance(values,list) or not 1<=len(values)<=100 or any(not isinstance(value,str) or not value or len(value)>1000 for value in values):
+                raise WorkflowError("Select Multiple needs 1 to 100 non-empty option values, each no longer than 1,000 characters",a["id"],"browser-option-values")
+            if len(set(values))!=len(values):raise WorkflowError("Select Multiple option values must be unique",a["id"],"browser-option-values-duplicate")
+            locator=self._locator(a,logs)
+            try:
+                is_multiple=locator.evaluate("el => el.tagName.toLowerCase() === 'select' && el.multiple")
+                if not is_multiple:raise WorkflowError("Select Multiple requires a native HTML select element with multiple enabled",a["id"],"browser-select-not-multiple")
+                selected=locator.select_option(value=values,timeout=timeout)
+                if set(selected)!=set(values):raise WorkflowError("Browser did not retain all requested selected values",a["id"],"browser-select-many-verification")
+            except WorkflowError:raise
+            except Exception as exc:raise WorkflowError(f"Could not select multiple browser options ({type(exc).__name__}): {str(exc)[:500]}",a["id"],"browser-select-many") from exc
+            v[a.get("result","selectedValues")]=selected
+            if logs is not None:self._emit({"event":"browser-select-many-complete","activityId":a["id"],"selectedCount":len(selected)},logs)
         elif kind == "browser_check": self._locator(a,logs).check(timeout=timeout)
         elif kind == "browser_uncheck": self._locator(a,logs).uncheck(timeout=timeout)
         elif kind == "browser_text": v[a.get("result", "text")] = self._locator(a,logs).inner_text(timeout=timeout)
+        elif kind == "browser_accessibility_snapshot":
+            limit=int(a.get("maxOutputChars",50_000))
+            try:
+                snapshot=self._browser_page.locator("body").aria_snapshot(timeout=timeout)
+            except Exception as exc:
+                raise WorkflowError(f"Could not read the browser accessibility tree ({type(exc).__name__}): {str(exc)[:500]}",a["id"],"browser-accessibility-snapshot") from exc
+            if len(snapshot)>limit:
+                raise WorkflowError(f"Accessibility snapshot has {len(snapshot)} characters; limit is {limit}. Increase maxOutputChars or scope the page before reading it.",a["id"],"browser-accessibility-limit")
+            v[a.get("result","accessibilitySnapshot")]=snapshot
+            if logs is not None:self._emit({"event":"browser-accessibility-snapshot","activityId":a["id"],"characters":len(snapshot)},logs)
+        elif kind == "browser_extract_records":
+            append=bool(a.get("append",False));result_name=a.get("result","records")
+            try:
+                if a.get("selectorKind", "css") != "css":
+                    raise WorkflowError("Extract Repeated Web Items requires a CSS selector for the repeated item container", a["id"], "browser-extract-selector")
+                fields = a.get("fields", [])
+                max_records=int(a.get("maxRecords",500));max_chars=int(a.get("maxOutputChars",1_000_000))
+                limits={"maxRecords":max_records,"maxOutputChars":max_chars}
+                previous=v.get(result_name,[]) if append else []
+                deduplicate_by=a.get("deduplicateBy",[])
+                if not isinstance(deduplicate_by,list) or len(deduplicate_by)>10 or any(not isinstance(name,str) or not name for name in deduplicate_by):
+                    raise WorkflowError("Extract Repeated Web Items deduplicateBy must be a list of at most 10 field names",a["id"],"browser-extract-deduplicate")
+                if deduplicate_by and not append:
+                    raise WorkflowError("Extract Repeated Web Items deduplication requires append mode",a["id"],"browser-extract-deduplicate")
+                mapped_names={field.get("name") for field in fields if isinstance(field,dict) and isinstance(field.get("name"),str)}
+                if deduplicate_by and any(name not in mapped_names for name in deduplicate_by):
+                    raise WorkflowError("Every deduplicateBy value must match a mapped field name",a["id"],"browser-extract-deduplicate")
+                previous_chars=0
+                if append:
+                    if not isinstance(previous,list) or any(not isinstance(row,dict) or any(not isinstance(key,str) or not isinstance(value,str) for key,value in row.items()) for row in previous):
+                        raise WorkflowError("Append mode needs its result variable to be a list of string-valued records",a["id"],"browser-extract-append-input")
+                    previous_chars=sum(len(key.encode("utf-16-le","surrogatepass"))//2+len(value.encode("utf-16-le","surrogatepass"))//2 for row in previous for key,value in row.items())
+                    total_record_limit=int(a.get("maxTotalRecords",10000))
+                    total_char_limit=int(a.get("maxTotalOutputChars",5_000_000))
+                    if len(previous)>total_record_limit or previous_chars>total_char_limit:
+                        raise WorkflowError("Append extraction reached its aggregate record or text limit; the accumulated result was discarded",a["id"],"browser-extract-total-limit")
+                    limits["maxRecords"]=max_records
+                    limits["maxOutputChars"]=min(max_chars,total_char_limit)
+                locator = self._browser_scope(a).locator(str(a.get("selector", "")))
+                locator.first.wait_for(state="attached", timeout=timeout)
+                extracted = locator.evaluate_all("""(items, config) => {
+                  if (items.length > config.maxRecords) return {error: `matched ${items.length} items; limit is ${config.maxRecords}`};
+                  let chars = 0;
+                  const records = [];
+                  for (let index = 0; index < items.length; index++) {
+                    const item = items[index];
+                    const record = {};
+                    for (const field of config.fields) {
+                      const matches = item.querySelectorAll(field.selector);
+                      if (matches.length > 1) return {error: `item ${index + 1}, field '${field.name}' matched ${matches.length} elements; use a more specific selector`};
+                      if (!matches.length) {
+                        if (field.required) return {error: `item ${index + 1} is missing required field '${field.name}'`};
+                        record[field.name] = '';
+                        continue;
+                      }
+                      const element = matches[0];
+                      let value = field.source === 'attribute' ? (element.getAttribute(field.attribute) || '') : (element.innerText || element.textContent || '');
+                      value = String(value).replace(/\\s+/g, ' ').trim();
+                      if (field.tokenIndex !== undefined) value = (value.match(/\\S+/g) || [])[field.tokenIndex] || '';
+                      if (field.required && !value) return {error: `item ${index + 1} has an empty required field '${field.name}'`};
+                      if (field.source === 'attribute' && field.attribute.toLowerCase() === 'href' && value) value = new URL(value, document.baseURI).href;
+                      record[field.name] = value;
+                      chars += field.name.length + value.length;
+                      if (chars > config.maxOutputChars) return {error: `extracted text exceeds output limit of ${config.maxOutputChars} characters`};
+                    }
+                    records.push(record);
+                  }
+                  return {records};
+                }""", {"fields": fields, **limits})
+                if extracted.get("error"):
+                    raise WorkflowError(f"Extract Repeated Web Items failed: {extracted['error']}", a["id"], "browser-extract-records")
+                records = extracted.get("records", [])
+                duplicates_skipped=0
+                if append and deduplicate_by:
+                    combined=[];seen_keys=set()
+                    for row in previous+records:
+                        key=tuple(row.get(name,"") for name in deduplicate_by)
+                        if any(value for value in key):
+                            if key in seen_keys:
+                                duplicates_skipped+=1
+                                continue
+                            seen_keys.add(key)
+                        combined.append(row)
+                else:
+                    combined=previous+records if append else records
+                if append:
+                    combined_chars=sum(len(key.encode("utf-16-le","surrogatepass"))//2+len(value.encode("utf-16-le","surrogatepass"))//2 for row in combined for key,value in row.items())
+                    if len(combined)>int(a.get("maxTotalRecords",10000)) or combined_chars>int(a.get("maxTotalOutputChars",5_000_000)):
+                        raise WorkflowError("Append extraction reached its aggregate record or text limit; the accumulated result was discarded",a["id"],"browser-extract-total-limit")
+                v[result_name]=combined
+                if logs is not None:
+                    self._emit({"event":"browser-records-extracted","activityId":a["id"],"records":len(records),"duplicatesSkipped":duplicates_skipped,"totalRecords":len(combined),"appended":append,"fields":[field.get("name") for field in fields]},logs)
+            except Exception:
+                if append:v.pop(result_name,None)
+                raise
         elif kind == "browser_table_read":
             if a.get("selectorKind","css")!="css":raise WorkflowError("Read Web Table requires a CSS selector for a table element",a["id"],"browser-table-selector")
-            locator=self._browser_page.locator(str(a.get("selector","")))
+            locator=self._browser_scope(a).locator(str(a.get("selector","")))
             locator.wait_for(state="visible",timeout=timeout)
             matches=locator.count()
             if matches!=1:raise WorkflowError(f"Read Web Table selector must match exactly one table; found {matches}",a["id"],"browser-table-ambiguous")
@@ -1616,30 +2172,351 @@ class WorkflowEngine:
             if extracted.get("error"):raise WorkflowError(f"Read Web Table failed: {extracted['error']}",a["id"],"browser-table-limit")
             v[a.get("result","rows")]=extracted["rows"]
             if logs is not None:logs.append({"event":"browser-table-read","activityId":a["id"],"rows":len(extracted["rows"]),"columns":len(extracted["rows"][0]) if extracted["rows"] else 0})
+        elif kind == "browser_scroll":
+            direction = a.get("direction", "down")
+            distance = int(a.get("distancePx", 600))
+            delay = int(a.get("delayMilliseconds", 700)) / 1000
+            to_bottom = bool(a.get("toBottom", False))
+            max_steps = int(a.get("maxSteps", 100))
+            container_selector = str(a.get("containerSelector", ""))
+            scroll_container = None
+            if container_selector:
+                try:
+                    scroll_container = self._browser_page.locator(container_selector)
+                    match_count = scroll_container.count()
+                    if match_count != 1:
+                        raise WorkflowError(f"Scroll container selector must match exactly one element; found {match_count}", a["id"], "browser-scroll-container-match")
+                    if not scroll_container.evaluate("element => element instanceof Element"):
+                        raise WorkflowError("Scroll container selector must identify an element", a["id"], "browser-scroll-container-type")
+                except WorkflowError:
+                    raise
+                except Exception as exc:
+                    raise WorkflowError(f"Could not resolve scroll container selector ({type(exc).__name__})", a["id"], "browser-scroll-container-selector") from exc
+            sign = 1 if direction == "down" else -1
+            completed = 0
+            previous = None
+            stable_bottom = 0
+            reached_bottom = False
+            metrics = {"scrollY": 0, "scrollTop": 0, "viewportHeight": 0, "documentHeight": 0, "progressPercent": 0}
+            steps = max_steps if to_bottom else 1
+            for step in range(steps):
+                self._check_cancel()
+                input_mode = "wheel"
+                if scroll_container is not None:
+                    scroll_container.scroll_into_view_if_needed(timeout=timeout)
+                    box = scroll_container.bounding_box()
+                    if not box or box["width"] <= 0 or box["height"] <= 0:
+                        raise WorkflowError("Scroll container is not visible or has no size", a["id"], "browser-scroll-container-hidden")
+                    container_top_before = scroll_container.evaluate("element => element.scrollTop || 0")
+                    page_top_before = self._browser_page.evaluate("window.scrollY || 0")
+                    self._browser_page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                self._browser_page.mouse.wheel(0, sign * distance)
+                deadline = time.monotonic() + delay
+                while time.monotonic() < deadline:
+                    self._check_cancel()
+                    time.sleep(min(.05, deadline - time.monotonic()))
+                if scroll_container is not None:
+                    container_top_after_wheel = scroll_container.evaluate("element => element.scrollTop || 0")
+                    can_move_container = scroll_container.evaluate("(element, direction) => direction > 0 ? element.scrollTop + element.clientHeight < element.scrollHeight - 1 : element.scrollTop > 1", sign)
+                    if abs(container_top_after_wheel - container_top_before) < 0.5 and can_move_container:
+                        # Some browser engines route synthetic wheel input to the document even
+                        # when the pointer is over a nested overflow region. Restore that outer
+                        # position and use the element's native scroll API, which still emits the
+                        # scroll event used by virtualized and lazy-loaded lists.
+                        page_top_after_wheel = self._browser_page.evaluate("window.scrollY || 0")
+                        if abs(page_top_after_wheel - page_top_before) > 0.5:
+                            self._browser_page.evaluate("position => window.scrollTo(0, position)", page_top_before)
+                        scroll_container.evaluate("(element, delta) => element.scrollBy({top: delta, behavior: 'instant'})", sign * distance)
+                        input_mode = "native-scroll-fallback"
+                        deadline = time.monotonic() + delay
+                        while time.monotonic() < deadline:
+                            self._check_cancel()
+                            time.sleep(min(.05, deadline - time.monotonic()))
+                    metrics = scroll_container.evaluate("""element => {
+                      const scrollTop = element.scrollTop || 0;
+                      const viewportHeight = element.clientHeight || 0;
+                      const documentHeight = element.scrollHeight || 0;
+                      return {scrollY: window.scrollY || 0, scrollTop, viewportHeight, documentHeight, progressPercent: documentHeight <= viewportHeight ? 100 : Math.min(100, Math.round((scrollTop + viewportHeight) / documentHeight * 100))};
+                    }""")
+                else:
+                    metrics = self._browser_page.evaluate("""() => {
+                  const root = document.documentElement;
+                  const scrollY = window.scrollY || root.scrollTop || 0;
+                  const viewportHeight = window.innerHeight || root.clientHeight || 0;
+                  const documentHeight = Math.max(root.scrollHeight, document.body?.scrollHeight || 0);
+                  return {scrollY, scrollTop: scrollY, viewportHeight, documentHeight, progressPercent: documentHeight <= viewportHeight ? 100 : Math.min(100, Math.round((scrollY + viewportHeight) / documentHeight * 100))};
+                }""")
+                completed += 1
+                at_bottom = metrics["scrollTop"] + metrics["viewportHeight"] >= metrics["documentHeight"] - 2
+                if at_bottom and metrics == previous:
+                    stable_bottom += 1
+                elif at_bottom:
+                    stable_bottom = 1
+                else:
+                    stable_bottom = 0
+                reached_bottom = at_bottom
+                if logs is not None:
+                    self._emit({"event": "browser-scroll-progress", "activityId": a["id"], "step": completed, "maxSteps": steps, "target": "container" if scroll_container is not None else "page", "inputMode": input_mode, **metrics}, logs)
+                previous = metrics
+                if to_bottom and stable_bottom >= 2:
+                    break
+            v[a.get("result", "scrollResult")] = {"scrollsCompleted": completed, "reachedBottom": reached_bottom, "target": "container" if scroll_container is not None else "page", **metrics}
         elif kind == "browser_screenshot":
             path = self._path(a["path"], v, True)
             self._browser_page.screenshot(path=str(path), full_page=bool(a.get("fullPage", False)), timeout=timeout)
         else: raise WorkflowError(f"Unsupported browser activity: {kind}", a["id"], "activity-unsupported")
 
     def _close_browser(self) -> None:
-        if self._browser is not None:
+        if self._browser_persistent_profile and self._browser_context is not None:
+            try:self._browser_context.close()
+            except Exception:pass
+        elif self._browser is not None:
             try: self._browser.close()
             except Exception: pass
         if self._browser_runtime is not None:
             try: self._browser_runtime.stop()
             except Exception: pass
         self._browser_runtime = self._browser = self._browser_context = self._browser_page = None
+        self._browser_persistent_profile=False
+        self._browser_tabs = {}
+        self._browser_unclaimed_popups = []
+        self._browser_popup_counter = 0
+        self._browser_responses = {}
+
+    def _register_browser_page(self, page: Any, name: str) -> None:
+        # Keep this method usable by focused adapter tests and partially
+        # constructed engines as well as normal WorkflowEngine instances.
+        if not hasattr(self, "_browser_responses"):
+            self._browser_responses = {}
+        already_registered = any(item is page for item in self._browser_tabs.values())
+        for existing, item in list(self._browser_tabs.items()):
+            if item is page and existing != name:
+                self._browser_tabs.pop(existing, None)
+        self._browser_unclaimed_popups = [item for item in self._browser_unclaimed_popups if item is not page]
+        if not already_registered:
+            page.set_default_timeout(30_000)
+            page.set_default_navigation_timeout(60_000)
+            page.route("**/*", self._guard_browser_request)
+            route_web_socket = getattr(page, "route_web_socket", None)
+            if callable(route_web_socket):
+                route_web_socket("**/*", lambda socket: socket.close(code=1008, reason="Open RPA Studio blocks WebSocket connections"))
+            self._browser_responses[page] = []
+            page.on("response", lambda response, observed_page=page: self._record_browser_response(observed_page, response))
+        self._browser_tabs[name] = page
+
+    def _record_browser_response(self, page: Any, response: Any) -> None:
+        """Keep bounded response metadata for synchronization; bodies are read only by explicit JSON mapping."""
+        try:
+            from urllib.parse import urlsplit, urlunsplit
+            parts=urlsplit(str(response.url))
+            host=parts.hostname or ""
+            if ":" in host and not host.startswith("["):host=f"[{host}]"
+            port=f":{parts.port}" if parts.port is not None else ""
+            safe_url=urlunsplit((parts.scheme,host+port,parts.path,"",""))[:2048]
+            content_type=str(response.headers.get("content-type","")).split(";",1)[0][:128]
+            length_header=response.headers.get("content-length","")
+            encoding=str(response.headers.get("content-encoding","identity")).lower()
+            body_unavailable="not-json"
+            response_reference=None
+            if content_type.lower()=="application/json" or content_type.lower().endswith("+json"):
+                if not length_header or not str(length_header).isdigit():body_unavailable="size-unknown"
+                elif int(length_header)>2_000_000:body_unavailable="size-limit"
+                elif encoding not in {"","identity"}:body_unavailable="compressed"
+                else:response_reference=response;body_unavailable=""
+            metadata={
+                "url":safe_url,
+                "method":str(response.request.method).upper()[:12],
+                "status":int(response.status),
+                "contentType":content_type,
+                "observedAt":time.monotonic(),
+                "_response":response_reference,
+                "_bodyUnavailable":body_unavailable,
+            }
+            entries=self._browser_responses.setdefault(page,[])
+            entries.append(metadata)
+            if len(entries)>100:del entries[:-100]
+            body_entries=[entry for entry in entries if entry.get("_response") is not None]
+            for entry in body_entries[:-10]:
+                entry["_response"]=None;entry["_bodyUnavailable"]="expired"
+        except Exception:
+            return
+
+    def _wait_browser_response(self, activity: dict[str, Any], variables: dict[str, Any],
+                               logs: list[dict[str, Any]] | None = None) -> None:
+        page=self._browser_page
+        url_contains=str(activity.get("urlContains",""))
+        expected_method=str(activity.get("method","any")).upper()
+        expected_status=activity.get("status")
+        timeout=float(activity.get("timeoutSeconds",15))
+        max_age=float(activity.get("maxAgeSeconds",30))
+        deadline=time.monotonic()+timeout
+        while True:
+            self._check_cancel()
+            now=time.monotonic()
+            entries=self._browser_responses.setdefault(page,[])
+            entries[:]=[item for item in entries if now-item["observedAt"]<=max_age]
+            match=next((item for item in entries
+                        if url_contains in item["url"]
+                        and (expected_method=="ANY" or item["method"]==expected_method)
+                        and (expected_status is None or item["status"]==expected_status)),None)
+            if match is not None:
+                entries.remove(match)
+                result={"method":match["method"],"status":match["status"],"contentType":match["contentType"]}
+                variables[activity.get("result","response")]=result
+                mapping=activity.get("jsonMapping")
+                mapped_count=0
+                if mapping is not None:
+                    mapped=self._map_browser_json_response(match,mapping,activity)
+                    variables[mapping["result"]]=mapped
+                    mapped_count=len(mapped)
+                schema_discovered=False
+                if activity.get("discoverJsonSchema"):
+                    discovered=self._inspect_browser_json_response(match,activity)
+                    variables[activity["schemaResult"]]=discovered
+                    schema_discovered=True
+                self.options.audit("browser.response.observed",{"activityId":activity["id"],**result})
+                if logs is not None:
+                    self._emit({"event":"browser-response-observed","activityId":activity["id"],**result,**({"mappedItems":mapped_count,"mappedFields":len(mapping.get("fields",[]))} if mapping is not None else {}),**({"schemaDiscovered":True,"schemaObjectArrays":len(discovered["objectArrayPointers"]),"schemaTruncated":discovered["truncated"]} if schema_discovered else {})},logs)
+                return
+            remaining=deadline-now
+            if remaining<=0:
+                raise WorkflowError(
+                    f"No browser response matched the configured URL substring, method, and status within {timeout:g}s",
+                    activity["id"],"browser-response-timeout")
+            time.sleep(min(.05,remaining))
+
+    def _read_bounded_browser_json_response(self, match: dict[str,Any], activity: dict[str,Any]) -> Any:
+        aid=activity["id"]
+        if not 200<=match["status"]<300:
+            raise WorkflowError("Browser JSON inspection requires a successful 2xx response",aid,"browser-response-json-status")
+        content_type=match["contentType"].lower()
+        if content_type!="application/json" and not content_type.endswith("+json"):
+            raise WorkflowError("Matched browser response is not a JSON content type",aid,"browser-response-json-content-type")
+        response=match.get("_response")
+        if response is None:
+            reason=match.get("_bodyUnavailable")
+            messages={"size-unknown":"Browser JSON mapping requires a response with a declared Content-Length","size-limit":"Browser JSON response exceeds the 2,000,000-byte runtime cap","compressed":"Browser JSON mapping does not read compressed response bodies","expired":"The bounded browser response body reference expired; trigger the response again"}
+            message=messages.get(reason,"Matched browser response body is unavailable or is not JSON")
+            raise WorkflowError(message,aid,"browser-response-body-unavailable")
+        max_bytes=int(activity.get("maxResponseBytes",500_000))
+        try:
+            length_header=response.header_value("content-length")
+            if not length_header or not length_header.isdigit():
+                raise WorkflowError("Browser JSON inspection requires a response with a bounded Content-Length header",aid,"browser-response-size-unknown")
+            declared_length=int(length_header)
+            if declared_length>max_bytes:
+                raise WorkflowError(f"Browser JSON response declares {declared_length} bytes; configured limit is {max_bytes}",aid,"browser-response-size-limit")
+            encoding=(response.header_value("content-encoding") or "identity").lower()
+            if encoding not in {"","identity"}:
+                raise WorkflowError("Browser JSON inspection accepts only uncompressed responses so its byte limit is enforceable",aid,"browser-response-encoding")
+            body=response.body()
+        except WorkflowError:
+            raise
+        except Exception as exc:
+            raise WorkflowError(f"Could not read the matched browser JSON response ({type(exc).__name__})",aid,"browser-response-body-read") from exc
+        if len(body)>max_bytes:
+            raise WorkflowError(f"Browser JSON response exceeds the configured {max_bytes}-byte limit",aid,"browser-response-size-limit")
+        try:
+            return json.loads(body.decode("utf-8-sig"))
+        except (UnicodeDecodeError,json.JSONDecodeError,RecursionError) as exc:
+            raise WorkflowError("Matched browser response is not valid UTF-8 JSON",aid,"browser-response-json") from exc
+
+    def _inspect_browser_json_response(self, match: dict[str,Any], activity: dict[str,Any]) -> dict[str,Any]:
+        """Inspect JSON structure only; returned data contains no response values."""
+        document=self._read_bounded_browser_json_response(match,activity)
+        return _inspect_json_shape(document)
+
+    def _map_browser_json_response(self, match: dict[str,Any], mapping: dict[str,Any], activity: dict[str,Any]) -> list[dict[str,Any]]:
+        """Extract only explicitly mapped scalar fields from a bounded browser JSON response."""
+        aid=activity["id"]
+        document=self._read_bounded_browser_json_response(match,activity)
+        try:
+            records=_json_pointer_get(document,mapping.get("itemsPointer",""))
+        except (KeyError,IndexError,ValueError,TypeError,RecursionError) as exc:
+            raise WorkflowError("Matched browser response array pointer did not resolve",aid,"browser-response-json") from exc
+        if not isinstance(records,list):
+            raise WorkflowError("Browser JSON response array pointer must select a JSON array",aid,"browser-response-json-array")
+        if len(records)>int(mapping.get("maxItems",500)):
+            raise WorkflowError("Browser JSON response array exceeds the configured item limit",aid,"browser-response-json-limit")
+        mapped=[]
+        for record in records:
+            self._check_cancel()
+            if not isinstance(record,dict):
+                raise WorkflowError("Browser JSON response array items must be objects",aid,"browser-response-json-record")
+            row={}
+            for field_mapping in mapping.get("fields",[]):
+                try:value=_json_pointer_get(record,field_mapping["path"])
+                except (KeyError,IndexError,ValueError,TypeError) as exc:
+                    raise WorkflowError("A browser JSON response field pointer did not resolve",aid,"browser-response-json-field-pointer") from exc
+                if value is not None and not isinstance(value,(str,bool,int,float)):
+                    raise WorkflowError("Mapped browser JSON fields must be scalar values or null",aid,"browser-response-json-field-type")
+                if isinstance(value,float) and not math.isfinite(value):
+                    raise WorkflowError("Mapped browser JSON number is not finite",aid,"browser-response-json-field-type")
+                row[field_mapping["name"]]=value
+            mapped.append(row)
+        return mapped
+
+    def _on_browser_popup(self, page: Any) -> None:
+        if any(item is page for item in self._browser_tabs.values()):
+            return
+        self._browser_popup_counter += 1
+        name = f"popup_{self._browser_popup_counter}"
+        while name in self._browser_tabs:
+            self._browser_popup_counter += 1
+            name = f"popup_{self._browser_popup_counter}"
+        self._register_browser_page(page, name)
+        self._browser_unclaimed_popups.append(page)
+
+    def _guard_browser_request(self, route: Any) -> None:
+        try:
+            url = route.request.url
+            if url.startswith(("http://", "https://")):
+                if not self.options.allow_network:
+                    raise EgressDenied("Browser requests require explicit per-run network permission")
+                assert_public_url(url)
+            route.continue_()
+        except Exception:
+            route.abort()
+
+    def _navigate_browser_page(self, page: Any, url: str, activity: dict[str, Any], variables: dict[str, Any], timeout_seconds: float) -> None:
+        if not url.startswith(("https://", "http://")):
+            raise WorkflowError("Browser URL must use http or https", activity["id"], "browser-url")
+        if not self.options.allow_network:
+            raise WorkflowError("Browser access requires explicit per-run network permission", activity["id"], "network-permission-denied")
+        try:
+            assert_public_url(url)
+        except EgressDenied as exc:
+            raise WorkflowError(str(exc), activity["id"], "http-egress-denied") from exc
+        timeout = min(max(float(timeout_seconds), 1), 120) * 1000
+        page.goto(url, wait_until=activity.get("waitUntil", "domcontentloaded"), timeout=timeout)
+
+    def _browser_scope(self,a:dict[str,Any])->Any:
+        selector=a.get("frameSelector")
+        if selector is None or selector=="":return self._browser_page
+        if not isinstance(selector,str) or not selector.strip():
+            raise WorkflowError("Browser frameSelector must be a non-empty CSS selector",a["id"],"browser-frame-selector")
+        try:
+            iframe=self._browser_page.locator(selector)
+            count=iframe.count()
+            if count!=1:raise WorkflowError(f"Browser frameSelector must match exactly one iframe; found {count}",a["id"],"browser-frame-ambiguous")
+            if not iframe.evaluate("element => element instanceof HTMLIFrameElement"):
+                raise WorkflowError("Browser frameSelector must identify an iframe element",a["id"],"browser-frame-selector")
+            return self._browser_page.frame_locator(selector)
+        except WorkflowError:raise
+        except Exception as exc:
+            raise WorkflowError(f"Could not resolve the configured iframe selector ({type(exc).__name__})",a["id"],"browser-frame-selector") from exc
 
     def _locator(self, a: dict[str, Any], logs: list[dict[str, Any]] | None = None, allow_fallback: bool = True) -> Any:
+        scope=self._browser_scope(a)
         def make_locator(kind: str, value: str, exact: bool = True) -> Any:
             if kind == "role":
                 role, _, name = value.partition(":")
-                return self._browser_page.get_by_role(role, name=name or None, exact=exact)
-            if kind == "label": return self._browser_page.get_by_label(value, exact=exact)
-            if kind == "text": return self._browser_page.get_by_text(value, exact=exact)
-            if kind == "placeholder": return self._browser_page.get_by_placeholder(value, exact=exact)
-            if kind == "test_id": return self._browser_page.get_by_test_id(value)
-            if kind == "css": return self._browser_page.locator(value)
+                return scope.get_by_role(role, name=name or None, exact=exact)
+            if kind == "label": return scope.get_by_label(value, exact=exact)
+            if kind == "text": return scope.get_by_text(value, exact=exact)
+            if kind == "placeholder": return scope.get_by_placeholder(value, exact=exact)
+            if kind == "test_id": return scope.get_by_test_id(value)
+            if kind == "css": return scope.locator(value)
             raise WorkflowError(f"Unknown selector kind: {kind}", a["id"], "selector-kind")
 
         kind, value = a.get("selectorKind", "role"), str(a.get("selector", ""))
@@ -1647,7 +2524,9 @@ class WorkflowEngine:
         exact = bool(a.get("exact", True))
         primary=make_locator(kind,value,exact)
         fallbacks=a.get("selectorFallbacks",[])
-        if not allow_fallback or not fallbacks:
+        if not allow_fallback:
+            return primary
+        if not fallbacks and a.get("selectorHealing","off")!="accessible_role":
             return primary
         primary_count=primary.count()
         if primary_count==1:
@@ -1659,21 +2538,128 @@ class WorkflowEngine:
             count=locator.count()
             if count==1: matches.append((index,locator))
             elif count>1: ambiguous.append(index)
-        if len(matches)!=1 or ambiguous:
+        if ambiguous or len(matches)>1 or primary_count>1:
             reason="ambiguous" if ambiguous or len(matches)>1 or primary_count>1 else "not found"
             code="selector-fallback-ambiguous" if reason=="ambiguous" else "selector-fallback-not-found"
             raise WorkflowError(f"Browser selector {reason}: primary matched {primary_count}; {len(matches)} fallback(s) matched uniquely and {len(ambiguous)} fallback(s) were ambiguous. Make the explicit selector chain resolve to exactly one control.",a["id"],code)
-        fallback_index,locator=matches[0]
-        details={"activityId":a["id"],"fallbackIndex":fallback_index}
-        self.options.audit("browser.selector_fallback",details)
+        if matches:
+            fallback_index,locator=matches[0]
+            details={"activityId":a["id"],"fallbackIndex":fallback_index}
+            self.options.audit("browser.selector_fallback",details)
+            if logs is not None:
+                self._emit({"event":"browser-selector-fallback","activityId":a["id"],"fallbackIndex":fallback_index},logs)
+            return locator
+        if a.get("selectorHealing","off")=="accessible_role" and primary_count==0:
+            role,separator,expected=value.partition(":") if kind=="role" else ("","","")
+            if separator and role and expected and exact:
+                return self._heal_accessible_role(scope,role,expected,a,logs)
+        if fallbacks:
+            raise WorkflowError(f"Browser selector not found: primary matched {primary_count}; no configured fallback matched uniquely. Make the explicit selector chain resolve to exactly one control.",a["id"],"selector-fallback-not-found")
+        return primary
+
+    def _heal_accessible_role(self, scope: Any, role: str, expected: str, activity: dict[str, Any], logs: list[dict[str, Any]] | None) -> Any:
+        """Recover only a missing exact role/name selector with one strong visible match."""
+        expected_normalized=_normalize_accessible_name(expected)
+        if not expected_normalized:
+            raise WorkflowError("Accessible selector recovery needs a non-empty accessible name",activity["id"],"browser-selector-heal-not-found")
+        try:
+            candidates=scope.get_by_role(role)
+            count=candidates.count()
+        except Exception as exc:
+            raise WorkflowError(f"Could not inspect same-role browser controls for safe selector recovery ({type(exc).__name__})",activity["id"],"browser-selector-heal-failed") from exc
+        if count>250:
+            raise WorkflowError("Accessible selector recovery stopped: this role has more than 250 controls",activity["id"],"browser-selector-heal-limit")
+        matches=[]
+        for index in range(count):
+            candidate=candidates.nth(index)
+            try:
+                if not candidate.is_visible() or not candidate.is_enabled():
+                    continue
+                snapshot=candidate.aria_snapshot()
+                accessible_name=_accessible_role_name(snapshot,role)
+                normalized=_normalize_accessible_name(accessible_name)
+                if not normalized:
+                    continue
+                if normalized==expected_normalized:
+                    score=1.0
+                elif min(len(normalized),len(expected_normalized))>=10:
+                    score=SequenceMatcher(None,expected_normalized,normalized,autojunk=False).ratio()
+                else:
+                    continue
+                if score>=0.94:
+                    matches.append((score,index,candidate))
+            except Exception:
+                continue
+        matches.sort(key=lambda item:item[0],reverse=True)
+        if not matches:
+            raise WorkflowError(f"Accessible selector recovery found no safe {role} match for the configured name",activity["id"],"browser-selector-heal-not-found")
+        if len(matches)>1:
+            if matches[0][0]==1.0 or matches[0][0]-matches[1][0]<0.10:
+                raise WorkflowError(f"Accessible selector recovery found {len(matches)} plausible {role} controls; no unique match is safe",activity["id"],"browser-selector-heal-ambiguous")
+        score,index,locator=matches[0]
+        self.options.audit("browser.selector_healed",{"activityId":activity["id"],"role":role,"candidateIndex":index,"similarity":round(score,3)})
         if logs is not None:
-            self._emit({"event":"browser-selector-fallback","activityId":a["id"],"fallbackIndex":fallback_index},logs)
+            self._emit({"event":"browser-selector-healed","activityId":activity["id"],"role":role,"similarity":round(score,3)},logs)
         return locator
 
     def _desktop_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
         if not self.options.allow_desktop:
             raise WorkflowError("Desktop control requires explicit per-run permission", a["id"], "desktop-permission-denied")
         kind=a["type"]
+        if kind == "desktop_ocr_click":
+            self._check_cancel()
+            try:
+                from .windows_uia import ocr_click
+                title=str(interpolate(a.get("windowTitle", ""),v))
+                target=str(interpolate(a.get("text", ""),v))
+                self.options.audit("desktop.ocr_click.attempt",{"activityId":a["id"],"processId":a.get("processId"),"confidenceThreshold":a.get("confidenceThreshold",80)})
+                result=ocr_click(title,target,int(a.get("confidenceThreshold",80)),float(a.get("timeoutSeconds",15)),a.get("processId"),self.options.cancel)
+                self._check_cancel()
+                v[a.get("result","ocrMatch")]=result
+                self.options.audit("desktop.ocr_click.succeeded",{"activityId":a["id"],"processId":a.get("processId"),"confidence":result["confidence"]})
+                return
+            except WorkflowError:
+                raise
+            except Exception as exc:
+                self._check_cancel()
+                message=f"{type(exc).__name__}: {exc}"
+                raise WorkflowError(f"OCR desktop click failed: {message}",a["id"],"desktop-ocr-click-failed") from exc
+        if kind.startswith("desktop_window_"):
+            try:
+                from . import desktop_accessibility
+                if not desktop_accessibility.status().get("available"):
+                    raise WorkflowError("Desktop accessibility is unavailable",a["id"],"runtime-unavailable")
+                title=str(interpolate(a.get("windowTitle", ""),v) or "").strip() or None
+                process_id=a.get("processId")
+                if kind=="desktop_window_wait":
+                    desired=a.get("state","exists");deadline=time.monotonic()+float(a.get("timeoutSeconds",30))
+                    while True:
+                        self._check_cancel()
+                        exists=desktop_accessibility.window_exists(title,process_id)
+                        if exists is (desired=="exists"):return
+                        remaining=deadline-time.monotonic()
+                        if remaining<=0:raise WorkflowError(f"Timed out waiting for the target desktop window to {desired.replace('_',' ')}",a["id"],"desktop-window-timeout")
+                        time.sleep(min(0.2,remaining))
+                self._check_cancel()
+                action={"desktop_window_activate":desktop_accessibility.activate_window,
+                        "desktop_window_minimize":desktop_accessibility.minimize_window,
+                        "desktop_window_restore":desktop_accessibility.restore_window,
+                        "desktop_window_close":desktop_accessibility.close_window}[kind]
+                action(title,process_id)
+                self.options.audit("desktop.window.action",{"activityId":a["id"],"action":kind.removeprefix("desktop_window_"),"processId":process_id})
+                if kind=="desktop_window_close":
+                    deadline=time.monotonic()+float(a.get("timeoutSeconds",15))
+                    while True:
+                        self._check_cancel()
+                        if not desktop_accessibility.window_exists(title,process_id):return
+                        remaining=deadline-time.monotonic()
+                        if remaining<=0:raise WorkflowError("The close request was sent, but the target window remained open; it may be waiting for an in-app confirmation",a["id"],"desktop-window-close-timeout")
+                        time.sleep(min(0.2,remaining))
+                return
+            except WorkflowError:
+                raise
+            except Exception as exc:
+                raise WorkflowError(f"Desktop window action failed: {type(exc).__name__}: {exc}",a["id"],"desktop-window-error") from exc
         if kind.startswith("desktop_ui_"):
             try:
                 from . import desktop_accessibility
@@ -1681,6 +2667,49 @@ class WorkflowEngine:
                 if not runtime.get("available"):
                     raise WorkflowError(runtime.get("reason") or "Windows UI Automation is unavailable",a["id"],"runtime-unavailable")
                 title=str(interpolate(a.get("windowTitle",""),v))
+                if kind=="desktop_ui_select_many":
+                    selected=desktop_accessibility.set_selection(
+                        title,a.get("name"),a.get("automationId"),a.get("controlType","List"),
+                        a.get("values",[]),a.get("mode","replace"),a.get("processId"))
+                    v[a.get("result","selectedItems")]=selected
+                    return
+                if kind == "desktop_ui_grid_read":
+                    name=a.get("name");automation_id=a.get("automationId");control_type=a.get("controlType","DataGrid");process_id=a.get("processId")
+                    timeout=min(max(float(a.get("timeoutSeconds",10)),1),120);deadline=time.monotonic()+timeout
+                    while True:
+                        self._check_cancel()
+                        observed=desktop_accessibility.control_state(title,name,automation_id,control_type,process_id)
+                        if observed is not None and observed.get("visible") and observed.get("enabled"):break
+                        remaining=deadline-time.monotonic()
+                        if remaining<=0:raise WorkflowError(f"Timed out after {timeout:g}s waiting for the selected UIA grid to become visible and enabled",a["id"],"desktop-uia-timeout")
+                        time.sleep(min(0.2,remaining))
+                    rows, metadata = desktop_accessibility.read_grid(
+                        title, name, automation_id, control_type,
+                        a.get("maxRows",100), a.get("maxColumns",30), a.get("maxOutputChars",50000), process_id)
+                    v[a.get("result","rows")]=rows
+                    metadata_result=a.get("metadataResult","gridMetadata")
+                    if metadata_result:v[metadata_result]=metadata
+                    return
+                if kind == "desktop_ui_set_range_value":
+                    name=a.get("name");automation_id=a.get("automationId");control_type=a.get("controlType","Slider");process_id=a.get("processId")
+                    timeout=min(max(float(a.get("timeoutSeconds",10)),1),120);deadline=time.monotonic()+timeout
+                    while True:
+                        self._check_cancel()
+                        observed=desktop_accessibility.control_state(title,name,automation_id,control_type,process_id)
+                        if observed is not None and observed.get("visible") and observed.get("enabled"):break
+                        remaining=deadline-time.monotonic()
+                        if remaining<=0:raise WorkflowError(f"Timed out after {timeout:g}s waiting for the selected Slider or Spinner to become visible and enabled",a["id"],"desktop-uia-timeout")
+                        time.sleep(min(0.2,remaining))
+                    requested=interpolate(a.get("value"),v)
+                    if isinstance(requested,bool) or not isinstance(requested,(int,float)) or not math.isfinite(requested):raise WorkflowError("Set UI Range Value expression must produce a finite number",a["id"],"desktop-uia-range-value")
+                    desktop_accessibility.set_range_value(title,name,automation_id,control_type,float(requested),process_id)
+                    return
+                if kind == "desktop_ui_drag":
+                    self._check_cancel()
+                    desktop_accessibility.drag(title, a.get("sourceName"), a.get("sourceAutomationId"), a.get("sourceControlType"),
+                                               a.get("targetName"), a.get("targetAutomationId"), a.get("targetControlType"),
+                                               a.get("durationMilliseconds",500), a.get("processId"))
+                    return
                 name=a.get("name")
                 automation_id=a.get("automationId")
                 control_type=a.get("controlType")
@@ -1690,14 +2719,23 @@ class WorkflowEngine:
                     self._check_cancel()
                     return desktop_accessibility.control_state(title,name,automation_id,control_type,process_id)
                 desired={"desktop_ui_wait":a.get("state","exists"),
-                         "desktop_ui_click":"enabled","desktop_ui_fill":"enabled",
-                         "desktop_ui_text":"exists"}[kind]
+                         "desktop_ui_click":"enabled","desktop_ui_press":"enabled","desktop_ui_fill":"enabled",
+                         "desktop_ui_invoke":"enabled",
+                         "desktop_ui_text":"exists","desktop_ui_select":"enabled",
+                         "desktop_ui_check":"enabled","desktop_ui_uncheck":"enabled","desktop_ui_set_range_value":"enabled",
+                         "desktop_ui_expand":"enabled","desktop_ui_collapse":"enabled"}[kind]
                 deadline=time.monotonic()+timeout
                 observed=None
                 while True:
                     observed=state()
                     ready=(observed is not None if desired=="exists" else
                            observed is None or not observed["visible"] if desired=="not_visible" else
+                           observed is not None and bool(observed.get("checked")) if desired=="checked" else
+                           observed is not None and observed.get("checked") is False if desired=="unchecked" else
+                           observed is not None and bool(observed.get("selected")) if desired=="selected" else
+                           observed is not None and observed.get("selected") is False if desired=="unselected" else
+                           observed is not None and observed.get("expanded") is True if desired=="expanded" else
+                           observed is not None and observed.get("expanded") is False if desired=="collapsed" else
                            observed is not None and observed.get(desired,False))
                     if ready:break
                     remaining=deadline-time.monotonic()
@@ -1707,13 +2745,50 @@ class WorkflowEngine:
                     time.sleep(min(0.2,remaining))
                 if kind=="desktop_ui_wait":return
                 if kind=="desktop_ui_click":desktop_accessibility.click(title,name,automation_id,control_type,process_id)
+                elif kind=="desktop_ui_invoke":desktop_accessibility.invoke(title,name,automation_id,control_type,process_id)
+                elif kind=="desktop_ui_press":desktop_accessibility.press(title,name,automation_id,control_type,a.get("key","Enter"),process_id)
                 elif kind=="desktop_ui_fill":desktop_accessibility.fill(title,name,automation_id,control_type,str(interpolate(a.get("value",""),v)),process_id)
+                elif kind=="desktop_ui_set_range_value":
+                    requested=interpolate(a.get("value"),v)
+                    if isinstance(requested,bool) or not isinstance(requested,(int,float)) or not math.isfinite(requested):raise WorkflowError("Set UI Range Value expression must produce a finite number",a["id"],"desktop-uia-range-value")
+                    desktop_accessibility.set_range_value(title,name,automation_id,control_type,float(requested),process_id)
+                elif kind=="desktop_ui_select":desktop_accessibility.select(title,name,automation_id,control_type,str(interpolate(a.get("value",""),v)),process_id)
+                elif kind=="desktop_ui_check":desktop_accessibility.set_checked(title,name,automation_id,control_type,True,process_id)
+                elif kind=="desktop_ui_uncheck":desktop_accessibility.set_checked(title,name,automation_id,control_type,False,process_id)
+                elif kind=="desktop_ui_expand":desktop_accessibility.set_expanded(title,name,automation_id,control_type,True,process_id)
+                elif kind=="desktop_ui_collapse":desktop_accessibility.set_expanded(title,name,automation_id,control_type,False,process_id)
                 elif kind=="desktop_ui_text":v[a.get("result","text")]=desktop_accessibility.read_text(title,name,automation_id,control_type,process_id)
                 return
             except WorkflowError:
                 raise
             except Exception as exc:
                 raise WorkflowError(f"Desktop accessibility failed: {type(exc).__name__}: {exc}",a["id"],"desktop-uia-error") from exc
+        if kind=="desktop_launch_app":
+            self._check_cancel()
+            raw_executable=str(interpolate(a.get("executable",""),v))
+            try:
+                executable=Path(raw_executable).expanduser().resolve(strict=True)
+                if not executable.is_file():
+                    raise WorkflowError("The configured application path is not a file",a["id"],"desktop-app-not-found")
+                arguments=a.get("arguments",[])
+                command=[str(executable),*(str(interpolate(argument,v)) for argument in arguments)]
+                # Never invoke a shell or inherit the workflow engine's standard streams.
+                creationflags=getattr(subprocess,"CREATE_NEW_PROCESS_GROUP",0) if os.name=="nt" else 0
+                process=subprocess.Popen(command,cwd=str(self.root),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,shell=False,close_fds=True,creationflags=creationflags,
+                    start_new_session=(os.name!="nt"))
+                pid=int(process.pid)
+                import threading
+                threading.Thread(target=process.wait,name=f"openrpa-child-reaper-{pid}",daemon=True).start()
+                result=str(a.get("result","processId"))
+                v[result]=pid
+                self.options.audit("desktop.application_launched",{"activityId":a["id"],"executable":executable.name,"argumentCount":len(arguments),"processId":pid})
+                return
+            except WorkflowError:
+                raise
+            except (OSError,ValueError,TypeError) as exc:
+                code="desktop-app-not-found" if isinstance(exc,FileNotFoundError) else "desktop-app-launch-error"
+                raise WorkflowError(f"Could not launch the configured application ({type(exc).__name__}): {exc}",a["id"],code) from exc
         try:
             import pyautogui
         except ImportError as exc:

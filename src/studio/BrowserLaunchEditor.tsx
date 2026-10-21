@@ -1,0 +1,23 @@
+import type { Activity } from './types';
+
+export type BrowserStatus={engines?:Record<string,{available:boolean}>;channels?:Record<string,{available:boolean;executable?:string|null;name?:string}>};
+
+export function BrowserLaunchEditor({activity,onChange,browserStatus}:{activity:Activity;onChange:(patch:Record<string,unknown>)=>void;browserStatus?:BrowserStatus}){
+  const browserType=String(activity.browserType??'chromium');
+  const channel=String(activity.channel??'chromium');
+  const executablePath=String(activity.executablePath??'');
+  const detected=Object.entries(browserStatus?.channels??{}).filter(([id,item])=>!['chromium','chrome','msedge'].includes(id)&&item.available&&item.executable);
+  const selectedInstalled=detected.find(([,item])=>item.executable===executablePath)?.[0];
+  const selectedStatus=browserType==='chromium'?(selectedInstalled?browserStatus?.channels?.[selectedInstalled]:channel==='custom'?undefined:browserStatus?.channels?.[channel]):browserStatus?.engines?.[browserType];
+  return <section className="selector-fallback-editor browser-launch-editor">
+    <div className="selector-fallback-heading"><strong>BROWSER SESSION</strong></div>
+    <div className="field"><label htmlFor="browser-engine">Browser engine</label><select id="browser-engine" value={browserType} onChange={event=>onChange({browserType:event.target.value,channel:'chromium',executablePath:''})}><option value="chromium">Chromium</option><option value="firefox">Firefox</option><option value="webkit">WebKit</option></select></div>
+    {browserType==='chromium'&&<>
+      <div className="field"><label htmlFor="browser-channel">Chromium browser</label><select id="browser-channel" value={selectedInstalled?`installed:${selectedInstalled}`:channel} onChange={event=>{const value=event.target.value;if(value.startsWith('installed:')){const id=value.slice(10);onChange({channel:'custom',executablePath:browserStatus?.channels?.[id]?.executable??''});}else onChange({channel:value,executablePath:value==='custom'?executablePath:''});}}><option value="chromium">Playwright Chromium</option><option value="chrome">Google Chrome</option><option value="msedge">Microsoft Edge</option>{detected.length>0&&<optgroup label="Detected installed browsers">{detected.map(([id,item])=><option key={id} value={`installed:${id}`}>{item.name??id}</option>)}</optgroup>}<option value="custom">Custom Chromium browser…</option></select></div>
+      {channel==='custom'&&<div className="field"><label htmlFor="browser-executable">Browser executable path</label><input id="browser-executable" placeholder="Absolute path to a Chromium-based browser" value={executablePath} onChange={event=>onChange({executablePath:event.target.value})}/><small className="field-hint">Brave, Vivaldi, Opera and other Chromium-based browsers can use this launch mode.</small></div>}
+    </>}
+    <div className="field"><label htmlFor="browser-profile-name">Persistent session profile (optional)</label><input id="browser-profile-name" maxLength={40} pattern="[A-Za-z][A-Za-z0-9_-]{0,39}" placeholder="e.g. WorkAccount" value={String(activity.profileName??'')} onChange={event=>onChange({profileName:event.target.value})}/><small className="field-hint">Sign in once in the visible automation browser and reuse this isolated session in later workflows. Cookies and local storage stay in this computer’s app data, separate from your normal browser and project exports. Using a saved session requires per-run desktop permission. Leave blank for a fresh session.</small></div>
+    <small className="field-hint" role="status">{browserType==='chromium'&&channel==='custom'?selectedInstalled?`${browserStatus?.channels?.[selectedInstalled]?.name??selectedInstalled} detected; compatibility is checked when the workflow launches it.`:executablePath.trim()?'Custom executable will be checked when the workflow runs.':'Enter an executable path; it will be checked when the workflow runs.':!browserStatus?'Checking installed browser runtimes…':selectedStatus?.available?'Executable detected. Compatibility is confirmed when the browser launches.':'This runtime was not detected. Install its Playwright browser runtime or select an installed browser.'}</small>
+    <div className="field"><label>Window visibility</label><label className="checkbox-field"><input aria-label="Run browser headless" type="checkbox" checked={activity.headless===true} onChange={event=>onChange({headless:event.target.checked})}/>{activity.headless===true?'Run hidden (headless)':'Show browser window while running'}</label><small className="field-hint">When you ask to watch a task, leave this off. Studio displays scroll progress in the run panel.</small></div>
+  </section>;
+}

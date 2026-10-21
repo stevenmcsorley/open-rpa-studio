@@ -16,7 +16,8 @@ impl Bridge {
         let base = if cfg!(debug_assertions) { std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..") } else { resource.join("engine") };
         // Windows releases carry a frozen Python bridge so users do not need
         // to install Python or configure PATH. Development keeps using Python.
-        let bundled_bridge = resource.join("engine").join(if cfg!(windows) { "openrpa-bridge.exe" } else { "openrpa-bridge" });
+        let bundled_name = format!("openrpa-bridge-{}{}", env!("CARGO_PKG_VERSION"), if cfg!(windows) { ".exe" } else { "" });
+        let bundled_bridge = resource.join("engine").join(bundled_name);
         let bundled = !cfg!(debug_assertions) && bundled_bridge.is_file();
         let python = if bundled { bundled_bridge.to_string_lossy().into_owned() } else if let Ok(p) = std::env::var("OPENRPA_PYTHON") { p } else if cfg!(windows) { "python".into() } else { "python3".into() };
         let mut cmd = Command::new(&python);

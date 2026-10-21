@@ -26,19 +26,23 @@ const LABELS: Record<string, string> = {
   csv_read: 'Read CSV', csv_write: 'Write CSV', xlsx_read: 'Read Excel workbook', pdf_read_text: 'Read PDF text', image_ocr: 'OCR image (local Tesseract)', sqlite_query: 'Query SQLite database',
   xlsx_write: 'Write Excel workbook', json_parse: 'Parse JSON', json_write: 'Write JSON',
   http_request: 'Send HTTP request', http_paginate: 'Read paginated API data', api_request: 'Call a saved API connection', browser_navigate: 'Open browser page', browser_goto: 'Open browser page',
-  browser_click: 'Click browser control', browser_fill: 'Fill browser control', browser_select: 'Select browser option',
-  browser_check: 'Change browser checkbox', browser_uncheck: 'Change browser checkbox', browser_wait: 'Wait for browser control',
-  browser_assert: 'Check browser page', browser_text: 'Read browser text', browser_table_read: 'Read web table', browser_record: 'Record browser actions',
-  browser_launch: 'Launch browser', browser_screenshot: 'Capture browser screenshot', browser_close: 'Close browser',
-  desktop_ui_click: 'Click desktop control', desktop_ui_fill: 'Set desktop text', desktop_ui_text: 'Read desktop text',
+  browser_click: 'Click browser control', browser_hover: 'Hover browser control', browser_press: 'Press browser key', browser_upload: 'Upload files through browser', browser_download: 'Download file through browser', browser_fill: 'Fill browser control', browser_select: 'Select browser option', browser_select_many: 'Select multiple browser options',
+  browser_check: 'Change browser checkbox', browser_uncheck: 'Change browser checkbox', browser_wait: 'Wait for browser control', browser_wait_response: 'Wait for browser response',
+  browser_assert: 'Check browser page', browser_text: 'Read browser text', browser_accessibility_snapshot: 'Read accessibility snapshot', browser_extract_records: 'Extract repeated web items', browser_table_read: 'Read web table', browser_scroll: 'Scroll web page', browser_record: 'Record browser actions',
+  browser_launch: 'Launch browser', browser_new_tab: 'Open browser tab', browser_capture_popup: 'Capture browser popup', browser_switch_tab: 'Switch browser tab', browser_close_tab: 'Close browser tab', browser_screenshot: 'Capture browser screenshot', browser_close: 'Close browser',
+  desktop_ui_click: 'Click desktop control', desktop_ui_drag: 'Drag desktop control', desktop_ui_grid_read: 'Read desktop data grid', desktop_ui_set_range_value: 'Set desktop slider or spinner', desktop_ui_invoke: 'Invoke desktop control', desktop_ui_press: 'Press key on desktop control', desktop_ui_fill: 'Set desktop text', desktop_ui_text: 'Read desktop text',
+  desktop_ocr_click: 'Click exact OCR text in desktop window',
   desktop_ui_wait: 'Wait for desktop control', desktop_click: 'Click screen coordinates', desktop_type: 'Type into desktop app',
+  desktop_ui_select: 'Select desktop option', desktop_ui_select_many: 'Set desktop list selection', desktop_ui_check: 'Check desktop control', desktop_ui_uncheck: 'Uncheck desktop control', desktop_ui_expand: 'Expand desktop tree item', desktop_ui_collapse: 'Collapse desktop tree item',
+  desktop_window_wait: 'Wait for desktop window', desktop_window_activate: 'Activate desktop window', desktop_window_minimize: 'Minimize desktop window', desktop_window_restore: 'Restore desktop window', desktop_window_close: 'Close desktop window',
+  desktop_launch_app: 'Launch desktop application',
   desktop_hotkey: 'Press desktop hotkey', desktop_press: 'Press desktop key', desktop_screenshot: 'Capture desktop screenshot',
   credential_get: 'Read saved credential', invoke_workflow: 'Call reusable workflow',
 };
 
 const FILE_READ = new Set(['file_read_text', 'file_list', 'csv_read', 'xlsx_read', 'pdf_read_text', 'image_ocr', 'sqlite_query']);
 const FILE_WRITE = new Set(['file_write_text', 'file_copy', 'csv_write', 'xlsx_write', 'json_write', 'desktop_screenshot', 'browser_screenshot']);
-const DESTRUCTIVE = new Set(['file_delete', 'file_move']);
+const DESTRUCTIVE = new Set(['file_delete', 'file_move', 'desktop_window_close']);
 
 function allActivities(workflow: Workflow): Record<string, unknown>[] {
   const found: Record<string, unknown>[] = [];
@@ -93,13 +97,13 @@ export function buildExecutionPlan(workflow: Workflow, workflows: Record<string,
     const isDesktop = type.startsWith('desktop_');
     let risk: PlannedAction['risk'] = 'read';
     let detail = 'No external effect identified';
-    if (DESTRUCTIVE.has(type)) { risk = 'destructive'; detail = type === 'file_move' ? `${valueDetail(source)} → ${valueDetail(destination)}` : valueDetail(path); }
+    if (DESTRUCTIVE.has(type)) { risk = 'destructive'; detail = type === 'file_move' ? `${valueDetail(source)} → ${valueDetail(destination)}` : type === 'desktop_window_close' ? `Close window ${valueDetail(item.windowTitle)}${item.processId?` (PID ${item.processId})`:''}` : valueDetail(path); }
     else if (FILE_WRITE.has(type)) { risk = 'write'; detail = type === 'file_copy' ? `${valueDetail(source)} → ${valueDetail(destination)}` : valueDetail(path); }
     else if (FILE_READ.has(type)) { risk = 'read'; detail = valueDetail(path); }
-    else if (type === 'api_request') { risk = 'external'; detail = `${String(item.method??'GET').toUpperCase()} ${valueDetail(item.connectionId)} ${valueDetail(item.path)}`; }
+    else if (type === 'api_request') { const method=String(item.method??'GET').toUpperCase(); risk = method==='DELETE'?'destructive':'external'; detail = `${method} ${valueDetail(item.connectionId)} ${valueDetail(item.path)}${method==='DELETE'?' · removes remote data':''}`; }
     else if (type === 'http_request' || type === 'http_paginate') { risk = 'external'; detail = `${type === 'http_paginate' ? 'GET (bounded pagination)' : String(item.method ?? 'GET').toUpperCase()} ${valueDetail(url)}`; }
-    else if (isBrowser) { risk = type === 'browser_text' || type === 'browser_table_read' || type === 'browser_wait' || type === 'browser_assert' ? 'read' : 'external'; detail = type === 'browser_navigate' || type === 'browser_goto' ? valueDetail(url) : 'Interacts with the active browser page'; }
-    else if (isDesktop) { risk = type.includes('click') || type.includes('fill') || type === 'desktop_type' || type === 'desktop_hotkey' || type === 'desktop_press' ? 'external' : 'read'; detail = typeof item.selector === 'string' ? item.selector : type === 'desktop_screenshot' ? valueDetail(path) : 'Interacts with the selected desktop application'; }
+    else if (isBrowser) { risk = type === 'browser_text' || type === 'browser_accessibility_snapshot' || type === 'browser_extract_records' || type === 'browser_table_read' || type === 'browser_wait' || type === 'browser_assert' || type === 'browser_wait_response' ? 'read' : 'external'; detail = type === 'browser_navigate' || type === 'browser_goto' ? valueDetail(url) : 'Interacts with the active browser page'; }
+    else if (isDesktop) { risk = type.includes('click') || type.includes('invoke') || type.includes('fill') || type.includes('select') || type.includes('check') || type.includes('expand') || type.includes('collapse') || type === 'desktop_type' || type === 'desktop_hotkey' || type === 'desktop_press' || type === 'desktop_launch_app' || type === 'desktop_window_activate' || type === 'desktop_window_minimize' || type === 'desktop_window_restore' ? 'external' : 'read'; detail = typeof item.selector === 'string' ? item.selector : type.startsWith('desktop_window_') ? `Window ${valueDetail(item.windowTitle)}${item.processId?` (PID ${item.processId})`:''}` : type === 'desktop_screenshot' ? valueDetail(path) : 'Interacts with the selected desktop application'; }
     else if (type === 'credential_get') { risk = 'read'; detail = 'Reads a credential by OS-vault reference'; }
     else { risk = 'external'; detail = 'Review the activity configuration before running'; }
     actions.push({ id, scope, type, label: LABELS[type] ?? type.replaceAll('_', ' '), detail, risk });
@@ -108,7 +112,7 @@ export function buildExecutionPlan(workflow: Workflow, workflows: Record<string,
   visit(workflow, workflowName, [workflowName], new Set([workflowName]));
   return {
     actions,
-    needsNetwork: actions.some(action => action.type === 'http_request' || action.type === 'http_paginate' || action.type === 'api_request' || action.type === 'browser_navigate' || (action.type === 'invoke_workflow' && (action.detail.includes('could not be inspected') || action.detail.includes('recursive call')))),
+    needsNetwork: actions.some(action => action.type === 'http_request' || action.type === 'http_paginate' || action.type === 'api_request' || action.type === 'browser_navigate' || (action.type.startsWith('browser_') && !['browser_launch','browser_close','browser_close_tab','browser_screenshot'].includes(action.type)) || (action.type === 'invoke_workflow' && (action.detail.includes('could not be inspected') || action.detail.includes('recursive call')))),
     needsDesktop: actions.some(action => action.type.startsWith('desktop_') || (action.type === 'invoke_workflow' && (action.detail.includes('could not be inspected') || action.detail.includes('recursive call')))),
     hasDestructiveActions: actions.some(action => action.risk === 'destructive'),
   };

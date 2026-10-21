@@ -5,6 +5,17 @@ import type { Workflow } from './types';
 const base: Workflow = { format: 'openrpa.workflow', formatVersion: 1, name: 'Main', variables: [], arguments: [], activities: [] };
 
 describe('run impact plan', () => {
+  it('plans an accessibility snapshot as a browser read',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'aria',type:'browser_accessibility_snapshot'}]});
+    expect(plan.actions[0]).toMatchObject({type:'browser_accessibility_snapshot',risk:'read',label:'Read accessibility snapshot'});
+  });
+  it('classifies API DELETE as destructive and requires a run confirmation',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'remove',type:'api_request',method:'DELETE',connectionId:'records',path:'/items/42'}]});
+    expect(plan.hasDestructiveActions).toBe(true);
+    expect(plan.actions[0]).toMatchObject({risk:'destructive',detail:'DELETE records /items/42 · removes remote data'});
+    expect(canStartWithPlan(plan,true,false,false)).toBe(false);
+    expect(canStartWithPlan(plan,true,false,true)).toBe(true);
+  });
   it('finds file, network and desktop actions nested under control flow', () => {
     const plan = buildExecutionPlan({ ...base, activities: [{ id: 'retry', type: 'retry', body: [
       { id: 'read', type: 'csv_read', path: 'data/orders.csv' },
@@ -82,6 +93,19 @@ describe('run impact plan', () => {
     expect(plan.actions).toEqual([expect.objectContaining({ id: 'table', label: 'Read web table', risk: 'read' })]);
   });
 
+  it('requires network permission for browser controls and tab navigation-capable actions', () => {
+    const plan=buildExecutionPlan({...base,activities:[
+      {id:'launch',type:'browser_launch'},
+      {id:'tab',type:'browser_new_tab',name:'details'},
+      {id:'switch',type:'browser_switch_tab',name:'main'},
+      {id:'click',type:'browser_click',selectorKind:'role',selector:'button:Continue'},
+      {id:'upload',type:'browser_upload',selectorKind:'css',selector:'input[type=file]',paths:['input/report.pdf']},
+      {id:'download',type:'browser_download',selectorKind:'role',selector:'link:Download',path:'output/file.pdf'},
+    ]});
+    expect(plan.needsNetwork).toBe(true);
+    expect(plan.actions.map(action=>action.label)).toEqual(['Launch browser','Open browser tab','Switch browser tab','Click browser control','Upload files through browser','Download file through browser']);
+  });
+
   it('covers flowchart nodes and state-machine activities', () => {
     const flowchart = buildExecutionPlan({ ...base, executionModel: 'flowchart', flowchart: {
       start: 's', nodes: [{ id: 's', kind: 'start' }, { id: 'a', kind: 'action', activity: { id: 'web', type: 'browser_navigate', url: 'https://example.org' } }, { id: 'e', kind: 'end' }],
@@ -124,5 +148,35 @@ describe('run impact plan', () => {
     expect(canStartWithPlan(plan, true, true, true)).toBe(true);
     const local = buildExecutionPlan({ ...base, activities: [{ id: 'write', type: 'file_write_text', path: 'out.txt' }] });
     expect(canStartWithPlan(local, false, false, false)).toBe(true);
+  });
+
+  it('labels semantic UIA invoke as a permission-gated desktop action',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'invoke',type:'desktop_ui_invoke',windowTitle:'Editor',automationId:'save'}]});
+    expect(plan.needsDesktop).toBe(true);
+    expect(plan.actions).toEqual([expect.objectContaining({id:'invoke',label:'Invoke desktop control',risk:'external'})]);
+  });
+
+  it('reviews tree navigation as an external desktop action and requires desktop permission',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'expand',type:'desktop_ui_expand',windowTitle:'Editor',automationId:'folder'},{id:'collapse',type:'desktop_ui_collapse',windowTitle:'Editor',automationId:'folder'}]});
+    expect(plan.needsDesktop).toBe(true);
+    expect(plan.actions.map(action=>action.risk)).toEqual(['external','external']);
+    expect(canStartWithPlan(plan,false,false,false)).toBe(false);
+  });
+
+  it('treats bounded browser response observation as a network read',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'response',type:'browser_wait_response',urlContains:'/api/orders',method:'GET'}]});
+    expect(plan.needsNetwork).toBe(true);
+    expect(plan.needsDesktop).toBe(false);
+    expect(plan.actions).toEqual([expect.objectContaining({id:'response',label:'Wait for browser response',risk:'read'})]);
+    expect(canStartWithPlan(plan,false,false,false)).toBe(false);
+  });
+
+  it('requires destructive confirmation before a workflow can close an application window',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'close',type:'desktop_window_close',windowTitle:'Editor',processId:99,confirmClose:true}]});
+    expect(plan.needsDesktop).toBe(true);
+    expect(plan.hasDestructiveActions).toBe(true);
+    expect(plan.actions).toEqual([expect.objectContaining({id:'close',risk:'destructive',detail:'Close window Editor (PID 99)'})]);
+    expect(canStartWithPlan(plan,false,false,false)).toBe(false);
+    expect(canStartWithPlan(plan,false,true,true)).toBe(true);
   });
 });

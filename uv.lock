@@ -490,7 +490,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/28/fa/b2ba8229b9381e8f6
 
 [[package]]
 name = "open-rpa-studio-engine"
-version = "0.1.39"
+version = "0.1.111"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },
@@ -508,6 +508,7 @@ credentials = [
 ]
 desktop = [
     { name = "pyautogui" },
+    { name = "python-xlib", marker = "sys_platform == 'linux'" },
     { name = "pywinauto", marker = "sys_platform == 'win32'" },
 ]
 dev = [
@@ -531,6 +532,7 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.19,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<9" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5,<7" },
+    { name = "python-xlib", marker = "sys_platform == 'linux' and extra == 'desktop'", specifier = ">=0.33,<1" },
     { name = "pywinauto", marker = "sys_platform == 'win32' and extra == 'desktop'", specifier = ">=0.6.9,<1" },
     { name = "regex", specifier = ">=2024.11,<2027" },
 ]
@@ -921,6 +923,18 @@ wheels = [
 ]
 
 [[package]]
+name = "python-xlib"
+version = "0.33"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/f5/8c0653e5bb54e0cbdfe27bf32d41f27bc4e12faa8742778c17f2a71be2c0/python-xlib-0.33.tar.gz", hash = "sha256:55af7906a2c75ce6cb280a584776080602444f75815a7aff4d287bb2d7018b32", size = 269068 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/b8/ff33610932e0ee81ae7f1269c890f697d56ff74b9f5b2ee5d9b7fa2c5355/python_xlib-0.33-py2.py3-none-any.whl", hash = "sha256:c3534038d42e0df2f1392a1b30a15a4ff5fdc2b86cfa94f072bf11b10a164398", size = 182185 },
+]
+
+[[package]]
 name = "python3-xlib"
 version = "0.15"
 source = { registry = "https://pypi.org/simple" }
@@ -969,6 +983,7 @@ version = "0.6.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "comtypes", marker = "sys_platform == 'win32'" },
+    { name = "python-xlib", marker = "sys_platform == 'linux'" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "six" },
 ]

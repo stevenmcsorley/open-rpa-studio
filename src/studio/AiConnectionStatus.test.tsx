@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AiConnectionStatus } from './AiConnectionStatus';
+import { AiConnectionStatus, isModelCatalogueRouteUnavailable } from './AiConnectionStatus';
 
 describe('AiConnectionStatus', () => {
   it('distinguishes a successful provider check from an empty model list', () => {
@@ -24,5 +24,13 @@ describe('AiConnectionStatus', () => {
     expect(html).toContain('Model catalogue unavailable');
     expect(html).toContain('enter a model ID to try generation');
     expect(html).toContain('HTTP 404');
+  });
+
+  it('only treats unsupported catalogue routes as a manual-model fallback',()=>{
+    expect(isModelCatalogueRouteUnavailable('Provider request failed with HTTP 404')).toBe(true);
+    expect(isModelCatalogueRouteUnavailable('Provider request failed with HTTP 405')).toBe(true);
+    expect(isModelCatalogueRouteUnavailable('Provider request failed with HTTP 501')).toBe(true);
+    expect(isModelCatalogueRouteUnavailable('Provider request failed with HTTP 401')).toBe(false);
+    expect(isModelCatalogueRouteUnavailable('Provider network request failed: TimeoutError')).toBe(false);
   });
 });

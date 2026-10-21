@@ -18,6 +18,49 @@ MAX_RUNS = 300
 MAX_AUDIT_EVENTS = 10_000
 
 
+def _read_only_db(path: Path) -> sqlite3.Connection | None:
+    """Open an existing history ledger without migrations or recovery writes."""
+    if not path.is_file():
+        return None
+    uri = path.resolve().as_uri() + "?mode=ro"
+    db = sqlite3.connect(uri, uri=True, timeout=0.5)
+    db.row_factory = None
+    db.execute("PRAGMA query_only=ON")
+    return db
+
+
+def read_runs(path: Path, limit: int = 50) -> list[dict[str, Any]]:
+    """Read another process' run ledger safely, including runs still in progress."""
+    db = _read_only_db(path)
+    if db is None:
+        return []
+    try:
+        rows = db.execute("SELECT run_id,project_path,project_name,workflow_name,workflow_sha256,status,started_at,ended_at,error_json,recovery_note FROM runs ORDER BY started_at DESC LIMIT ?", (max(1, min(int(limit), 200)),)).fetchall()
+        keys = ("runId", "projectPath", "projectName", "workflow", "workflowSha256", "status", "startedAt", "endedAt", "error", "recoveryNote")
+        return [dict(zip(keys, row[:8] + (json.loads(row[8]) if row[8] else None, row[9]))) for row in rows]
+    finally:
+        db.close()
+
+
+def read_run(path: Path, run_id: str) -> dict[str, Any] | None:
+    """Read one run and its events without changing its status or recovery note."""
+    db = _read_only_db(path)
+    if db is None:
+        return None
+    try:
+        row = db.execute("SELECT run_id,project_path,project_name,workflow_name,workflow_sha256,status,started_at,ended_at,result_json,error_json,recovery_note FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if not row:
+            return None
+        event_rows = db.execute("SELECT created_at,event_json FROM run_events WHERE run_id=? ORDER BY sequence", (run_id,)).fetchall()
+        keys = ("runId", "projectPath", "projectName", "workflow", "workflowSha256", "status", "startedAt", "endedAt")
+        record = dict(zip(keys, row[:8]))
+        record.update(result=json.loads(row[8]) if row[8] else None, error=json.loads(row[9]) if row[9] else None,
+                      recoveryNote=row[10], events=[{**json.loads(raw), "recordedAt": created_at} for created_at, raw in event_rows])
+        return record
+    finally:
+        db.close()
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 

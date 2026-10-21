@@ -59,6 +59,9 @@ def main() -> int:
                 if "error" in response:
                     raise RuntimeError(f"{execution_model} bridge request failed: {response['error'].get('type', 'error')}")
                 draft_result = response["result"]
+                usage=draft_result.get("usage")
+                if not isinstance(usage,dict) or not all(isinstance(usage.get(key),int) and usage[key]>=0 for key in ("inputTokens","outputTokens","totalTokens")):
+                    raise RuntimeError(f"{execution_model} draft did not return valid Ollama-reported token usage")
                 workflow = draft_result["workflow"]
                 problems = validate_workflow(workflow, {"Main"})
                 if not draft_result.get("valid") or problems:
@@ -91,7 +94,9 @@ def main() -> int:
                     "validated": True,
                     "runStatus": result.status,
                     "logEventCount": len(log_events),
-                    "compatibilityFallbackUsed": bool(draft_result.get("warnings")),
+                    "usage": usage,
+                    "compatibilityFallbackUsed": any("rejected JSON Schema mode" in warning for warning in draft_result.get("warnings", [])),
+                    "warnings": draft_result.get("warnings", []),
                     "elapsedSeconds": round(time.perf_counter() - started, 3),
                 })
         finally:

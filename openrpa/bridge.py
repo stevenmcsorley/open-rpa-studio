@@ -14,13 +14,16 @@ from pathlib import Path
 from typing import Any
 from .engine import RunOptions, run_project
 from .model import load_project, validate_workflow, validate_workflow_bindings
-from .history import RunHistory
+from .history import RunHistory, read_run, read_runs
 from . import ai_providers
 from . import ai_connections
 from . import api_connections
 from .debugger import DebugController
 from .browser_inspector import BrowserInspector
+from .desktop_recorder import DesktopClickRecorder, create_desktop_recorder, desktop_recorder_status
 from .activity_catalog import ACTIVITY_CATALOG
+from .active_project import publish_active_project, read_active_project
+from .app_paths import app_data_dir
 
 cancel_event = threading.Event()
 stdout_lock = threading.Lock()
@@ -29,18 +32,43 @@ active_run_id: str | None = None
 active_debugger: DebugController | None = None
 ai_draft_lock = threading.Lock()
 ai_draft_cancellations: dict[str, threading.Event] = {}
+api_auth_cancellations: dict[str, threading.Event] = {}
+api_auth_lock = threading.Lock()
 browser_inspector=BrowserInspector()
+desktop_recorder=create_desktop_recorder()
 atexit.register(browser_inspector.close)
+atexit.register(desktop_recorder.close)
 
 def _history_path() -> Path:
     configured = os.environ.get("OPENRPA_DATA_DIR")
     if configured:
         return Path(configured).expanduser() / "run-history.sqlite3"
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    return base / "OpenRPAStudio" / "run-history.sqlite3"
+    return app_data_dir() / "run-history.sqlite3"
+
+def _mcp_history_path(root: Path) -> Path | None:
+    """Locate MCP's per-project ledger, which the desktop reads without recovery writes."""
+    try:
+        project_root = root.resolve()
+        project_key = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:16]
+        configured = os.environ.get("OPENRPA_DATA_DIR")
+        if configured:
+            return Path(configured).expanduser() / f"mcp-run-history-{project_key}.sqlite3"
+        return app_data_dir() / f"mcp-run-history-{project_key}.sqlite3"
+    except (OSError, RuntimeError):
+        return None
+
+def _mcp_runs(limit: int) -> list[dict[str, Any]]:
+    root = read_active_project()
+    path = _mcp_history_path(root) if root else None
+    if path is None:
+        return []
+    return [{**item, "source": "MCP"} for item in read_runs(path, limit)]
+
+def _mcp_run(run_id: str) -> dict[str, Any] | None:
+    root = read_active_project()
+    path = _mcp_history_path(root) if root else None
+    item = read_run(path, run_id) if path else None
+    return {**item, "source": "MCP"} if item else None
 
 def _ai_connections_path() -> Path:
     return _history_path().parent / "ai-connections.json"
@@ -94,6 +122,23 @@ def _workflow_breakpoints(workflow: dict[str, Any]) -> set[str]:
             if isinstance(activities,list):walk(activities)
     return found
 
+
+def _api_request_connection_problems(workflow: dict[str, Any], profiles: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Ensure AI-generated API calls reference a connection configured locally."""
+    known={profile.get("id") for profile in profiles if isinstance(profile,dict)}
+    problems=[]
+    def visit(value: Any) -> None:
+        if isinstance(value,dict):
+            if value.get("type")=="api_request" and value.get("connectionId") not in known:
+                problems.append({"code":"api-connection-unknown",
+                    "message":"API Request must reference one of this computer's saved API connections; create a connection in API Connections and regenerate the draft.",
+                    "activityId":str(value.get("id", ""))})
+            for child in value.values(): visit(child)
+        elif isinstance(value,list):
+            for child in value: visit(child)
+    visit(workflow)
+    return problems
+
 def _workflow_breakpoint_conditions(workflow: dict[str, Any]) -> dict[str, str]:
     """Collect conditional activity breakpoints without treating graph guards as breakpoints."""
     found: dict[str, str] = {}
@@ -133,6 +178,67 @@ def _workflow_breakpoint_conditions(workflow: dict[str, Any]) -> dict[str, str]:
             if isinstance(state.get("activities"), list): walk(state["activities"])
     return found
 
+def _repair_flowchart_node_id_collisions(graph: Any) -> list[str]:
+    """Rename graph nodes that collide with their contained activity IDs.
+
+    Models commonly reuse an action's activity ID for its graph node. Node IDs
+    are structural references, so a deterministic rename plus edge rewrites is
+    safe; activity IDs (used by logs and breakpoints) remain untouched. Other
+    malformed graph IDs are left to normal validation.
+    """
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return []
+    nodes = graph["nodes"]
+    node_ids = [node.get("id") for node in nodes if isinstance(node, dict) and isinstance(node.get("id"), str)]
+    if len(node_ids) != len(set(node_ids)):
+        return []
+    activity_ids: set[str] = set()
+    def visit(activity: Any) -> None:
+        if not isinstance(activity, dict):
+            return
+        identifier = activity.get("id")
+        if isinstance(identifier, str):
+            activity_ids.add(identifier)
+        for branch in ("then", "else", "body", "catch", "finally", "default"):
+            children = activity.get(branch)
+            if isinstance(children, list):
+                for child in children: visit(child)
+        cases = activity.get("cases", [])
+        if isinstance(cases, list):
+            for case in cases:
+                if isinstance(case, dict) and isinstance(case.get("activities"), list):
+                    for child in case["activities"]: visit(child)
+    for node in nodes:
+        if isinstance(node, dict) and node.get("kind") == "action":
+            visit(node.get("activity"))
+    if not activity_ids.intersection(node_ids):
+        return []
+    reserved = set(node_ids) | activity_ids
+    mapping: dict[str, str] = {}
+    for index, node in enumerate(nodes, start=1):
+        if not isinstance(node, dict) or node.get("id") not in activity_ids:
+            continue
+        candidate = f"node-{index}"
+        suffix = 1
+        while candidate in reserved:
+            suffix += 1
+            candidate = f"node-{index}-{suffix}"
+        reserved.add(candidate)
+        mapping[node["id"]] = candidate
+        node["id"] = candidate
+    if not mapping:
+        return []
+    if graph.get("start") in mapping:
+        graph["start"] = mapping[graph["start"]]
+    transitions = graph.get("transitions")
+    if isinstance(transitions, list):
+        for transition in transitions:
+            if not isinstance(transition, dict):
+                continue
+            if transition.get("from") in mapping: transition["from"] = mapping[transition["from"]]
+            if transition.get("to") in mapping: transition["to"] = mapping[transition["to"]]
+    return ["Adjusted a flowchart node ID that collided with an activity ID; activity IDs were preserved."]
+
 def atomic_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=".openrpa-", suffix=".tmp", dir=path.parent)
@@ -162,6 +268,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
     try:
         if method == "project.open":
             project, root = load_project(params["path"])
+            publish_active_project(root)
             history.audit("project.open",{"project":project.get("name",""),"workflowCount":len(project.get("workflows",{}))})
             workflows = {}
             for key, rel in project["workflows"].items():
@@ -228,6 +335,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             workflow = {"format": "openrpa.workflow", "formatVersion": 1, "name": "Main", "variables": [], "arguments": [], "activities": []}
             atomic_json(wf_path, workflow)
             atomic_json(root / "project.json", project)
+            publish_active_project(root)
             history.audit("project.create",{"project":project.get("name",""),"workflowCount":len(project["workflows"])})
             result = {"project": project, "root": str(root), "workflows": {"Main": workflow}}
         elif method == "project.save":
@@ -294,7 +402,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 elif e.get("event") == "debug.variable-edited":
                     history.audit("debug.variable_edited", {"runId":run_id,"name":e.get("name"),"type":e.get("type")})
                 send({"event": "run.event", "data": {**e, "runId": run_id}})
-            options = RunOptions(allow_network=bool(params.get("allowNetwork", False)), allow_desktop=bool(params.get("allowDesktop", False)), cancel=cancel_event.is_set, event=record_event, audit=history.audit,debugger=debugger,api_connections_path=_api_connections_path())
+            if params.get("allowDestructive") is True: history.audit("permission.granted", {"runId":run_id,"permission":"destructive","source":"studio-run-confirmation"})
+            options = RunOptions(allow_network=bool(params.get("allowNetwork", False)), allow_desktop=bool(params.get("allowDesktop", False)), allow_destructive=bool(params.get("allowDestructive",False)), cancel=cancel_event.is_set, event=record_event, audit=history.audit,debugger=debugger,api_connections_path=_api_connections_path())
             def run_and_reply() -> None:
                 global active_run_id, active_debugger
                 try:
@@ -353,9 +462,19 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 raise ValueError("No debug run is active")
             result = active_debugger.evaluate_watch(params.get("expression"))
         elif method == "run.history":
-            result = {"runs": history.list_runs(params.get("limit", 50))}
+            limit = params.get("limit", 50)
+            runs = [{**item, "source": "Studio"} for item in history.list_runs(limit)]
+            runs.extend(_mcp_runs(limit))
+            runs.sort(key=lambda item: item.get("startedAt", ""), reverse=True)
+            result = {"runs": runs[:max(1, min(int(limit), 200))]}
         elif method == "run.get":
-            result = {"run": history.get_run(str(params.get("runId", "")))}
+            run_id = str(params.get("runId", ""))
+            record = history.get_run(run_id)
+            if record is not None:
+                record["source"] = "Studio"
+            else:
+                record = _mcp_run(run_id)
+            result = {"run": record}
         elif method == "run.export":
             run_id = params.get("runId")
             destination = params.get("destination")
@@ -364,6 +483,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             if not isinstance(destination, str) or not destination.strip():
                 raise ValueError("A destination file is required for evidence export")
             record = history.get_run(run_id)
+            if record is None:
+                record = _mcp_run(run_id)
             if record is None:
                 raise ValueError("The selected run no longer exists in durable history")
             envelope = {"format": "openrpa.run-evidence", "formatVersion": 1, "run": record}
@@ -377,21 +498,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
         elif method == "activity.catalog":
             result = ACTIVITY_CATALOG
         elif method == "adapter.status":
-            browser = {"available": False, "reason": "Optional Playwright package is not installed"}
-            try:
-                from playwright.sync_api import sync_playwright
-                with sync_playwright() as runtime:
-                    executable = Path(runtime.chromium.executable_path)
-                    if executable.is_file():
-                        test_browser=runtime.chromium.launch(headless=True)
-                        test_browser.close()
-                        browser = {"available": True, "reason": None, "engine": "Chromium", "executablePresent": True}
-                    else:
-                        browser = {"available": False, "reason": "Playwright is installed, but Chromium is missing; run 'playwright install chromium'", "engine": "Chromium", "executablePresent": False}
-            except ImportError:
-                pass
-            except Exception as exc:
-                browser = {"available": False, "reason": f"Playwright runtime probe failed: {type(exc).__name__}: {exc}"}
+            from .browser_runtime import status as browser_runtime_status
+            browser = browser_runtime_status()
             desktop = {"available": False, "reason": "Optional PyAutoGUI package is not installed"}
             try:
                 import pyautogui
@@ -406,6 +514,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 desktop = {"available": False, "reason": f"Desktop probe failed: {type(exc).__name__}: {exc}"}
             from . import desktop_accessibility
             accessibility = desktop_accessibility.status()
+            desktop_recorder_status_value = desktop_recorder_status()
             try:
                 from .credentials import get_safe_keyring
                 get_safe_keyring()
@@ -425,7 +534,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                     if version.returncode==0:ocr.update({"available":True,"reason":None,"engine":"Tesseract","version":(version.stdout.splitlines() or [""])[0][:120]})
                     else:ocr.update({"available":False,"reason":"Tesseract was found but its runtime probe failed"})
                 except Exception as exc:ocr.update({"available":False,"reason":f"Tesseract runtime probe failed: {type(exc).__name__}"})
-            result = {"browser": browser, "desktop": desktop, "accessibility": accessibility,"credentialVault":vault,"ocr":ocr}
+            result = {"browser": browser, "desktop": desktop, "accessibility": accessibility,
+                      "desktopRecorder": desktop_recorder_status_value,"credentialVault":vault,"ocr":ocr}
         elif method == "desktop.inspect.windows":
             if params.get("allowDesktop") is not True:
                 raise ValueError("Desktop inspection requires explicit desktop permission in the Studio toolbar")
@@ -440,13 +550,27 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             controls=desktop_accessibility.list_controls(str(params.get("windowTitle","")),params.get("processId"))
             history.audit("desktop.accessibility_controls_inspected",{"count":len(controls)})
             result={"controls":controls}
+        elif method == "desktop.inspect.record.start":
+            if params.get("allowDesktop") is not True:
+                raise ValueError("Desktop recording requires explicit desktop permission in the Studio toolbar")
+            record_keyboard=params.get("recordKeyboard",sys.platform=="win32")
+            result=desktop_recorder.start(str(params.get("windowTitle","")),params.get("processId"),record_keyboard)
+            history.audit("desktop.recorder_start",{"processId":result["processId"],"targetScoped":True,"keyboardCapture":bool(result.get("recordKeyboard",False)),"mode":result.get("mode")})
+        elif method == "desktop.inspect.record.stop":
+            result=desktop_recorder.stop()
+            history.audit("desktop.recorder_stop",{"processId":result["processId"],"eventCount":len(result["events"]),"ignoredClicks":result["ignoredClicks"],"ignoredKeys":result["ignoredKeys"],"truncated":result["truncated"],"mode":result.get("mode")})
         elif method == "browser.inspect.open":
             if params.get("allowNetwork") is not True:
                 raise ValueError("Browser inspection requires explicit network permission in the Studio toolbar")
-            opened=browser_inspector.open(str(params.get("url","")))
+            opened=browser_inspector.open(str(params.get("url","")),str(params.get("browserType","chromium")),str(params.get("channel","chromium")),str(params.get("executablePath","")))
             from urllib.parse import urlsplit
             history.audit("browser.inspector_open",{"host":urlsplit(opened["url"]).hostname,"networkPermission":True})
             result=opened
+        elif method == "browser.inspect.probe":
+            from .browser_runtime import probe as probe_browser_runtime
+            probed=probe_browser_runtime(str(params.get("browserType","chromium")),str(params.get("channel","chromium")),str(params.get("executablePath","")))
+            history.audit("browser.runtime_probe",{"browserType":probed["browserType"],"channel":probed["channel"],"success":True,"networkUsed":False})
+            result=probed
         elif method == "browser.inspect.controls":
             result=browser_inspector.controls()
         elif method == "browser.inspect.record.start":
@@ -476,7 +600,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
         elif method == "api.connections.list":
             profiles=api_connections.list_profiles(_api_connections_path())
             for profile in profiles:
-                profile["credentialStored"]=api_connections.has_secret(profile["id"]) if profile["authType"]!="none" else False
+                profile["credentialStored"]=api_connections.has_oauth_tokens(profile["id"]) if profile["authType"]=="oauth_authorization_code" else api_connections.has_secret(profile["id"]) if profile["authType"]!="none" else False
+                profile["clientSecretStored"]=api_connections.has_secret(profile["id"]) if profile["authType"]=="oauth_authorization_code" else False
             result={"profiles":profiles}
         elif method == "api.connections.save":
             store_path=_api_connections_path()
@@ -487,12 +612,19 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 except ValueError:pass
             profile=api_connections.save_profile(store_path,proposed)
             secret=params.get("secret")
-            if secret is not None:api_connections.store_secret(profile["id"],secret)
-            elif previous and previous["authType"] not in {"none",profile["authType"]}:
-                # Never reinterpret a bearer token as an API key (or vice versa).
+            auth_material_changed=previous is not None and any(previous.get(key)!=profile.get(key) for key in ("authType","baseUrl","tokenUrl","authorizationUrl","clientId","clientAuthMethod","scope","audience"))
+            if previous and previous["authType"]!=profile["authType"]:
+                # Never reinterpret a credential or OAuth grant under a different API authentication mode.
                 api_connections.delete_secret(profile["id"])
-            history.audit("api.connection.save",{"profileId":profile["id"],"authType":profile["authType"],"credentialProvided":secret is not None})
-            result={"profile":profile,"credentialStored":api_connections.has_secret(profile["id"]) if profile["authType"]!="none" else False}
+            if auth_material_changed:
+                api_connections.delete_oauth_tokens(profile["id"])
+                if previous and any(previous.get(key)!=profile.get(key) for key in ("clientId","clientAuthMethod")):
+                    api_connections.delete_secret(profile["id"])
+            if secret is not None and profile["authType"]=="oauth_authorization_code":api_connections.delete_oauth_tokens(profile["id"])
+            if secret is not None:api_connections.store_secret(profile["id"],secret)
+            history.audit("api.connection.save",{"profileId":profile["id"],"authType":profile["authType"],"credentialProvided":secret is not None,"authorizationReset":auth_material_changed})
+            credential_stored=api_connections.has_oauth_tokens(profile["id"]) if profile["authType"]=="oauth_authorization_code" else api_connections.has_secret(profile["id"]) if profile["authType"]!="none" else False
+            result={"profile":profile,"credentialStored":credential_stored,"clientSecretStored":api_connections.has_secret(profile["id"]) if profile["authType"]=="oauth_authorization_code" else False}
         elif method == "api.connections.delete":
             profile_id=params.get("profileId")
             api_connections.delete_profile(_api_connections_path(),profile_id)
@@ -518,9 +650,49 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                     token,expires=api_connections.request_oauth_token(profile,secret,restricted_http_request,20)
                     headers["Authorization"]="Bearer "+token
                     history.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname})
+            elif profile["authType"]=="oauth_authorization_code":
+                secret=api_connections.read_secret(profile["id"]) if profile["clientAuthMethod"]!="none" else ""
+                token=api_connections.authorization_code_access_token(profile,restricted_http_request,secret,20)
+                headers["Authorization"]="Bearer "+token
+                history.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname,"grant":"authorization_code"})
             response=restricted_http_request(url,"GET",headers,None,10,65536)
             history.audit("api.connection.test",{"profileId":profile["id"],"host":parts.hostname,"status":response.get("status")})
             result={"status":response.get("status"),"ok":200<=int(response.get("status",0))<300,"contentType":next((value for key,value in response.get("headers",{}).items() if key.lower()=="content-type"),"")[:200]}
+        elif method == "api.connections.authorize":
+            if params.get("allowNetwork") is not True:raise ValueError("Authorizing an API connection requires enabling Allow network")
+            profile=api_connections.get_profile(_api_connections_path(),str(params.get("profileId","")))
+            if profile["authType"]!="oauth_authorization_code":raise ValueError("This API connection does not use OAuth authorization code")
+            secret=api_connections.read_secret(profile["id"]) if profile["clientAuthMethod"]!="none" else ""
+            from .network import request as restricted_http_request
+            tokens=api_connections.authorize_with_system_browser(profile,restricted_http_request,secret,180,cancel=ai_cancel)
+            api_connections.store_oauth_tokens(profile["id"],tokens)
+            history.audit("api.oauth.authorize",{"connectionId":profile["id"],"authorizationHost":urlsplit(profile["authorizationUrl"]).hostname,"tokenHost":urlsplit(profile["tokenUrl"]).hostname,"granted":True})
+            result={"authorized":True,"credentialStored":True}
+        elif method == "api.connections.authorize.cancel":
+            profile_id=str(params.get("profileId",""))
+            with api_auth_lock:cancellation=api_auth_cancellations.get(profile_id)
+            if cancellation is not None:cancellation.set()
+            result={"cancelled":cancellation is not None}
+        elif method == "openapi.fetch":
+            if params.get("allowNetwork") is not True:raise ValueError("Fetching an OpenAPI URL requires enabling Allow network")
+            from urllib.parse import urlsplit
+            from .network import request as restricted_http_request
+            url=params.get("url")
+            if not isinstance(url,str) or not url.strip() or len(url)>2048:raise ValueError("OpenAPI URL must contain 1–2,048 characters")
+            url=url.strip();parts=urlsplit(url)
+            if parts.scheme!="https" or not parts.hostname or parts.username is not None or parts.password is not None or parts.fragment:
+                raise ValueError("OpenAPI documents must use an absolute HTTPS URL without embedded credentials or a fragment")
+            host=parts.hostname.lower()
+            history.audit("openapi.fetch",{"host":host,"status":"started"})
+            response=restricted_http_request(url,"GET",{"Accept":"application/json, application/yaml, text/yaml, text/plain;q=0.9"},None,15,2_000_000)
+            status=int(response.get("status",0));body=response.get("body","")
+            if status<200 or status>=300 or response.get("redirectBlocked"):
+                raise ValueError(f"OpenAPI document fetch failed with HTTP {status}; redirects are not followed")
+            if not isinstance(body,str) or not body.strip():raise ValueError("OpenAPI document response was empty")
+            size=len(body.encode("utf-8"))
+            if size>2_000_000:raise ValueError("OpenAPI document response exceeds the 2 MB limit")
+            history.audit("openapi.fetch",{"host":host,"status":status,"bytes":size})
+            result={"text":body}
         elif method == "credential.store":
             service=params.get("service")
             username=params.get("username")
@@ -542,7 +714,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
         elif method == "ai.models":
             provider=str(params.get("provider","ollama"))
             history.audit("ai.models",{"provider":provider,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
-            models=ai_providers.models(provider,params.get("baseUrl"),params.get("credentialService"),params.get("credentialUsername"))
+            models=ai_providers.models(provider,params.get("baseUrl"),params.get("credentialService"),params.get("credentialUsername"),params.get("credentialMode","bearer"),params.get("credentialHeader","api-key"))
             result={"models":models,"provider":provider}
         elif method == "ai.cancel":
             draft_id=params.get("draftId")
@@ -558,6 +730,12 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             provider=str(params.get("provider","ollama"))
             model=str(params.get("model","")).strip()
             types=[x["type"] for x in ACTIVITY_CATALOG]
+            # API profiles contain only non-secret configuration in this local store.
+            # Send the smallest useful allowlisted metadata to help the model select
+            # an existing connection; the OS-vault credential is never read here.
+            saved_api_profiles=api_connections.list_profiles(_api_connections_path(),check_public_destinations=False)
+            ai_api_profiles=[{key:profile[key] for key in ("id","name","baseUrl","authType")}
+                for profile in saved_api_profiles]
             execution_model=str(params.get("executionModel","sequence"))
             history.audit("ai.draft",{"provider":provider,"model":model[:200],"workflowModel":execution_model,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
             compatibility_warnings=[]
@@ -566,15 +744,20 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 history.audit("ai.structured_output_fallback",{"provider":provider,"model":model[:200]})
             draft=ai_providers.draft(provider,model,params.get("prompt",""),types,params.get("baseUrl"),
                 params.get("credentialService"),params.get("credentialUsername"),execution_model,ai_cancel,
-                on_compatibility_fallback=record_ai_compatibility_fallback)
+                on_compatibility_fallback=record_ai_compatibility_fallback,
+                api_connections=ai_api_profiles,credential_mode=params.get("credentialMode","bearer"),
+                credential_header=params.get("credentialHeader","api-key"),activity_catalog=ACTIVITY_CATALOG)
             if ai_cancel is not None and ai_cancel.is_set():
                 raise ai_providers.RequestCancelled("Provider request was cancelled")
+            usage=draft.pop("_openrpa_usage",None) if isinstance(draft,dict) else None
             payload_key={"sequence":"activities","flowchart":"flowchart","state_machine":"stateMachine"}.get(execution_model)
             if payload_key is None:raise ValueError("AI workflow model must be sequence, flowchart, or state_machine")
             if not isinstance(draft,dict) or set(draft)-{"explanation",payload_key}:
                 raise ValueError(f"Model output must contain explanation and {payload_key} only")
             payload=draft.get(payload_key)
             activities=payload if execution_model=="sequence" else ([node.get("activity") for node in payload.get("nodes",[]) if isinstance(node,dict) and node.get("kind")=="action"] if execution_model=="flowchart" and isinstance(payload,dict) else ([state.get("activities",[]) for state in payload.get("states",[]) if isinstance(state,dict)] if execution_model=="state_machine" and isinstance(payload,dict) else []))
+            if execution_model == "flowchart":
+                compatibility_warnings.extend(_repair_flowchart_node_id_collisions(payload))
             if execution_model=="sequence" and (not isinstance(activities,list) or len(activities)>300):raise ValueError("Model draft must contain no more than 300 activities")
             def count_activities(items: list[Any]) -> int:
                 total=0
@@ -594,7 +777,10 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             workflow={"format":"openrpa.workflow","formatVersion":1,"name":"AI Draft","variables":[],"arguments":[],"activities":[] if execution_model!="sequence" else activities}
             if execution_model!="sequence":workflow["executionModel"]=execution_model;workflow["flowchart" if execution_model=="flowchart" else "stateMachine"]=payload
             problems=validate_workflow(workflow,set(params.get("workflows",["Main"])))
-            result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider,"warnings":compatibility_warnings}
+            problems.extend(_api_request_connection_problems(workflow,saved_api_profiles))
+            if isinstance(usage,dict):
+                history.audit("ai.draft.usage",{"provider":provider,"model":model[:200],**usage})
+            result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider,"warnings":compatibility_warnings,"usage":usage}
         else:
             raise ValueError(f"Unknown bridge method: {method}")
         send({"id": request.get("id"), "result": result})
@@ -610,29 +796,33 @@ def main() -> None:
         request: Any = None
         try:
             request=json.loads(line)
-            if request.get("method")!="ai.draft":
+            if request.get("method") not in {"ai.draft","api.connections.authorize"}:
                 handle(request)
                 continue
             params=request.get("params",{})
-            draft_id=params.get("draftId",str(request.get("id","")))
-            if not isinstance(draft_id,str) or not draft_id or len(draft_id)>128:
-                raise ValueError("AI draft requires a valid draft ID")
+            is_ai=request.get("method")=="ai.draft"
+            operation_id=params.get("draftId",str(request.get("id",""))) if is_ai else str(params.get("profileId",""))
+            if not isinstance(operation_id,str) or not operation_id or len(operation_id)>128:
+                raise ValueError("AI draft or API authorization requires a valid identifier")
             cancellation=threading.Event()
-            with ai_draft_lock:
-                if draft_id in ai_draft_cancellations:
-                    raise ValueError("An AI draft with this ID is already active")
-                ai_draft_cancellations[draft_id]=cancellation
+            lock=ai_draft_lock if is_ai else api_auth_lock
+            active=ai_draft_cancellations if is_ai else api_auth_cancellations
+            with lock:
+                if operation_id in active:
+                    raise ValueError("This AI draft or API authorization is already active")
+                active[operation_id]=cancellation
 
-            def finish_draft(current_request: dict[str, Any]=request, current_id: str=draft_id,
-                             current_cancel: threading.Event=cancellation) -> None:
+            def finish_operation(current_request: dict[str, Any]=request, current_id: str=operation_id,
+                                 current_cancel: threading.Event=cancellation, current_ai: bool=is_ai) -> None:
                 try:
                     handle(current_request,current_cancel)
                 finally:
-                    with ai_draft_lock:
-                        if ai_draft_cancellations.get(current_id) is current_cancel:
-                            ai_draft_cancellations.pop(current_id,None)
+                    current_lock=ai_draft_lock if current_ai else api_auth_lock
+                    current_active=ai_draft_cancellations if current_ai else api_auth_cancellations
+                    with current_lock:
+                        if current_active.get(current_id) is current_cancel:current_active.pop(current_id,None)
 
-            threading.Thread(target=finish_draft,name="openrpa-ai-draft",daemon=True).start()
+            threading.Thread(target=finish_operation,name="openrpa-ai-draft" if is_ai else "openrpa-api-oauth",daemon=True).start()
         except Exception as exc:
             send({"id":request.get("id") if isinstance(request,dict) else None,
                   "error": {"message": str(exc), "type": type(exc).__name__}})

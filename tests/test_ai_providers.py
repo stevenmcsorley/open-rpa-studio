@@ -9,7 +9,58 @@ from openrpa import ai_providers as ai
 
 def test_provider_catalog_includes_local_and_remote_families():
     ids={item["id"] for item in ai.catalog()}
-    assert {"ollama","lm_studio","local_openai_compatible","openai","openai_responses","claude","openrouter","openai_compatible"} <= ids
+    assert {"ollama","lm_studio","local_openai_compatible","openai","openai_responses","claude","openrouter","gemini","openai_compatible"} <= ids
+
+
+@pytest.mark.parametrize("provider,response,expected",[
+    ("ollama",{"prompt_eval_count":120,"eval_count":40},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
+    ("openai",{"usage":{"prompt_tokens":120,"completion_tokens":40,"total_tokens":160}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
+    ("openai_responses",{"usage":{"input_tokens":120,"output_tokens":40,"total_tokens":160}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
+    ("claude",{"usage":{"input_tokens":120,"output_tokens":40}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
+    ("gemini",{"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":40,"totalTokenCount":160}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
+])
+def test_provider_usage_normalizes_reported_token_counts(provider,response,expected):
+    assert ai._usage(response,provider)==expected
+
+
+def test_provider_usage_ignores_invalid_counts_and_model_supplied_metadata():
+    assert ai._usage({"usage":{"prompt_tokens":True,"completion_tokens":-1,"total_tokens":1_000_000_001}},"openai") is None
+    draft={"explanation":"safe","activities":[],"_openrpa_usage":{"totalTokens":999}}
+    assert ai._attach_usage(draft,{"usage":{"prompt_tokens":2,"completion_tokens":3}},"openai")=={
+        "explanation":"safe","activities":[],"_openrpa_usage":{"inputTokens":2,"outputTokens":3,"totalTokens":5}}
+
+
+def test_gemini_draft_uses_native_generate_content_schema_and_key_header(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"gemini-secret")
+    seen={}
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    def call(url,local,method="GET",**kwargs):
+        seen.update(url=url,local=local,method=method,body=kwargs["body"],secret=kwargs["secret"],provider=kwargs["provider"])
+        return {"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":json.dumps(draft)}]}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("gemini","gemini-2.5-flash","make a log",["log"],credential_service="s",credential_username="u")
+    assert result==draft
+    assert seen["url"]=="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    assert seen["method"]=="POST" and seen["secret"]=="gemini-secret" and seen["provider"]=="gemini"
+    assert seen["body"]["generationConfig"]["responseMimeType"]=="application/json"
+    assert seen["body"]["generationConfig"]["responseSchema"]["required"]==["explanation","activities"]
+    assert "make a log" not in seen["body"]["systemInstruction"]["parts"][0]["text"]
+    assert json.loads(seen["body"]["contents"][0]["parts"][0]["text"])=={"task_description":"make a log"}
+
+
+def test_gemini_schema_rewrites_const_and_drops_unsupported_string_length_constraints():
+    assert ai._gemini_schema({"type":"string","const":"start","minLength":1})=={"type":"string","enum":["start"]}
+
+
+@pytest.mark.parametrize("response,message",[
+    ({"promptFeedback":{"blockReason":"SAFETY"}},"blocked"),
+    ({"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[]}}]},"truncated"),
+    ({"candidates":[{"finishReason":"SAFETY","content":{"parts":[]}}]},"refused"),
+    ({"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"not-json"}]}}]},"malformed"),
+])
+def test_gemini_reports_blocked_truncated_refused_and_malformed_drafts(response,message):
+    with pytest.raises(ValueError,match=message):
+        ai._gemini_text(response)
 
 
 @pytest.mark.parametrize("provider,url",[
@@ -75,18 +126,110 @@ def test_models_calls_openai_compatible_endpoint(monkeypatch):
     assert seen["url"]=="https://api.example/v1/models"
 
 
+def test_custom_api_key_header_is_used_for_generic_compatible_requests(monkeypatch):
+    requests=[]
+    monkeypatch.setattr(ai,"restricted_request",lambda url,method,headers,body,timeout,max_bytes,cancel:
+        (requests.append((url,headers.copy())) or {"status":200,"body":json.dumps({"data":[{"id":"model-a"}]})}))
+    monkeypatch.setattr(ai,"_credential",lambda *_:"vault-secret")
+    result=ai._call("https://api.example/v1/models",False,secret="vault-secret",provider="openai_compatible",
+        credential_mode="api_key_header",credential_header="x-api-key")
+    assert result=={"data":[{"id":"model-a"}]}
+    assert requests[0][1]["x-api-key"]=="vault-secret"
+    assert "Authorization" not in requests[0][1]
+
+
+def test_models_loads_custom_api_key_from_vault_and_applies_header(monkeypatch):
+    seen=[]
+    monkeypatch.setattr(ai,"_credential",lambda service,username:("vault-secret" if (service,username)==("gateway","main") else None))
+    monkeypatch.setattr(ai,"restricted_request",lambda url,method,headers,body,timeout,max_bytes,cancel:
+        (seen.append((url,headers.copy())) or {"status":200,"body":'{"data":[{"id":"model-x"}]}'}))
+    assert ai.models("openai_compatible","https://gateway.example/v1","gateway","main","api_key_header","x-api-key")==["model-x"]
+    assert seen[0][0]=="https://gateway.example/v1/models"
+    assert seen[0][1]["x-api-key"]=="vault-secret"
+    assert "Authorization" not in seen[0][1]
+
+
+@pytest.mark.parametrize("header",["Authorization","Cookie","bad header","x-api-key\\r\\nInjected: yes"])
+def test_custom_api_key_header_rejects_unsafe_names(header):
+    with pytest.raises(ValueError):
+        ai._provider_auth_header("openai_compatible","api_key_header",header)
+
+
+def test_custom_api_key_header_is_limited_to_remote_compatible_provider():
+    with pytest.raises(ValueError,match="only for OpenAI-compatible"):
+        ai._provider_auth_header("openai","api_key_header","x-api-key")
+
+
+def test_claude_model_catalog_follows_bounded_opaque_cursor_pages(monkeypatch):
+    pages=[
+        {"data":[{"id":"claude-a"},{"id":"claude-b"}],"has_more":True,"last_id":"cursor / opaque"},
+        {"data":[{"id":"claude-b"},{"id":"claude-c"}],"has_more":False,"last_id":"claude-c"},
+    ]
+    seen=[]
+    monkeypatch.setattr(ai,"_credential",lambda *_:"claude-key")
+    def call(url,local,**kwargs):
+        seen.append((url,local,kwargs["headers"],kwargs["secret"],kwargs["provider"]))
+        return pages.pop(0)
+    monkeypatch.setattr(ai,"_call",call)
+    assert ai.models("claude")==["claude-a","claude-b","claude-c"]
+    assert seen==[
+        ("https://api.anthropic.com/v1/models?limit=1000",False,{"anthropic-version":"2023-06-01"},"claude-key","claude"),
+        ("https://api.anthropic.com/v1/models?limit=1000&after_id=cursor+%2F+opaque",False,{"anthropic-version":"2023-06-01"},"claude-key","claude"),
+    ]
+
+
+@pytest.mark.parametrize("response",[
+    {"data":[],"has_more":True},
+    {"data":[{"id":"model-a"}],"has_more":True,"last_id":"model-a"},
+])
+def test_claude_model_catalog_fails_closed_on_missing_or_repeated_cursor(monkeypatch,response):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"claude-key")
+    monkeypatch.setattr(ai,"_call",lambda *_args,**_kwargs:response)
+    with pytest.raises(ValueError,match="more pages"):
+        ai.models("claude")
+
+
+def test_gemini_model_catalog_reads_model_names(monkeypatch):
+    seen={}
+    monkeypatch.setattr(ai,"_credential",lambda *_:"gemini-secret")
+    def call(url,local,**kwargs):
+        seen.update(url=url,secret=kwargs["secret"],provider=kwargs["provider"])
+        return {"models":[{"name":"models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash"}]}
+    monkeypatch.setattr(ai,"_call",call)
+    assert ai.models("gemini",credential_service="s",credential_username="u")==["models/gemini-2.5-flash"]
+    assert seen=={"url":"https://generativelanguage.googleapis.com/v1beta/models","secret":"gemini-secret","provider":"gemini"}
+
+
+def test_gemini_key_is_sent_only_in_its_dedicated_header(monkeypatch):
+    seen={}
+    def request(url,method,headers,body,timeout,max_bytes,cancel):
+        seen.update(url=url,headers=headers)
+        return {"status":200,"body":"{}"}
+    monkeypatch.setattr(ai,"restricted_request",request)
+    assert ai._call("https://generativelanguage.googleapis.com/v1beta/models",False,
+        secret="private-key",provider="gemini")=={}
+    assert seen["headers"]["x-goog-api-key"]=="private-key"
+    assert "Authorization" not in seen["headers"]
+    assert "private-key" not in seen["url"]
+
+
 def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
     seen={}
     def call(url,local,method="GET",**kwargs):
         seen.update(url=url,method=method,body=kwargs["body"])
         return {"choices":[{"message":{"content":json.dumps({"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]})}}]}
     monkeypatch.setattr(ai,"_call",call)
-    result=ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1")
+    result=ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1",
+        activity_catalog=[{"type":"log","title":"Log Message","category":"Workflow","description":"Write a structured log entry.","defaults":{"level":"info","message":""},"vaultSecret":"must-not-send"},
+            {"type":"file_delete","title":"Delete File","category":"Files","description":"not allowed for this draft","defaults":{"path":"x"}}])
     assert result["activities"][0]["type"]=="log"
     assert seen["url"].endswith("/chat/completions") and seen["method"]=="POST"
     assert seen["body"]["response_format"]["type"]=="json_schema"
     messages=seen["body"]["messages"]
     assert len(messages)==2 and messages[0]["role"]=="system" and messages[1]["role"]=="user"
+    assert "Canonical native activity reference" in messages[0]["content"]
+    assert '"type":"log"' in messages[0]["content"] and '"message":""' in messages[0]["content"]
+    assert '"type":"file_delete"' not in messages[0]["content"] and "must-not-send" not in messages[0]["content"]
     assert json.loads(messages[1]["content"])=={"task_description":"make a log"}
     assert "make a log" not in messages[0]["content"]
 
@@ -298,6 +441,14 @@ def test_claude_state_machine_draft_uses_state_machine_tool_shape(monkeypatch):
     assert "stateMachine" in seen["schema"]["required"]
 
 
+@pytest.mark.parametrize("stop_reason,message",[("max_tokens","truncated"),("refusal","refused")])
+def test_claude_refusal_and_output_truncation_are_distinguished(monkeypatch,stop_reason,message):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    monkeypatch.setattr(ai,"_call",lambda *a,**k:{"stop_reason":stop_reason,"content":[]})
+    with pytest.raises(ValueError,match=message):
+        ai.draft("claude","model-x","make a workflow",["log"],credential_service="s",credential_username="u")
+
+
 def test_graph_schema_requires_discriminated_nodes_and_well_formed_states():
     flowchart=ai._schema("flowchart")["properties"]["flowchart"]["properties"]["nodes"]["items"]["oneOf"]
     nodes={row["properties"]["kind"]["const"]:row for row in flowchart}
@@ -333,9 +484,29 @@ def test_task_is_encoded_as_untrusted_json_data_for_all_provider_prompts(monkeyp
     user_message=seen["body"]["messages"][1]["content"]
     assert json.loads(user_message)=={"task_description":prompt}
     assert prompt not in seen["body"]["messages"][0]["content"]
+    instructions=seen["body"]["messages"][0]["content"]
+    assert "headless=false" in instructions and "browser_scroll" in instructions and "browser_extract_records" in instructions
+    assert "browser_capture_popup" in instructions and "browser_switch_tab" in instructions
 
 
 def test_ollama_malformed_draft_fails_closed(monkeypatch):
     monkeypatch.setattr(ai,"_call",lambda *a,**k:{"response":"not json"})
     with pytest.raises(ValueError,match="malformed structured output"):
         ai.draft("ollama","model-x","do a thing",["log"])
+
+
+def test_api_draft_exposes_only_allowlisted_connection_metadata(monkeypatch):
+    profile={"id":"profile-123","name":"Broker","baseUrl":"https://broker.example/v1","authType":"bearer",
+        "headers":{"X-Private":"header-secret"},"clientId":"private-client","credential":"vault-reference"}
+    request={"explanation":"Read portfolio","activities":[{"id":"portfolio","type":"api_request","connectionId":"profile-123","method":"GET","path":"/portfolio","query":{},"headers":{},"result":"response"}]}
+    seen={}
+    def call(url,local,method="GET",**kwargs):
+        seen["system"]=kwargs["body"]["messages"][0]["content"]
+        return {"choices":[{"message":{"content":json.dumps(request)}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("openai_compatible","model-x","read my portfolio",["api_request"],"https://api.example/v1",api_connections=[profile])
+    assert result==request
+    assert "profile-123" in seen["system"] and "https://broker.example/v1" in seen["system"]
+    assert "header-secret" not in seen["system"] and "X-Private" not in seen["system"]
+    assert "private-client" not in seen["system"] and "vault-reference" not in seen["system"]
+    assert "OS vault" in seen["system"] and "Allow network" in seen["system"]

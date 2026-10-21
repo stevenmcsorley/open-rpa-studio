@@ -43,6 +43,42 @@ def test_bridge_rejects_ai_output_for_a_different_model(monkeypatch):
     assert "stateMachine" in replies[-1]["error"]["message"]
 
 
+def test_bridge_returns_and_audits_provider_reported_token_usage_only(monkeypatch):
+    replies=[];audits=[]
+    monkeypatch.setattr(bridge,"send",replies.append)
+    monkeypatch.setattr(bridge.history,"audit",lambda action,details:audits.append((action,details)))
+    monkeypatch.setattr(bridge.ai_providers,"draft",lambda *_args,**_kwargs:{
+        "explanation":"safe","activities":[{"id":"message","type":"log","message":"hello"}],
+        "_openrpa_usage":{"inputTokens":12,"outputTokens":7,"totalTokens":19}})
+    bridge.handle({"id":90,"method":"ai.draft","params":{"provider":"ollama","model":"local","prompt":"make a workflow","workflows":["Main"]}})
+    assert replies[-1]["result"]["usage"]=={"inputTokens":12,"outputTokens":7,"totalTokens":19}
+    assert ("ai.draft.usage",{"provider":"ollama","model":"local","inputTokens":12,"outputTokens":7,"totalTokens":19}) in audits
+
+
+def test_bridge_passes_safe_api_profiles_and_rejects_unknown_connection_ids(monkeypatch):
+    replies=[];captured={}
+    profile={"id":"profile-123","name":"Broker","baseUrl":"https://broker.example/v1","authType":"bearer",
+        "headers":{"X-Private":"do-not-send"},"clientId":"do-not-send"}
+    payload={"explanation":"Read portfolio","activities":[{"id":"portfolio","type":"api_request","connectionId":"profile-123","method":"GET","path":"/portfolio","query":{},"headers":{},"result":"response"}]}
+    monkeypatch.setattr(bridge,"send",replies.append)
+    monkeypatch.setattr(bridge.history,"audit",lambda *_args,**_kwargs:None)
+    monkeypatch.setattr(bridge.api_connections,"list_profiles",lambda _path,**_kwargs:[profile])
+    def draft(*_args,api_connections=None,**_kwargs):
+        captured["profiles"]=api_connections
+        return payload
+    monkeypatch.setattr(bridge.ai_providers,"draft",draft)
+    request={"id":91,"method":"ai.draft","params":{"provider":"ollama","model":"local","prompt":"read my portfolio","workflows":["Main"]}}
+    bridge.handle(request)
+    assert captured["profiles"]==[{key:profile[key] for key in ("id","name","baseUrl","authType")}]
+    assert replies[-1]["result"]["valid"] is True
+
+    payload["activities"][0]["connectionId"]="invented-profile"
+    bridge.handle(request)
+    result=replies[-1]["result"]
+    assert result["valid"] is False
+    assert any(problem["code"]=="api-connection-unknown" for problem in result["problems"])
+
+
 def test_bridge_returns_and_audits_structured_output_compatibility_fallback(monkeypatch):
     replies=[];audits=[]
     monkeypatch.setattr(bridge,"send",replies.append)
@@ -54,6 +90,28 @@ def test_bridge_returns_and_audits_structured_output_compatibility_fallback(monk
     bridge.handle({"id":9,"method":"ai.draft","params":{"provider":"openai_compatible","model":"model-1","prompt":"create a log","executionModel":"sequence","workflows":["Main"]}})
     assert replies[-1]["result"]["warnings"]==["Retried with schema-guided JSON"]
     assert ("ai.structured_output_fallback",{"provider":"openai_compatible","model":"model-1"}) in audits
+
+
+def test_bridge_forwards_custom_auth_header_to_model_catalog_and_drafting(monkeypatch):
+    replies=[];seen={}
+    monkeypatch.setattr(bridge,"send",replies.append)
+    def models(*args):
+        seen["models"]=args
+        return ["model-x"]
+    monkeypatch.setattr(bridge.ai_providers,"models",models)
+    def draft(*args,**kwargs):
+        seen["draft"]=(args,kwargs)
+        return {"explanation":"ok","activities":[{"id":"message","type":"log","message":"hello"}]}
+    monkeypatch.setattr(bridge.ai_providers,"draft",draft)
+    common={"provider":"openai_compatible","baseUrl":"https://gateway.example/v1","credentialService":"vault-service",
+        "credentialUsername":"primary","credentialMode":"api_key_header","credentialHeader":"x-api-key"}
+    bridge.handle({"id":31,"method":"ai.models","params":common})
+    bridge.handle({"id":32,"method":"ai.draft","params":{**common,"model":"model-x","prompt":"write a log","workflows":["Main"]}})
+    assert seen["models"]==("openai_compatible","https://gateway.example/v1","vault-service","primary","api_key_header","x-api-key")
+    assert seen["draft"][1]["credential_mode"]=="api_key_header"
+    assert seen["draft"][1]["credential_header"]=="x-api-key"
+    assert seen["draft"][1]["activity_catalog"]==bridge.ACTIVITY_CATALOG
+    assert "vault-secret" not in str(replies)
 
 
 def test_bridge_end_to_end_local_provider_fallback_is_validated_and_disclosed(monkeypatch):

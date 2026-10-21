@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Any
 import json
 import math
+import re
 from pathlib import PureWindowsPath
 from decimal import Decimal
+from .desktop_keys import SUPPORTED_DESKTOP_KEYS
 
 FORMAT = "openrpa.workflow"
 VERSION = 1
@@ -157,8 +159,8 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(connection_id,str) or not connection_id or len(connection_id)>64:
                     problems.append({"code":"api-connection-id","message":"API Request requires a saved connection id","activityId":str(aid or "")})
                 method=item.get("method","GET")
-                if not isinstance(method,str) or method.upper() not in {"GET","POST","PUT","PATCH"}:
-                    problems.append({"code":"api-method","message":"API Request method must be GET, POST, PUT, or PATCH","activityId":str(aid or "")})
+                if not isinstance(method,str) or method.upper() not in {"GET","POST","PUT","PATCH","DELETE"}:
+                    problems.append({"code":"api-method","message":"API Request method must be GET, POST, PUT, PATCH, or DELETE","activityId":str(aid or "")})
                 path=item.get("path","/")
                 if not isinstance(path,str) or len(path)>8192:
                     problems.append({"code":"api-path","message":"API Request path must be text no longer than 8,192 characters","activityId":str(aid or "")})
@@ -166,10 +168,10 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(query,dict) or len(query)>100 or any(not isinstance(key,str) or not key or len(key)>256 for key in query):
                     problems.append({"code":"api-query","message":"API Request query must be an object with at most 100 named parameters","activityId":str(aid or "")})
                 headers=item.get("headers",{})
-                if not isinstance(headers,dict) or len(headers)>50 or any(not isinstance(key,str) or not key or len(key)>128 or "\r" in key or "\n" in key or not isinstance(value,str) or len(value)>8192 or "\r" in value or "\n" in value for key,value in headers.items()):
-                    problems.append({"code":"api-request-headers","message":"API Request headers must be an object of at most 50 bounded single-line text values","activityId":str(aid or "")})
-                elif any(key.lower() in {"host","content-length","transfer-encoding","connection","authorization","cookie","proxy-authorization"} for key in headers):
-                    problems.append({"code":"api-request-header-restricted","message":"API Request cannot override authentication or transport headers","activityId":str(aid or "")})
+                if not isinstance(headers,dict) or len(headers)>50 or any(not isinstance(key,str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}",key) or not isinstance(value,str) or len(value)>8192 or "\r" in value or "\n" in value for key,value in headers.items()):
+                    problems.append({"code":"api-request-headers","message":"API Request headers must use valid HTTP token names and at most 50 bounded single-line text values","activityId":str(aid or "")})
+                elif any(key.lower() in {"host","content-length","transfer-encoding","connection","authorization","cookie","set-cookie","proxy-authorization"} or any(term in key.lower() for term in ("token","secret","api-key","api_key","apikey","password","credential")) for key in headers):
+                    problems.append({"code":"api-request-header-restricted","message":"API Request cannot contain authentication, credential, or transport headers; configure credentials on the saved connection","activityId":str(aid or "")})
                 timeout=item.get("timeoutSeconds",20)
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=60:
                     problems.append({"code":"api-request-timeout","message":"API Request timeoutSeconds must be between 1 and 60","activityId":str(aid or "")})
@@ -180,6 +182,55 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(result,str) or not result.isidentifier():
                     problems.append({"code":"api-request-result","message":"API Request result must be a variable name","activityId":str(aid or "")})
                 mapping=item.get("responseMapping")
+                pagination=item.get("pagination")
+                if pagination is not None:
+                    if not isinstance(pagination,dict):
+                        problems.append({"code":"api-pagination","message":"API Request pagination must be an object","activityId":str(aid or "")})
+                    else:
+                        strategy=pagination.get("strategy")
+                        if strategy not in {"cursor","next_link"}:
+                            problems.append({"code":"api-pagination-strategy","message":"API Request pagination strategy must be cursor or next_link","activityId":str(aid or "")})
+                        if not isinstance(method,str) or method.upper()!="GET" or item.get("body") is not None:
+                            problems.append({"code":"api-pagination-method","message":"API Request pagination supports GET requests without a body","activityId":str(aid or "")})
+                        if mapping is not None:
+                            problems.append({"code":"api-pagination-mapping","message":"API Request pagination cannot be combined with responseMapping","activityId":str(aid or "")})
+                        for field_name in ("itemsPointer", "cursorPointer", "nextLinkPointer"):
+                            pointer=pagination.get(field_name)
+                            required=field_name=="itemsPointer" or (strategy=="cursor" and field_name=="cursorPointer") or (strategy=="next_link" and field_name=="nextLinkPointer")
+                            if required and not _valid_json_pointer(pointer):
+                                problems.append({"code":"api-pagination-pointer","message":f"API pagination {field_name} must be an RFC 6901 JSON Pointer","activityId":str(aid or "")})
+                        for field_name in ("cursorParam",):
+                            value=pagination.get(field_name)
+                            if strategy=="cursor" and (not isinstance(value,str) or not value or len(value)>256):
+                                problems.append({"code":"api-pagination-param","message":"Cursor pagination cursorParam must be 1–256 characters","activityId":str(aid or "")})
+                        for field_name, default, minimum, maximum in (("maxPages",10,1,50),("maxItems",10000,1,100000),("maxTotalBytes",5000000,1024,20000000)):
+                            value=pagination.get(field_name,default)
+                            if not isinstance(value,int) or isinstance(value,bool) or not minimum<=value<=maximum:
+                                problems.append({"code":"api-pagination-limit","message":f"API pagination {field_name} must be an integer from {minimum} to {maximum}","activityId":str(aid or "")})
+                        for field_name,default,optional in (("result","items",False),("metadataResult","pagination",True)):
+                            value=pagination.get(field_name,default)
+                            if not isinstance(value,str) or (optional and value and not value.isidentifier()) or (not optional and not value.isidentifier()):
+                                problems.append({"code":"api-pagination-result","message":f"API pagination {field_name} must be a variable name" if not optional else "API pagination metadataResult must be empty or a variable name","activityId":str(aid or "")})
+                        names=[result,pagination.get("result","items")]
+                        if pagination.get("metadataResult","pagination"):names.append(pagination.get("metadataResult","pagination"))
+                        if all(isinstance(value,str) for value in names) and len(set(names))!=len(names):
+                            problems.append({"code":"api-pagination-result-conflict","message":"Raw response, paginated items, and pagination metadata need different variable names","activityId":str(aid or "")})
+                retry_policy=item.get("retryPolicy")
+                if retry_policy is not None:
+                    if not isinstance(retry_policy,dict):
+                        problems.append({"code":"api-retry-policy","message":"API Request retryPolicy must be an object","activityId":str(aid or "")})
+                    else:
+                        attempts=retry_policy.get("maxAttempts",1)
+                        if not isinstance(attempts,int) or isinstance(attempts,bool) or not 1<=attempts<=5:
+                            problems.append({"code":"api-retry-attempts","message":"API Request maxAttempts must be an integer from 1 to 5","activityId":str(aid or "")})
+                        delay=retry_policy.get("delaySeconds",0.5)
+                        if not isinstance(delay,(int,float)) or isinstance(delay,bool) or not math.isfinite(delay) or not 0<=delay<=10:
+                            problems.append({"code":"api-retry-delay","message":"API Request delaySeconds must be between 0 and 10","activityId":str(aid or "")})
+                        factor=retry_policy.get("backoffFactor",2)
+                        if not isinstance(factor,(int,float)) or isinstance(factor,bool) or not math.isfinite(factor) or not 1<=factor<=3:
+                            problems.append({"code":"api-retry-backoff","message":"API Request backoffFactor must be between 1 and 3","activityId":str(aid or "")})
+                        if attempts!=1 and (not isinstance(method,str) or method.upper()!="GET" or item.get("body") is not None):
+                            problems.append({"code":"api-retry-safety","message":"Automatic API retries are available only for GET requests without a body; DELETE and other methods are never retried","activityId":str(aid or "")})
                 if mapping is not None:
                     if not isinstance(mapping,dict):
                         problems.append({"code":"api-response-mapping","message":"API Request responseMapping must be an object","activityId":str(aid or "")})
@@ -461,6 +512,19 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(psm,int) or isinstance(psm,bool) or not 0<=psm<=13:problems.append({"code":"ocr-psm","message":"OCR Image pageSegmentationMode must be an integer from 0 to 13","activityId":str(aid or "")})
                 timeout=item.get("timeoutSeconds",60)
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=300:problems.append({"code":"ocr-timeout","message":"OCR Image timeoutSeconds must be from 1 to 300","activityId":str(aid or "")})
+            elif typ == "desktop_ocr_click":
+                title=item.get("windowTitle")
+                if not isinstance(title,str) or not title.strip() or len(title)>512:problems.append({"code":"desktop-ocr-window","message":"OCR Click needs an exact visible windowTitle of 1–512 characters","activityId":str(aid or "")})
+                target=item.get("text")
+                if not isinstance(target,str) or not target.strip() or len(target)>512:problems.append({"code":"desktop-ocr-text","message":"OCR Click text must contain 1–512 characters","activityId":str(aid or "")})
+                process_id=item.get("processId")
+                if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):problems.append({"code":"desktop-ocr-process-id","message":"OCR Click processId must be a positive integer","activityId":str(aid or "")})
+                confidence=item.get("confidenceThreshold",80)
+                if not isinstance(confidence,int) or isinstance(confidence,bool) or not 0<=confidence<=100:problems.append({"code":"desktop-ocr-confidence","message":"OCR Click confidenceThreshold must be an integer from 0 to 100","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",15)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=60:problems.append({"code":"desktop-ocr-timeout","message":"OCR Click timeoutSeconds must be from 1 to 60","activityId":str(aid or "")})
+                result=item.get("result","ocrMatch")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"desktop-ocr-result","message":"OCR Click result must be a variable name","activityId":str(aid or "")})
             elif typ == "sqlite_query":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"sqlite-path","message":"SQLite Query needs a non-empty database path","activityId":str(aid or "")})
                 query=item.get("query")
@@ -475,18 +539,26 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:problems.append({"code":"sqlite-timeout","message":"SQLite Query timeoutSeconds must be from 1 to 120","activityId":str(aid or "")})
             elif typ not in ACTIVITY_TYPES:
                 problems.append({"code": "activity-unsupported", "message": f"Unsupported activity type: {typ}", "activityId": str(aid or "")})
-            if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_table_read","browser_wait","browser_assert"}:
+            if typ in {"browser_click","browser_hover","browser_press","browser_upload","browser_download","browser_fill","browser_select","browser_select_many","browser_check","browser_uncheck","browser_text","browser_extract_records","browser_table_read","browser_wait","browser_assert"}:
                 selector_kind=item.get("selectorKind","role")
                 if not isinstance(selector_kind,str) or selector_kind not in {"role","label","text","placeholder","test_id","css"}:
                     problems.append({"code":"browser-selector-kind","message":"Browser selectorKind must be role, label, text, placeholder, test_id, or css","activityId":str(aid or "")})
                 selector=item.get("selector")
                 if not isinstance(selector,str) or not selector.strip() or len(selector)>2048:
                     problems.append({"code":"browser-selector","message":"Browser selector must contain 1–2,048 characters","activityId":str(aid or "")})
+                frame_selector=item.get("frameSelector")
+                if frame_selector is not None and (not isinstance(frame_selector,str) or len(frame_selector)>2048 or "\x00" in frame_selector or (frame_selector and not frame_selector.strip())):
+                    problems.append({"code":"browser-frame-selector","message":"frameSelector must be empty or a CSS selector of at most 2,048 characters","activityId":str(aid or "")})
                 timeout=item.get("timeoutSeconds",15)
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
                     problems.append({"code":"browser-timeout","message":"Browser timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
                 if "exact" in item and not isinstance(item["exact"],bool):
                     problems.append({"code":"browser-exact","message":"Browser exact must be a boolean","activityId":str(aid or "")})
+                healing=item.get("selectorHealing","off")
+                if not isinstance(healing,str) or healing not in {"off","accessible_role"}:
+                    problems.append({"code":"browser-selector-healing","message":"selectorHealing must be off or accessible_role","activityId":str(aid or "")})
+                elif healing=="accessible_role" and (selector_kind!="role" or item.get("exact",True) is not True):
+                    problems.append({"code":"browser-selector-healing-scope","message":"Accessible selector recovery requires an exact role selector such as button:Save","activityId":str(aid or "")})
                 fallbacks=item.get("selectorFallbacks",[])
                 if not isinstance(fallbacks,list) or len(fallbacks)>10:
                     problems.append({"code":"browser-selector-fallbacks","message":"selectorFallbacks must be a list of at most 10 explicit selectors","activityId":str(aid or "")})
@@ -506,6 +578,31 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"browser-value","message":"Browser Fill/Select value must be a string or expression","activityId":str(aid or "")})
                 elif typ=="browser_select" and not item.get("value","").strip():
                     problems.append({"code":"browser-option-value","message":"Browser Select needs an option value or expression","activityId":str(aid or "")})
+                if typ=="browser_select_many":
+                    values=item.get("values")
+                    if not isinstance(values,list) or not 1<=len(values)<=100 or any(not isinstance(value,str) or not value or len(value)>1000 for value in values):
+                        problems.append({"code":"browser-option-values","message":"Browser Select Multiple needs 1 to 100 non-empty option values, each no longer than 1,000 characters","activityId":str(aid or "")})
+                    elif len(set(values))!=len(values):
+                        problems.append({"code":"browser-option-values-duplicate","message":"Browser Select Multiple values must be unique","activityId":str(aid or "")})
+                    result=item.get("result","selectedValues")
+                    if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"browser-select-many-result","message":"Browser Select Multiple result must be a variable name","activityId":str(aid or "")})
+                if typ=="browser_press":
+                    key=item.get("key","Enter")
+                    valid_keys={"Enter","Tab","Escape","Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown","Backspace","Delete"}
+                    if not isinstance(key,str) or key not in valid_keys:
+                        problems.append({"code":"browser-key","message":"Browser Press key must be one of Enter, Tab, Escape, Space, ArrowUp/Down/Left/Right, Home, End, PageUp/Down, Backspace, or Delete","activityId":str(aid or "")})
+                if typ=="browser_upload":
+                    paths=item.get("paths")
+                    if not isinstance(paths,list) or not 1<=len(paths)<=20 or any(not isinstance(path,str) or not path.strip() or len(path)>4096 or "\x00" in path for path in paths):
+                        problems.append({"code":"browser-upload-paths","message":"Browser Upload needs 1 to 20 non-empty project-relative file paths","activityId":str(aid or "")})
+                if typ=="browser_download":
+                    path=item.get("path")
+                    if not isinstance(path,str) or not path.strip() or len(path)>4096 or "\x00" in path:
+                        problems.append({"code":"browser-download-path","message":"Browser Download needs a non-empty destination path of at most 4,096 characters","activityId":str(aid or "")})
+                    if not isinstance(item.get("overwrite",False),bool):
+                        problems.append({"code":"browser-download-overwrite","message":"Browser Download overwrite must be a boolean","activityId":str(aid or "")})
+                    if not isinstance(item.get("result","download"),str) or not item.get("result","download").isidentifier():
+                        problems.append({"code":"browser-download-result","message":"Browser Download result must be a variable name","activityId":str(aid or "")})
                 if typ=="browser_text" and (not isinstance(item.get("result","text"),str) or not item.get("result","text")):
                     problems.append({"code":"browser-result","message":"Browser Text result must be a non-empty variable name","activityId":str(aid or "")})
                 if typ=="browser_table_read":
@@ -516,6 +613,53 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     for field,default,maximum in limits:
                         value=item.get(field,default)
                         if not isinstance(value,int) or isinstance(value,bool) or not 1<=value<=maximum:problems.append({"code":"browser-table-limit","message":f"{field} must be an integer from 1 to {maximum}","activityId":str(aid or "")})
+                if typ=="browser_extract_records":
+                    if selector_kind!="css":problems.append({"code":"browser-extract-selector","message":"Extract Repeated Web Items requires a CSS selector for the repeated item container","activityId":str(aid or "")})
+                    fields=item.get("fields")
+                    if not isinstance(fields,list) or not 1<=len(fields)<=50:
+                        problems.append({"code":"browser-extract-fields","message":"Extract Repeated Web Items needs 1 to 50 field mappings","activityId":str(aid or "")})
+                    else:
+                        field_names:set[str]=set()
+                        for field in fields:
+                            if not isinstance(field,dict) or set(field)-{"name","selector","source","attribute","required","tokenIndex"}:
+                                problems.append({"code":"browser-extract-field","message":"Each browser field mapping may contain only name, selector, source, attribute, required, and tokenIndex","activityId":str(aid or "")});continue
+                            name=field.get("name");relative=field.get("selector");source=field.get("source","text")
+                            if not isinstance(name,str) or not name.isidentifier() or len(name)>100:
+                                problems.append({"code":"browser-extract-field-name","message":"Browser field name must be a variable-style identifier up to 100 characters","activityId":str(aid or "")})
+                            elif name.casefold() in field_names:
+                                problems.append({"code":"browser-extract-field-duplicate","message":"Browser field names must be unique ignoring case","activityId":str(aid or "")})
+                            else:field_names.add(name.casefold())
+                            if not isinstance(relative,str) or not relative.strip() or len(relative)>2048:
+                                problems.append({"code":"browser-extract-field-selector","message":"Each field needs a relative CSS selector of 1–2,048 characters","activityId":str(aid or "")})
+                            if not isinstance(source,str) or source not in {"text","attribute"}:
+                                problems.append({"code":"browser-extract-source","message":"Browser field source must be text or attribute","activityId":str(aid or "")})
+                            attribute=field.get("attribute","")
+                            if source=="attribute" and (not isinstance(attribute,str) or not attribute or len(attribute)>128 or not re.fullmatch(r"[A-Za-z_:][A-Za-z0-9:._-]*",attribute)):
+                                problems.append({"code":"browser-extract-attribute","message":"Attribute fields need a valid HTML attribute name","activityId":str(aid or "")})
+                            if "required" in field and not isinstance(field["required"],bool):
+                                problems.append({"code":"browser-extract-required","message":"Field required must be a boolean","activityId":str(aid or "")})
+                            token_index=field.get("tokenIndex")
+                            if token_index is not None and (source!="attribute" or not isinstance(token_index,int) or isinstance(token_index,bool) or not 0<=token_index<=20):
+                                problems.append({"code":"browser-extract-token-index","message":"tokenIndex must be an integer from 0 to 20 and can only be used with an attribute source","activityId":str(aid or "")})
+                    if not isinstance(item.get("result","records"),str) or not item.get("result","records").isidentifier():
+                        problems.append({"code":"browser-extract-result","message":"Extract Repeated Web Items result must be a variable name","activityId":str(aid or "")})
+                    for field,default,maximum in (("maxRecords",500,5000),("maxOutputChars",1000000,10000000)):
+                        value=item.get(field,default)
+                        if not isinstance(value,int) or isinstance(value,bool) or not 1<=value<=maximum:problems.append({"code":"browser-extract-limit","message":f"{field} must be an integer from 1 to {maximum}","activityId":str(aid or "")})
+                    if not isinstance(item.get("append",False),bool):
+                        problems.append({"code":"browser-extract-append","message":"Extract Repeated Web Items append must be a boolean","activityId":str(aid or "")})
+                    deduplicate_by=item.get("deduplicateBy",[])
+                    if not isinstance(deduplicate_by,list) or len(deduplicate_by)>10 or any(not isinstance(name,str) or not name or len(name)>100 for name in deduplicate_by):
+                        problems.append({"code":"browser-extract-deduplicate","message":"deduplicateBy must be a list of up to 10 mapped field names","activityId":str(aid or "")})
+                    elif len(set(deduplicate_by))!=len(deduplicate_by):
+                        problems.append({"code":"browser-extract-deduplicate","message":"deduplicateBy field names must be unique","activityId":str(aid or "")})
+                    elif deduplicate_by and not item.get("append",False):
+                        problems.append({"code":"browser-extract-deduplicate","message":"Deduplication requires append mode so records can be compared across extracts","activityId":str(aid or "")})
+                    elif isinstance(fields,list) and any(name not in {field.get("name") for field in fields if isinstance(field,dict) and isinstance(field.get("name"),str)} for name in deduplicate_by):
+                        problems.append({"code":"browser-extract-deduplicate","message":"Every deduplicateBy value must exactly match a mapped field name","activityId":str(aid or "")})
+                    for field,default,maximum in (("maxTotalRecords",10000,50000),("maxTotalOutputChars",5000000,10000000)):
+                        value=item.get(field,default)
+                        if not isinstance(value,int) or isinstance(value,bool) or not 1<=value<=maximum:problems.append({"code":"browser-extract-total-limit","message":f"{field} must be an integer from 1 to {maximum}","activityId":str(aid or "")})
                 if typ=="browser_wait" and (not isinstance(item.get("state","visible"),str) or item.get("state","visible") not in {"attached","detached","visible","hidden"}):
                     problems.append({"code":"browser-wait-state","message":"Browser Wait state must be attached, detached, visible, or hidden","activityId":str(aid or "")})
                 if typ=="browser_assert":
@@ -532,11 +676,175 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 wait_until=item.get("waitUntil","domcontentloaded")
                 if not isinstance(wait_until,str) or wait_until not in {"commit","domcontentloaded","load","networkidle"}:
                     problems.append({"code":"browser-wait-until","message":"Browser waitUntil must be commit, domcontentloaded, load, or networkidle","activityId":str(aid or "")})
+            elif typ=="browser_wait_response":
+                url_contains=item.get("urlContains")
+                if not isinstance(url_contains,str) or not url_contains.strip() or len(url_contains)>2048 or "\x00" in url_contains or "?" in url_contains or "#" in url_contains:
+                    problems.append({"code":"browser-response-url","message":"Browser response urlContains must be a non-empty URL/path substring without query strings or fragments (max 2,048 characters)","activityId":str(aid or "")})
+                method=item.get("method","any")
+                if not isinstance(method,str) or method.lower() not in {"any","get","post","put","patch","delete","head","options"}:
+                    problems.append({"code":"browser-response-method","message":"Browser response method must be any, GET, POST, PUT, PATCH, DELETE, HEAD, or OPTIONS","activityId":str(aid or "")})
+                status=item.get("status")
+                if status is not None and (not isinstance(status,int) or isinstance(status,bool) or not 100<=status<=599):
+                    problems.append({"code":"browser-response-status","message":"Browser response status must be null or an integer from 100 to 599","activityId":str(aid or "")})
+                for field,default,minimum,maximum in (("maxAgeSeconds",30,1,300),("timeoutSeconds",15,1,120)):
+                    value=item.get(field,default)
+                    if not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value) or not minimum<=value<=maximum:
+                        problems.append({"code":"browser-response-timeout","message":f"{field} must be between {minimum} and {maximum} seconds","activityId":str(aid or "")})
+                result=item.get("result","response")
+                if not isinstance(result,str) or not result.isidentifier() or len(result)>256:
+                    problems.append({"code":"browser-response-result","message":"Browser response result must be a variable name","activityId":str(aid or "")})
+                max_response_bytes=item.get("maxResponseBytes",500_000)
+                if not isinstance(max_response_bytes,int) or isinstance(max_response_bytes,bool) or not 1<=max_response_bytes<=2_000_000:
+                    problems.append({"code":"browser-response-size","message":"Browser response maxResponseBytes must be an integer from 1 to 2,000,000","activityId":str(aid or "")})
+                mapping=item.get("jsonMapping")
+                discover_schema=item.get("discoverJsonSchema",False)
+                if not isinstance(discover_schema,bool):
+                    problems.append({"code":"browser-response-schema-discovery","message":"Browser response schema discovery must be a boolean","activityId":str(aid or "")})
+                schema_result=item.get("schemaResult","responseSchema")
+                if discover_schema:
+                    if not isinstance(schema_result,str) or not schema_result.isidentifier() or len(schema_result)>256:
+                        problems.append({"code":"browser-response-schema-result","message":"Browser response schema result must be a variable name","activityId":str(aid or "")})
+                    elif schema_result==result or (isinstance(mapping,dict) and schema_result==mapping.get("result")):
+                        problems.append({"code":"browser-response-schema-result-conflict","message":"Browser response schema result must differ from metadata and mapped-row variables","activityId":str(aid or "")})
+                    if mapping is not None:
+                        problems.append({"code":"browser-response-schema-mode","message":"Choose either JSON schema discovery or explicit JSON mapping for one response","activityId":str(aid or "")})
+                if mapping is not None:
+                    if not isinstance(mapping,dict) or set(mapping)-{"itemsPointer","result","maxItems","fields"}:
+                        problems.append({"code":"browser-response-mapping","message":"Browser JSON mapping must contain only itemsPointer, result, maxItems, and fields","activityId":str(aid or "")})
+                    else:
+                        if not _valid_json_pointer(mapping.get("itemsPointer","")):
+                            problems.append({"code":"browser-response-pointer","message":"Browser JSON itemsPointer must be an RFC 6901 JSON Pointer","activityId":str(aid or "")})
+                        mapped_result=mapping.get("result")
+                        if not isinstance(mapped_result,str) or not mapped_result.isidentifier() or len(mapped_result)>256:
+                            problems.append({"code":"browser-response-mapping-result","message":"Browser JSON mapping result must be a variable name","activityId":str(aid or "")})
+                        elif mapped_result==result:
+                            problems.append({"code":"browser-response-mapping-result-conflict","message":"Browser JSON mapped result must differ from the response metadata variable","activityId":str(aid or "")})
+                        max_items=mapping.get("maxItems",500)
+                        if not isinstance(max_items,int) or isinstance(max_items,bool) or not 1<=max_items<=10_000:
+                            problems.append({"code":"browser-response-mapping-limit","message":"Browser JSON mapping maxItems must be an integer from 1 to 10,000","activityId":str(aid or "")})
+                        fields=mapping.get("fields")
+                        if not isinstance(fields,list) or not 1<=len(fields)<=50:
+                            problems.append({"code":"browser-response-mapping-fields","message":"Browser JSON mapping needs 1 to 50 field mappings","activityId":str(aid or "")})
+                        else:
+                            field_names:set[str]=set()
+                            for field in fields:
+                                if not isinstance(field,dict) or set(field)-{"name","path"}:
+                                    problems.append({"code":"browser-response-mapping-field","message":"Each browser JSON response field must contain only name and path","activityId":str(aid or "")});continue
+                                name=field.get("name");pointer=field.get("path")
+                                if not isinstance(name,str) or not name.isidentifier() or len(name)>100:
+                                    problems.append({"code":"browser-response-mapping-field-name","message":"Browser JSON response field names must be variable-style identifiers up to 100 characters","activityId":str(aid or "")})
+                                elif name.casefold() in field_names:
+                                    problems.append({"code":"browser-response-mapping-field-duplicate","message":"Browser JSON response field names must be unique ignoring case","activityId":str(aid or "")})
+                                else:field_names.add(name.casefold())
+                                if not _valid_json_pointer(pointer):
+                                    problems.append({"code":"browser-response-mapping-field-pointer","message":"Browser JSON response field path must be an RFC 6901 JSON Pointer","activityId":str(aid or "")})
             elif typ=="browser_launch" and "headless" in item and not isinstance(item["headless"],bool):
                 problems.append({"code":"browser-headless","message":"Browser Launch headless must be a boolean","activityId":str(aid or "")})
-            elif typ=="browser_launch" and item.get("channel","chromium") not in {"chromium","chrome","msedge"}:
-                problems.append({"code":"browser-channel","message":"Browser Launch channel must be chromium, chrome, or msedge","activityId":str(aid or "")})
-            if typ in {"desktop_ui_click","desktop_ui_fill","desktop_ui_text","desktop_ui_wait"}:
+            elif typ=="browser_launch":
+                browser_type=item.get("browserType","chromium")
+                channel=item.get("channel","chromium")
+                executable=item.get("executablePath","")
+                profile_name=item.get("profileName","")
+                if not isinstance(profile_name,str) or (profile_name and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,39}",profile_name)):
+                    problems.append({"code":"browser-profile-name","message":"Persistent profile name must be empty or start with a letter and contain only letters, digits, underscores or hyphens (max 40 characters)","activityId":str(aid or "")})
+                if not isinstance(browser_type,str) or browser_type not in {"chromium","firefox","webkit"}:
+                    problems.append({"code":"browser-engine","message":"Browser Launch browserType must be chromium, firefox, or webkit","activityId":str(aid or "")})
+                if not isinstance(channel,str) or channel not in {"chromium","chrome","msedge","custom"}:
+                    problems.append({"code":"browser-channel","message":"Chromium channel must be chromium, chrome, msedge, or custom","activityId":str(aid or "")})
+                if browser_type!="chromium" and channel!="chromium":
+                    problems.append({"code":"browser-channel-engine","message":"Chrome/Edge channels and custom executable paths are supported only with the Chromium engine","activityId":str(aid or "")})
+                if channel=="custom" and (not isinstance(executable,str) or not executable.strip() or len(executable)>4096 or "\x00" in executable or not Path(executable).is_absolute()):
+                    problems.append({"code":"browser-executable","message":"Custom Chromium needs an absolute executable path of at most 4,096 characters","activityId":str(aid or "")})
+                elif channel!="custom" and (not isinstance(executable,str) or executable!=""):
+                    problems.append({"code":"browser-executable-channel","message":"Set Chromium channel to custom when configuring executablePath","activityId":str(aid or "")})
+            elif typ in {"browser_new_tab","browser_capture_popup","browser_switch_tab","browser_close_tab"}:
+                name=item.get("name")
+                if not isinstance(name,str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,49}",name):
+                    problems.append({"code":"browser-tab-name","message":"Browser tab name must start with a letter and contain only letters, digits, underscores or hyphens (max 50 characters)","activityId":str(aid or "")})
+                if typ=="browser_new_tab":
+                    url=item.get("url","")
+                    if not isinstance(url,str) or len(url)>2048 or "\x00" in url:
+                        problems.append({"code":"browser-tab-url","message":"New Browser Tab URL must be a string of at most 2,048 characters","activityId":str(aid or "")})
+                if typ=="browser_capture_popup":
+                    timeout=item.get("timeoutSeconds",15)
+                    if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
+                        problems.append({"code":"browser-popup-timeout","message":"Capture Browser Popup timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+            elif typ=="browser_accessibility_snapshot":
+                limit=item.get("maxOutputChars",50000)
+                if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=200000:
+                    problems.append({"code":"browser-accessibility-limit","message":"Accessibility Snapshot maxOutputChars must be an integer from 1 to 200,000","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",15)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
+                    problems.append({"code":"browser-accessibility-timeout","message":"Accessibility Snapshot timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+                result=item.get("result","accessibilitySnapshot")
+                if not isinstance(result,str) or not result.isidentifier():
+                    problems.append({"code":"browser-accessibility-result","message":"Accessibility Snapshot result must be a variable name","activityId":str(aid or "")})
+            elif typ=="browser_scroll":
+                if not isinstance(item.get("direction","down"),str) or item.get("direction","down") not in {"down","up"}:
+                    problems.append({"code":"browser-scroll-direction","message":"Scroll direction must be down or up","activityId":str(aid or "")})
+                for field,default,minimum,maximum in (("distancePx",600,50,2000),("delayMilliseconds",700,0,5000),("maxSteps",100,1,500)):
+                    value=item.get(field,default)
+                    if not isinstance(value,int) or isinstance(value,bool) or not minimum<=value<=maximum:
+                        problems.append({"code":"browser-scroll-limit","message":f"{field} must be an integer from {minimum} to {maximum}","activityId":str(aid or "")})
+                if not isinstance(item.get("toBottom",False),bool):
+                    problems.append({"code":"browser-scroll-bottom","message":"toBottom must be a boolean","activityId":str(aid or "")})
+                container_selector=item.get("containerSelector","")
+                if not isinstance(container_selector,str) or len(container_selector)>2048 or "\x00" in container_selector:
+                    problems.append({"code":"browser-scroll-container","message":"Scroll container CSS selector must be text no longer than 2,048 characters","activityId":str(aid or "")})
+                elif container_selector.strip()!=container_selector:
+                    problems.append({"code":"browser-scroll-container","message":"Scroll container CSS selector must not have leading or trailing whitespace","activityId":str(aid or "")})
+                if not isinstance(item.get("result","scrollResult"),str) or not item.get("result","scrollResult").isidentifier():
+                    problems.append({"code":"browser-scroll-result","message":"Scroll Page result must be a variable name","activityId":str(aid or "")})
+            if typ == "desktop_ui_grid_read":
+                window_title=item.get("windowTitle")
+                if not isinstance(window_title,str) or not window_title.strip() or len(window_title)>512:problems.append({"code":"desktop-uia-window","message":"UIA grid read needs an exact windowTitle of 1–512 characters","activityId":str(aid or "")})
+                name=item.get("name","");automation_id=item.get("automationId","");control_type=item.get("controlType","DataGrid")
+                if not isinstance(name,str) or len(name)>512:problems.append({"code":"desktop-uia-name","message":"UIA grid accessible name must be text no longer than 512 characters","activityId":str(aid or "")})
+                if not isinstance(automation_id,str) or len(automation_id)>512:problems.append({"code":"desktop-uia-automation-id","message":"UIA grid Automation ID must be text no longer than 512 characters","activityId":str(aid or "")})
+                if isinstance(name,str) and isinstance(automation_id,str) and not name.strip() and not automation_id.strip():problems.append({"code":"desktop-uia-selector","message":"Specify an accessible name or Automation ID for the UIA grid","activityId":str(aid or "")})
+                if not isinstance(control_type,str) or len(control_type)>128:problems.append({"code":"desktop-uia-control-type","message":"UIA grid controlType must be text no longer than 128 characters","activityId":str(aid or "")})
+                for field,default,minimum,maximum in (("maxRows",100,1,500),("maxColumns",30,1,100),("maxOutputChars",50000,1000,500000)):
+                    value=item.get(field,default)
+                    if not isinstance(value,int) or isinstance(value,bool) or not minimum<=value<=maximum:problems.append({"code":"desktop-uia-grid-limit","message":f"{field} must be an integer from {minimum} to {maximum}","activityId":str(aid or "")})
+                if not isinstance(item.get("result","rows"),str) or not item.get("result","rows").isidentifier():problems.append({"code":"desktop-uia-grid-result","message":"UIA grid result must be a variable name","activityId":str(aid or "")})
+                metadata_result=item.get("metadataResult","gridMetadata")
+                if not isinstance(metadata_result,str) or (metadata_result and not metadata_result.isidentifier()):problems.append({"code":"desktop-uia-grid-metadata-result","message":"UIA grid metadataResult must be an empty value or a variable name","activityId":str(aid or "")})
+                if isinstance(metadata_result,str) and metadata_result and metadata_result==item.get("result","rows"):problems.append({"code":"desktop-uia-grid-result-collision","message":"UIA grid result and metadataResult must use different variable names","activityId":str(aid or "")})
+                process_id=item.get("processId")
+                if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):problems.append({"code":"desktop-uia-process-id","message":"UIA processId must be a positive integer","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",10)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:problems.append({"code":"desktop-uia-timeout","message":"UIA timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+            if typ == "desktop_ui_set_range_value":
+                window_title=item.get("windowTitle")
+                if not isinstance(window_title,str) or not window_title.strip() or len(window_title)>512:problems.append({"code":"desktop-uia-window","message":"Set UI Range Value needs an exact windowTitle of 1–512 characters","activityId":str(aid or "")})
+                name=item.get("name","");automation_id=item.get("automationId","");control_type=item.get("controlType","")
+                if not isinstance(name,str) or len(name)>512:problems.append({"code":"desktop-uia-name","message":"UIA accessible name must be text no longer than 512 characters","activityId":str(aid or "")})
+                if not isinstance(automation_id,str) or len(automation_id)>512:problems.append({"code":"desktop-uia-automation-id","message":"UIA Automation ID must be text no longer than 512 characters","activityId":str(aid or "")})
+                if isinstance(name,str) and isinstance(automation_id,str) and not name.strip() and not automation_id.strip():problems.append({"code":"desktop-uia-selector","message":"Specify an accessible name or Automation ID for the UIA control","activityId":str(aid or "")})
+                if not isinstance(control_type,str) or control_type not in {"Slider","Spinner","Spin Button","SpinButton"}:problems.append({"code":"desktop-uia-range-type","message":"Set UI Range Value requires a Slider, Spinner, or AT-SPI Spin Button control","activityId":str(aid or "")})
+                value=item.get("value")
+                if not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value):problems.append({"code":"desktop-uia-range-value","message":"Range value must be a finite number","activityId":str(aid or "")})
+                process_id=item.get("processId")
+                if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):problems.append({"code":"desktop-uia-process-id","message":"UIA processId must be a positive integer","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",10)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:problems.append({"code":"desktop-uia-timeout","message":"UIA timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+            if typ == "desktop_ui_drag":
+                window_title=item.get("windowTitle")
+                if not isinstance(window_title,str) or not window_title.strip() or len(window_title)>512:
+                    problems.append({"code":"desktop-uia-window","message":"UIA drag needs an exact windowTitle of 1–512 characters","activityId":str(aid or "")})
+                for side in ("source","target"):
+                    name=item.get(side+"Name","");automation_id=item.get(side+"AutomationId","");control_type=item.get(side+"ControlType","")
+                    if not isinstance(name,str) or len(name)>512:problems.append({"code":"desktop-uia-drag-name","message":f"Drag {side} name must be text no longer than 512 characters","activityId":str(aid or "")})
+                    if not isinstance(automation_id,str) or len(automation_id)>512:problems.append({"code":"desktop-uia-drag-id","message":f"Drag {side} Automation ID must be text no longer than 512 characters","activityId":str(aid or "")})
+                    if isinstance(name,str) and isinstance(automation_id,str) and not name.strip() and not automation_id.strip():problems.append({"code":"desktop-uia-drag-selector","message":f"Specify a name or Automation ID for the drag {side}","activityId":str(aid or "")})
+                    if not isinstance(control_type,str) or len(control_type)>128:problems.append({"code":"desktop-uia-drag-control-type","message":f"Drag {side} controlType must be text no longer than 128 characters","activityId":str(aid or "")})
+                duration=item.get("durationMilliseconds",500)
+                if not isinstance(duration,int) or isinstance(duration,bool) or not 100<=duration<=5000:problems.append({"code":"desktop-uia-drag-duration","message":"Drag durationMilliseconds must be an integer from 100 to 5,000","activityId":str(aid or "")})
+                process_id=item.get("processId")
+                if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):problems.append({"code":"desktop-uia-process-id","message":"UIA processId must be a positive integer","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",10)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:problems.append({"code":"desktop-uia-timeout","message":"UIA timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+            if typ in {"desktop_ui_click","desktop_ui_invoke","desktop_ui_press","desktop_ui_fill","desktop_ui_text","desktop_ui_wait","desktop_ui_select","desktop_ui_select_many","desktop_ui_check","desktop_ui_uncheck","desktop_ui_expand","desktop_ui_collapse"}:
                 window_title=item.get("windowTitle")
                 if not isinstance(window_title,str) or not window_title.strip() or len(window_title)>512:
                     problems.append({"code":"desktop-uia-window","message":"UIA activity needs an exact windowTitle of 1–512 characters","activityId":str(aid or "")})
@@ -550,6 +858,10 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 control_type=item.get("controlType","")
                 if not isinstance(control_type,str) or len(control_type)>128:
                     problems.append({"code":"desktop-uia-control-type","message":"UIA controlType must be text no longer than 128 characters","activityId":str(aid or "")})
+                if typ=="desktop_ui_invoke" and control_type and control_type not in {"Button","Push Button","Toggle Button","Hyperlink","MenuItem","Menu Item","SplitButton","Split Button","Link"}:
+                    problems.append({"code":"desktop-uia-invoke-type","message":"Invoke UI Control requires an accessible Button, Hyperlink, MenuItem, SplitButton, or Link control","activityId":str(aid or "")})
+                if typ=="desktop_ui_press" and item.get("key") not in SUPPORTED_DESKTOP_KEYS:
+                    problems.append({"code":"desktop-uia-key","message":"Press UI Key needs one key or chord from the supported allowlist","activityId":str(aid or "")})
                 process_id=item.get("processId")
                 if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):
                     problems.append({"code":"desktop-uia-process-id","message":"UIA processId must be a positive integer","activityId":str(aid or "")})
@@ -558,10 +870,66 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"desktop-uia-timeout","message":"UIA timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
                 if typ=="desktop_ui_fill" and (not isinstance(item.get("value"),str) or (control_type and control_type not in {"Edit","Entry"})):
                     problems.append({"code":"desktop-uia-fill","message":"UIA Set Text needs a string value and an Edit control","activityId":str(aid or "")})
+                if typ=="desktop_ui_select" and (not isinstance(item.get("value"),str) or not item.get("value").strip() or (control_type and control_type not in {"ComboBox","Combo Box","List","ListBox","List Box","ListItem","List Item","TreeItem","Tree Item"})):
+                    problems.append({"code":"desktop-uia-select","message":"UIA Select Option needs a non-empty exact option name and a ComboBox, List, ListBox, ListItem, or TreeItem control","activityId":str(aid or "")})
+                if typ=="desktop_ui_select_many":
+                    values=item.get("values",[])
+                    mode=item.get("mode","replace")
+                    if control_type and control_type not in {"List","List Box"}:
+                        problems.append({"code":"desktop-uia-select-many-type","message":"Set List Selection requires a List control","activityId":str(aid or "")})
+                    if not isinstance(values,list) or len(values)>100 or any(not isinstance(value,str) or len(value)>512 for value in values):
+                        problems.append({"code":"desktop-uia-select-many-values","message":"List selection values must be an array of at most 100 names, each no longer than 512 characters","activityId":str(aid or "")})
+                    elif len(values)!=len(set(values)):
+                        problems.append({"code":"desktop-uia-select-many-duplicates","message":"List selection values must not contain duplicate names","activityId":str(aid or "")})
+                    if not isinstance(mode,str) or mode not in {"replace","add","remove"} or (mode!="replace" and isinstance(values,list) and not values):
+                        problems.append({"code":"desktop-uia-select-many-mode","message":"List selection mode must be replace, add, or remove; add and remove need at least one name","activityId":str(aid or "")})
+                    result=item.get("result","selectedItems")
+                    if not isinstance(result,str) or not result.isidentifier():
+                        problems.append({"code":"desktop-uia-select-many-result","message":"Set List Selection result must be a variable name","activityId":str(aid or "")})
+                if typ=="desktop_ui_check" and (control_type and control_type not in {"CheckBox","Check Box","RadioButton","Radio Button"}):
+                    problems.append({"code":"desktop-uia-check","message":"UIA Set Checked requires a CheckBox or RadioButton control","activityId":str(aid or "")})
+                if typ=="desktop_ui_uncheck" and (control_type and control_type not in {"CheckBox","Check Box"}):
+                    problems.append({"code":"desktop-uia-uncheck","message":"UIA Uncheck requires a CheckBox control","activityId":str(aid or "")})
+                if typ in {"desktop_ui_expand","desktop_ui_collapse"} and control_type and control_type not in {"TreeItem","Tree Item"}:
+                    problems.append({"code":"desktop-uia-tree-type","message":"Expand or Collapse requires a TreeItem control","activityId":str(aid or "")})
                 if typ=="desktop_ui_text" and (not isinstance(item.get("result","text"),str) or not item.get("result","text").strip()):
                     problems.append({"code":"desktop-uia-result","message":"UIA Read Text needs a non-empty result variable name","activityId":str(aid or "")})
-                if typ=="desktop_ui_wait" and item.get("state","exists") not in {"exists","visible","enabled","not_visible"}:
-                    problems.append({"code":"desktop-uia-state","message":"UIA Wait state must be exists, visible, enabled, or not_visible","activityId":str(aid or "")})
+                if typ=="desktop_ui_wait" and (not isinstance(item.get("state","exists"),str) or item.get("state","exists") not in {"exists","visible","enabled","not_visible","checked","unchecked","selected","unselected","expanded","collapsed"}):
+                    problems.append({"code":"desktop-uia-state","message":"UIA Wait state must be exists, visible, enabled, not_visible, checked, unchecked, selected, unselected, expanded, or collapsed","activityId":str(aid or "")})
+                if typ=="desktop_ui_wait" and item.get("state") in {"selected","unselected"} and control_type not in {"ListItem","List Item","TreeItem","Tree Item"}:
+                    problems.append({"code":"desktop-uia-selected-state-type","message":"Selected and unselected wait states require a ListItem or TreeItem control","activityId":str(aid or "")})
+                if typ=="desktop_ui_wait" and item.get("state") in {"expanded","collapsed"} and control_type not in {"TreeItem","Tree Item"}:
+                    problems.append({"code":"desktop-uia-tree-state-type","message":"Expanded and collapsed wait states require a TreeItem control","activityId":str(aid or "")})
+            if typ=="desktop_launch_app":
+                executable=item.get("executable")
+                if not isinstance(executable,str) or not executable.strip() or len(executable)>4096 or "\x00" in executable or not Path(executable).is_absolute():
+                    problems.append({"code":"desktop-app-executable","message":"Launch Desktop Application needs an absolute executable path of at most 4,096 characters","activityId":str(aid or "")})
+                arguments=item.get("arguments",[])
+                if not isinstance(arguments,list) or len(arguments)>100 or any(not isinstance(value,str) or len(value)>4096 or "\x00" in value for value in arguments):
+                    problems.append({"code":"desktop-app-arguments","message":"Application arguments must be an array of at most 100 strings, each no longer than 4,096 characters","activityId":str(aid or "")})
+                result=item.get("result","processId")
+                if not isinstance(result,str) or not result.isidentifier() or len(result)>256:
+                    problems.append({"code":"desktop-app-result","message":"Launch Desktop Application result must be a variable name","activityId":str(aid or "")})
+            if typ in {"desktop_window_wait","desktop_window_activate","desktop_window_minimize","desktop_window_restore","desktop_window_close"}:
+                title=item.get("windowTitle","");process_id=item.get("processId")
+                if not isinstance(title,str) or len(title)>512:
+                    problems.append({"code":"desktop-window-title","message":"Window title must be text no longer than 512 characters","activityId":str(aid or "")})
+                if process_id is not None and (not isinstance(process_id,int) or isinstance(process_id,bool) or process_id<1):
+                    problems.append({"code":"desktop-window-process-id","message":"Window processId must be a positive integer","activityId":str(aid or "")})
+                if not title.strip() and process_id is None:
+                    problems.append({"code":"desktop-window-selector","message":"Specify an exact windowTitle or processId","activityId":str(aid or "")})
+                if typ=="desktop_window_wait":
+                    state=item.get("state","exists");timeout=item.get("timeoutSeconds",30)
+                    if state not in {"exists","not_exists"}:
+                        problems.append({"code":"desktop-window-state","message":"Wait for Window state must be exists or not_exists","activityId":str(aid or "")})
+                    if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
+                        problems.append({"code":"desktop-window-timeout","message":"Wait for Window timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+                if typ=="desktop_window_close":
+                    timeout=item.get("timeoutSeconds",15)
+                    if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:
+                        problems.append({"code":"desktop-window-close-timeout","message":"Close Window timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
+                if typ=="desktop_window_close" and item.get("confirmClose") is not True:
+                    problems.append({"code":"desktop-window-close-confirmation","message":"Close Window requires confirmClose=true to acknowledge it may close unsaved work","activityId":str(aid or "")})
     model=workflow.get("executionModel","sequence")
     if model not in {"sequence","flowchart","state_machine"}:
         problems.append({"code":"execution-model","message":"executionModel must be 'sequence', 'flowchart', or 'state_machine'"})
@@ -811,7 +1179,8 @@ ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "image_ocr", "json_parse", "json_write",
     "wait", "http_request", "http_paginate", "api_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
-    "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_table_read", "browser_wait", "browser_assert", "browser_screenshot",
+    "browser_launch", "browser_close", "browser_navigate", "browser_new_tab", "browser_capture_popup", "browser_switch_tab", "browser_close_tab", "browser_click", "browser_hover", "browser_press", "browser_upload", "browser_download", "browser_wait_response", "browser_fill", "browser_select", "browser_select_many", "browser_check", "browser_uncheck", "browser_text", "browser_accessibility_snapshot", "browser_extract_records", "browser_table_read", "browser_wait", "browser_assert", "browser_scroll", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
-    "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
+    "desktop_ui_click", "desktop_ocr_click", "desktop_ui_drag", "desktop_ui_grid_read", "desktop_ui_set_range_value", "desktop_ui_invoke", "desktop_ui_press", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait", "desktop_ui_select", "desktop_ui_select_many", "desktop_ui_check", "desktop_ui_uncheck", "desktop_ui_expand", "desktop_ui_collapse", "desktop_launch_app",
+    "desktop_window_wait", "desktop_window_activate", "desktop_window_minimize", "desktop_window_restore", "desktop_window_close",
 }

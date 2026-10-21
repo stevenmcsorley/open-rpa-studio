@@ -30,6 +30,18 @@ def test_remote_profile_persists_only_os_vault_references(tmp_path):
     assert "work-key" in text and "openai/gpt-4o-mini" in text
 
 
+def test_openai_compatible_custom_auth_header_profile_round_trips_without_secret(tmp_path):
+    path=tmp_path/"ai-connections.json"
+    profile=ai_connections.save_profile(path,{"name":"Gateway","provider":"openai_compatible",
+        "baseUrl":"https://gateway.example/v1","model":"model-x","credentialService":"openrpa-gateway",
+        "credentialUsername":"primary","credentialMode":"api_key_header","credentialHeader":"x-api-key"})
+    assert profile["credentialMode"]=="api_key_header"
+    assert profile["credentialHeader"]=="x-api-key"
+    text=path.read_text(encoding="utf-8")
+    assert "vault-secret" not in text and "secret" not in text.lower()
+    assert ai_connections.list_profiles(path)==[profile]
+
+
 def test_openai_responses_profile_is_distinct_and_round_trips(tmp_path):
     path=tmp_path/"ai-connections.json"
     profile=ai_connections.save_profile(path,{"name":"OpenAI Responses","provider":"openai_responses",
@@ -38,11 +50,40 @@ def test_openai_responses_profile_is_distinct_and_round_trips(tmp_path):
     assert ai_connections.list_profiles(path)==[profile]
 
 
+@pytest.mark.parametrize("changes",[
+    {"baseUrl":"https://attacker.example/v1"},
+    {"provider":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},
+    {"credentialMode":"api_key_header","credentialHeader":"x-api-key"},
+])
+def test_profile_cannot_retarget_an_existing_vault_reference(tmp_path,changes):
+    path=tmp_path/"ai-connections.json"
+    profile=ai_connections.save_profile(path,{"name":"Trusted endpoint","provider":"openai_compatible",
+        "baseUrl":"https://trusted.example/v1","model":"model-x","credentialService":"vault-service",
+        "credentialUsername":"primary"})
+    with pytest.raises(ValueError,match="cannot reuse the same vault reference"):
+        ai_connections.save_profile(path,{**profile,**changes})
+    assert ai_connections.list_profiles(path)==[profile]
+
+
+def test_profile_can_retarget_only_with_a_new_vault_reference(tmp_path):
+    path=tmp_path/"ai-connections.json"
+    profile=ai_connections.save_profile(path,{"name":"Trusted endpoint","provider":"openai_compatible",
+        "baseUrl":"https://trusted.example/v1","model":"model-x","credentialService":"vault-service",
+        "credentialUsername":"primary"})
+    updated=ai_connections.save_profile(path,{**profile,"baseUrl":"https://proxy.example/v1",
+        "credentialService":"proxy-service","credentialUsername":"proxy-key"})
+    assert updated["id"]==profile["id"]
+    assert updated["baseUrl"]=="https://proxy.example/v1"
+    assert updated["credentialService"]=="proxy-service"
+
+
 @pytest.mark.parametrize("profile,match",[
     ({"name":"Missing key","provider":"openai"},"vault service and username"),
     ({"name":"Remote HTTP","provider":"openai_compatible","baseUrl":"http://api.example/v1","credentialService":"s","credentialUsername":"u"},"HTTPS"),
     ({"name":"Remote loopback","provider":"openai_compatible","baseUrl":"https://127.0.0.1/v1","credentialService":"s","credentialUsername":"u"},"loopback"),
     ({"name":"Local network","provider":"ollama","baseUrl":"http://192.168.1.3:11434"},"loopback"),
+    ({"name":"Unsafe auth header","provider":"openai_compatible","baseUrl":"https://gateway.example/v1","credentialService":"s","credentialUsername":"u","credentialMode":"api_key_header","credentialHeader":"Authorization"},"cannot be used"),
+    ({"name":"Custom header on OpenAI","provider":"openai","credentialService":"s","credentialUsername":"u","credentialMode":"api_key_header","credentialHeader":"x-api-key"},"only for OpenAI-compatible"),
 ])
 def test_connection_profiles_validate_provider_security(profile,match):
     with pytest.raises(ValueError,match=match):

@@ -8,6 +8,10 @@ export type AiConnectionState =
   | { status: 'catalog-failed'; message: string }
   | { status: 'failed'; message: string };
 
+export function isModelCatalogueRouteUnavailable(message:string):boolean{
+  return /\bHTTP\s+(?:404|405|501)\b/i.test(message);
+}
+
 export function AiConnectionStatus({ state }: { state: AiConnectionState }) {
   if (state.status === 'idle') {
     return <div className="ai-connection-status idle" aria-live="polite"><Radio size={13} /><span>Connection not tested</span></div>;

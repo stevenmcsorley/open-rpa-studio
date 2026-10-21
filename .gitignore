@@ -9,10 +9,12 @@ src-tauri/gen/
 src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
 src-tauri/resources/openrpa-bridge.exe
+src-tauri/resources/openrpa-bridge-*.exe
 .build/
 release/*.exe
 .playwright-cli/
 output/playwright/
+output/pw-snapshot.txt
 *.egg-info/
 *.tsbuildinfo
 examples/*/out/
