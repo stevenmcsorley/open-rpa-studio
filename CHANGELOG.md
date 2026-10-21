@@ -3,7 +3,7 @@
 
 - Added optional safe-expression conditions to activity breakpoints. False conditions continue execution; true conditions pause at the boundary.
 - Invalid or non-Boolean conditions pause for review instead of silently skipping a breakpoint. Workflow validation bounds conditions to 2,048 characters and requires an enabled breakpoint.
-- Verification: 135 Python tests, 44 frontend tests, production Vite build, offline Cargo check, `npm audit` with zero vulnerabilities, and installed Windows bridge acceptance for false/true/invalid conditions plus watches and safe resume. GitHub CI pending.
+- Verification: 135 Python tests, 44 frontend tests, production Vite build, offline Cargo check, `npm audit` with zero vulnerabilities, and installed Windows bridge acceptance for false/true/invalid conditions plus watches and safe resume. GitHub CI passed (run 39526203667).
 
 ## 0.1.22 — Live debugger watch expressions
 
