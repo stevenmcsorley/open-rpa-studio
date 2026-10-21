@@ -1,4 +1,8 @@
 # Changelog
+## 0.1.36
+- Added local OpenAPI 3.0/3.1 JSON and YAML import to the API Request editor. It lists supported operations, applies path/query/header parameters and JSON request examples to the normal editable activity, and creates matching string variables for required parameters.
+- Import is bounded to 2 MB, resolves local references only, reports external references without fetching them, and executes no specification content. Verification: 125 frontend tests and production build pass; `npm audit --omit=dev` reports zero vulnerabilities. Windows NSIS installer: 69.16 MiB, SHA-256 `d34cd790ac0647ea45b2979dd7725c939d4da91f31accd416d3b72849059cd1f`.
+
 ## 0.1.35
 - Added OAuth 2.0 client-credentials authentication to API connection profiles, including client-secret Basic and form-body methods, scope/audience, restricted token exchange, in-memory expiry-aware token reuse, and token-aware connection tests. Existing v1 API connection files remain readable and migrate on save.
 - OAuth token exchange and the connection-test UI path have mocked coverage; no provider account was available for live OAuth acceptance. Verification: 253 Python tests, 121 frontend tests, frontend production build, `cargo check --locked`, and `uv lock --check` pass. Windows NSIS installer: 69.13 MiB, SHA-256 `3f55c27de40c028bc4e84f2701e3c433d56f3efead5428a74a28338523db25c5`.
