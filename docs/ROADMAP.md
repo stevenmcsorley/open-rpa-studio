@@ -17,6 +17,7 @@
 - Flowchart palette insertion splices activities into the selected path, preserves downstream transitions, routes Decision insertions through True, and inserts before End nodes without leaving unreachable nodes.
 - Flowchart minimap displays graph topology, selected node and current viewport, with pointer and keyboard navigation for large canvases.
 - A scoped workflow outline for the selected flowchart action lists nested activities with branch context and navigates them in the inspector while keeping the containing graph node selected.
+- The Output pane collapses to its tab strip to increase designer workspace and expands without losing the selected output tab.
 - State-machine transition overview visualizes initial, final, guarded, cyclic and disconnected states, with graph-node selection wired to the existing state editor.
 - Example CSV automation and engine/UI verification.
 - Desktop toolbar import/export for deterministic, integrity-checked `.orpa` project packages, with export workflow validation and safe empty-folder extraction.

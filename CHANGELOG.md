@@ -1,6 +1,8 @@
 # Changelog
 ## Unreleased
 
+- Made the Output pane's existing collapse control functional. Collapsing reduces its grid row to the tab strip and hides pane contents; reopening restores the full output area. Updated the flowchart screenshot to show the larger authoring area.
+- Verification: all 69 frontend tests pass; TypeScript and production Vite build pass. Playwright confirmed Collapse/Expand labels and behavior, retained output tabs, and reported zero browser console errors.
 - Added a scoped, navigable activity outline for the selected flowchart action. It exposes nested branch paths, selects nested activities in the existing inspector, and keeps the containing graph action highlighted. Added a public browser-preview screenshot.
 - Verification: 69 frontend tests pass; TypeScript and production Vite build pass. Playwright converted the sample workflow to a flowchart, added an If action and nested Log activity, and confirmed the action outline lists both activities while the nested Log is selected.
 - Flowchart action inspectors now expose the existing nested sequence editor for If/Else, loops, Switch, and Try/Catch/Finally activities. Nested edits update the activity stored on the graph action node; branch additions, field edits, duplication and removal remain inside that node. Added tested graph-tree operations for locating, patching, appending and removing nested activities.
