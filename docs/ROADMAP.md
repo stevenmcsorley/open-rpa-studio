@@ -16,6 +16,7 @@
 - Browser interaction recording for uniquely identified, named controls. Recording preserves action order and selector metadata, excludes password/email/payment/file/hidden fields, never reads typed values, and requires review before insertion; recorded fill/select values are left blank for explicit author completion.
 - Flowchart palette insertion splices activities into the selected path, preserves downstream transitions, routes Decision insertions through True, and inserts before End nodes without leaving unreachable nodes.
 - Flowchart minimap displays graph topology, selected node and current viewport, with pointer and keyboard navigation for large canvases.
+- State-machine transition overview visualizes initial, final, guarded, cyclic and disconnected states, with graph-node selection wired to the existing state editor.
 - Example CSV automation and engine/UI verification.
 - Desktop toolbar import/export for deterministic, integrity-checked `.orpa` project packages, with export workflow validation and safe empty-folder extraction.
 - Reusable workflow argument mapping with per-call-site outputs and preflight validation.
@@ -25,7 +26,7 @@
 ## Next release gates
 
 1. **Debugging completion:** workflow invocation failures now carry a bounded, redacted call path and origin workflow/activity through run results and durable history. Add durable debug checkpoints; paused variable editing and Step Out are supported at activity boundaries. Mid-activity pause remains adapter-dependent.
-2. **Visual authoring:** extend minimap-style navigation to state machines and nested workflow branches; flowchart pan, zoom, focus, fit, connector reconnection and a viewport-aware minimap are implemented.
+2. **Visual authoring:** extend graph overview/navigation to nested workflow branches and add direct transition-edit gestures to the state-machine graph; state selection, guarded-edge display and flowchart navigation are implemented.
 3. **Automation adapters:** add editable selector healing and broaden accessibility acceptance across GTK, Qt, WPF, Win32, WinForms and packaged-app targets. Browser waits/assertions and bounded browser interaction recording are implemented.
 4. **Security:** signed plugin metadata, dependency/SBOM scans, adversarial package and egress tests, threat-model review, safe package verification.
 5. **Distribution:** Windows x64 per-user NSIS installer now builds and installs in a workspace-local smoke test, with a bundled Python engine and no-console child process. Still verify on a clean Windows machine; sign binaries; test upgrades, uninstall and WebView2 bootstrap behavior; produce Linux AppImage/deb on a supported Linux build host.

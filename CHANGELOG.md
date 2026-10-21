@@ -3,8 +3,9 @@
 
 - Added a flowchart minimap showing graph topology, selected node and the visible canvas viewport, with pointer and keyboard navigation.
 - Fixed large flowcharts expanding the designer beyond its allocated workspace; long graphs now scroll inside the canvas. The Fit control accounts for both graph dimensions.
-- Refreshed the public README screenshot to show the flowchart editor and minimap.
-- Verification: 53 frontend tests and the production Vite build pass; a live 11-node browser workflow confirmed minimap navigation changes the canvas scroll position.
+- Added a state-machine transition overview generated from saved states and guards; selecting a state in the graph opens its existing editable state panel.
+- Refreshed public README screenshots to show both graph editors.
+- Verification: 55 frontend tests and the production Vite build pass; a live 11-node flowchart confirmed minimap scrolling and a browser interaction confirmed state-graph selection updates the editor.
 
 ## 0.1.28 — Local MCP server for AI clients
 
