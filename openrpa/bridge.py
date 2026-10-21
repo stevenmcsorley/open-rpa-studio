@@ -474,11 +474,15 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             parts=urlsplit(url);base=urlsplit(profile["baseUrl"])
             if (parts.scheme,parts.hostname,parts.port)!=(base.scheme,base.hostname,base.port):raise ValueError("Connection test cannot change the API host")
             headers=dict(profile["headers"])
-            if profile["authType"] in {"bearer","api_key_header"}:
+            from .network import request as restricted_http_request
+            if profile["authType"] in {"bearer","api_key_header","oauth_client_credentials"}:
                 secret=api_connections.read_secret(profile["id"])
                 if profile["authType"]=="bearer":headers["Authorization"]="Bearer "+secret
-                else:headers[profile["apiKeyHeader"]]=secret
-            from .network import request as restricted_http_request
+                elif profile["authType"]=="api_key_header":headers[profile["apiKeyHeader"]]=secret
+                else:
+                    token,expires=api_connections.request_oauth_token(profile,secret,restricted_http_request,20)
+                    headers["Authorization"]="Bearer "+token
+                    history.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname})
             response=restricted_http_request(url,"GET",headers,None,10,65536)
             history.audit("api.connection.test",{"profileId":profile["id"],"host":parts.hostname,"status":response.get("status")})
             result={"status":response.get("status"),"ok":200<=int(response.get("status",0))<300,"contentType":next((value for key,value in response.get("headers",{}).items() if key.lower()=="content-type"),"")[:200]}

@@ -54,16 +54,16 @@ Open RPA Studio is independent of Flowbench. This roadmap records upcoming produ
 The connector milestone will build on the existing restricted HTTP client, workflow activities, and OS credential vault. It will provide:
 
 - Reusable, project-local API connection profiles with a visual editor.
-- Secure API-key and OAuth 2.0 client-credentials setup. Secrets and tokens remain in the operating-system vault; workflow files hold references only.
+- Secure API-key and OAuth 2.0 client-credentials setup. Client secrets remain in the operating-system vault; access tokens remain in memory for the run. Authorization Code/PKCE and refresh-token grants remain future work.
 - Explicit method, base URL, path, query parameters, headers, and JSON request-body configuration.
 - Bounded pagination strategies, request pacing/rate limits, timeouts, response-size quotas, cancellation, and clear partial-failure behavior.
 - Safe response parsing and JSON-path mapping into workflow variables and data rows.
 - Permission review, destination checks, redacted diagnostics, and audit evidence for every external request.
 - AI draft support using the same validated activities and saved-connection references, without granting the model access to secret values.
 
-**Delivered increments:** native **Paginated API Read** performs bounded page-numbered GETs and maps JSON arrays; reusable HTTPS connection profiles and a visual **API Request** editor support OS-vault bearer/API-key authentication, shared headers, GET/POST/PUT/PATCH, bounded responses and request pacing. Both use the restricted public egress client and per-run network permission. A live MCP run against JSONPlaceholder succeeded. See [API activity documentation](API-ACTIVITIES.md). Remaining work includes OAuth 2.0 token flows, cursor/next-link pagination, retries, richer JSON mapping, generated OpenAPI connectors and broader provider acceptance.
+**Delivered increments:** native **Paginated API Read** performs bounded page-numbered GETs and maps JSON arrays; reusable HTTPS connection profiles and a visual **API Request** editor support OS-vault bearer/API-key/OAuth client-credentials authentication, shared headers, GET/POST/PUT/PATCH, bounded responses and request pacing. OAuth tokens are short-lived in-memory run data. All requests use restricted public egress and per-run network permission. A live MCP request against JSONPlaceholder succeeded; OAuth exchange currently has mocked protocol tests and still needs live acceptance with a provider account. See [API activity documentation](API-ACTIVITIES.md). Remaining work includes Authorization Code/PKCE, cursor/next-link pagination, retries, richer JSON mapping, generated OpenAPI connectors and broader provider acceptance.
 
-Delivery gates: connection-profile validation and vault storage; a real authenticated request against a controlled local test server; pagination and retry safety; editable UI authoring; full engine and packaging acceptance. Unsupported OAuth flows, private-network targets, redirects, and provider-specific pagination must be explicit rather than implied to work.
+Remaining delivery gates: live OAuth acceptance with a provider account; cursor/next-link pagination and retry safety; richer mapping and generated OpenAPI connectors; broader provider acceptance. Private-network targets, redirects and unsupported OAuth flows must remain explicit rather than implied to work.
 
 ## Differentiated product direction
 

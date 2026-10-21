@@ -59,7 +59,7 @@ export async function storeAiCredential(service:string,username:string,secret:st
 export async function listAiConnections():Promise<AiConnectionProfile[]>{if(!inDesktop())return [];return (await rpc('ai.connections.list')).profiles??[];}
 export async function saveAiConnection(profile:Partial<AiConnectionProfile>):Promise<AiConnectionProfile>{return (await rpc('ai.connections.save',{profile})).profile;}
 export async function deleteAiConnection(profileId:string):Promise<void>{await rpc('ai.connections.delete',{profileId});}
-export type ApiConnectionProfile={id:string;name:string;baseUrl:string;authType:'none'|'bearer'|'api_key_header';apiKeyHeader:string;headers:Record<string,string>;minIntervalSeconds:number;credentialStored?:boolean};
+export type ApiConnectionProfile={id:string;name:string;baseUrl:string;authType:'none'|'bearer'|'api_key_header'|'oauth_client_credentials';apiKeyHeader:string;headers:Record<string,string>;minIntervalSeconds:number;tokenUrl:string;clientId:string;scope:string;audience:string;clientAuthMethod:'client_secret_basic'|'client_secret_post';credentialStored?:boolean};
 export async function listApiConnections():Promise<ApiConnectionProfile[]>{if(!inDesktop())return [];return (await rpc('api.connections.list')).profiles??[];}
 export async function saveApiConnection(profile:Partial<ApiConnectionProfile>,secret?:string):Promise<ApiConnectionProfile>{const result=await rpc('api.connections.save',{profile,...(secret?{secret}:{})});return {...result.profile,credentialStored:result.credentialStored};}
 export async function deleteApiConnection(profileId:string):Promise<void>{await rpc('api.connections.delete',{profileId});}

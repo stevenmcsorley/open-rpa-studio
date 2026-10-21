@@ -77,6 +77,7 @@ class WorkflowEngine:
         self._browser_page: Any = None
         self._secret_values: set[str] = set()
         self._api_last_request_at: dict[str, float] = {}
+        self._api_tokens: dict[str, tuple[str,float]] = {}
         self.workflows: dict[str, dict[str, Any]] = {}
         for key, rel in project["workflows"].items():
             path = (self.root / rel).resolve()
@@ -1408,11 +1409,23 @@ class WorkflowEngine:
             raise WorkflowError("API Request authentication headers are managed by the saved connection",a["id"],"api-auth-header-managed")
         secret=None
         try:
-            if profile["authType"] in {"bearer","api_key_header"}:
+            if profile["authType"] in {"bearer","api_key_header","oauth_client_credentials"}:
                 secret=api_connections.read_secret(profile["id"])
                 self._secret_values.add(secret)
                 if profile["authType"]=="bearer":headers["Authorization"]="Bearer "+secret
-                else:headers[profile["apiKeyHeader"]]=secret
+                elif profile["authType"]=="api_key_header":headers[profile["apiKeyHeader"]]=secret
+                else:
+                    cached=self._api_tokens.get(profile["id"])
+                    now=time.monotonic()
+                    if cached and cached[1]>now+1:token=cached[0]
+                    else:
+                        try:token,expires=api_connections.request_oauth_token(profile,secret,restricted_http_request,min(float(a.get("timeoutSeconds",20)),20.0))
+                        except EgressDenied as exc:raise WorkflowError(str(exc),a["id"],"http-egress-denied") from exc
+                        except (OSError,TimeoutError,ValueError,RuntimeError) as exc:raise WorkflowError(f"OAuth token exchange failed: {exc}",a["id"],"api-oauth-token-failed") from exc
+                        safety=min(30.0,expires*.1);self._api_tokens[profile["id"]]=(token,now+max(1.0,expires-safety))
+                        token_host=urlsplit(profile["tokenUrl"]).hostname
+                        self.options.audit("api.oauth.token",{"connectionId":profile["id"],"host":token_host})
+                    self._secret_values.add(token);headers["Authorization"]="Bearer "+token
             body=a.get("body")
             if body is not None:body=str(interpolate(body,v)).encode("utf-8")
             wait=max(0.0,profile["minIntervalSeconds"]-(time.monotonic()-self._api_last_request_at.get(profile["id"],0.0)))

@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from .network import assert_public_url
 
 FORMAT = "openrpa.api-connections"
-VERSION = 1
+VERSION = 2
 MAX_PROFILES = 100
 MAX_FILE_BYTES = 1_000_000
 VAULT_SERVICE = "OpenRPA API Connection"
@@ -32,7 +32,7 @@ def default_store_path() -> Path:
 def _profile(value: Any, *, require_id: bool = False) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("API connection must be an object")
-    allowed = {"id", "name", "baseUrl", "authType", "apiKeyHeader", "headers", "minIntervalSeconds"}
+    allowed = {"id", "name", "baseUrl", "authType", "apiKeyHeader", "headers", "minIntervalSeconds", "tokenUrl", "clientId", "scope", "audience", "clientAuthMethod"}
     if set(value) - allowed:
         raise ValueError("API connection contains unsupported fields")
     raw_id = value.get("id")
@@ -57,8 +57,8 @@ def _profile(value: Any, *, require_id: bool = False) -> dict[str, Any]:
     except Exception as exc:
         raise ValueError(f"API base URL is not a permitted public HTTPS destination: {exc}") from exc
     auth_type = value.get("authType", "none")
-    if auth_type not in {"none", "bearer", "api_key_header"}:
-        raise ValueError("API authentication must be none, bearer, or api_key_header")
+    if auth_type not in {"none", "bearer", "api_key_header", "oauth_client_credentials"}:
+        raise ValueError("API authentication must be none, bearer, api_key_header, or oauth_client_credentials")
     key_header = value.get("apiKeyHeader", "X-API-Key")
     if not isinstance(key_header, str) or not HEADER_NAME.fullmatch(key_header) or key_header.lower() in FORBIDDEN_HEADERS:
         raise ValueError("API key header must be a valid, non-transport HTTP header name")
@@ -77,9 +77,27 @@ def _profile(value: Any, *, require_id: bool = False) -> dict[str, Any]:
     interval = value.get("minIntervalSeconds", 0)
     if isinstance(interval, bool) or not isinstance(interval, (float, int)) or not 0 <= interval <= 60:
         raise ValueError("Minimum request interval must be between 0 and 60 seconds")
+    oauth_fields={}
+    if auth_type=="oauth_client_credentials":
+        token_url=value.get("tokenUrl")
+        if not isinstance(token_url,str) or len(token_url)>2048:
+            raise ValueError("OAuth token URL must be HTTPS text no longer than 2,048 characters")
+        token_parts=urlsplit(token_url.strip())
+        if token_parts.scheme!="https" or not token_parts.hostname or token_parts.username is not None or token_parts.password is not None or token_parts.query or token_parts.fragment:
+            raise ValueError("OAuth token URL must be an HTTPS URL without embedded credentials, query, or fragment")
+        try:assert_public_url(token_url.strip())
+        except Exception as exc:raise ValueError(f"OAuth token URL is not a permitted public HTTPS destination: {exc}") from exc
+        client_id=value.get("clientId")
+        if not isinstance(client_id,str) or not client_id.strip() or len(client_id)>1024 or "\r" in client_id or "\n" in client_id:
+            raise ValueError("OAuth client ID must contain 1–1,024 single-line characters")
+        scope=value.get("scope","");audience=value.get("audience","");client_auth=value.get("clientAuthMethod","client_secret_basic")
+        if not isinstance(scope,str) or len(scope)>2048 or "\r" in scope or "\n" in scope:raise ValueError("OAuth scope must be single-line text up to 2,048 characters")
+        if not isinstance(audience,str) or len(audience)>2048 or "\r" in audience or "\n" in audience:raise ValueError("OAuth audience must be single-line text up to 2,048 characters")
+        if client_auth not in {"client_secret_basic","client_secret_post"}:raise ValueError("OAuth client authentication must be client_secret_basic or client_secret_post")
+        oauth_fields={"tokenUrl":token_url.strip(),"clientId":client_id.strip(),"scope":scope,"audience":audience,"clientAuthMethod":client_auth}
     return {"id": profile_id, "name": name.strip(), "baseUrl": base_url.strip().rstrip("/"),
             "authType": auth_type, "apiKeyHeader": key_header, "headers": safe_headers,
-            "minIntervalSeconds": float(interval)}
+            "minIntervalSeconds": float(interval),"tokenUrl":oauth_fields.get("tokenUrl",""),"clientId":oauth_fields.get("clientId",""),"scope":oauth_fields.get("scope",""),"audience":oauth_fields.get("audience",""),"clientAuthMethod":oauth_fields.get("clientAuthMethod","client_secret_basic")}
 
 
 def list_profiles(path: Path) -> list[dict[str, Any]]:
@@ -91,7 +109,7 @@ def list_profiles(path: Path) -> list[dict[str, Any]]:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("API connection store is unreadable or malformed") from exc
-    if not isinstance(document, dict) or set(document) != {"format", "formatVersion", "profiles"} or document.get("format") != FORMAT or document.get("formatVersion") != VERSION or not isinstance(document.get("profiles"), list):
+    if not isinstance(document, dict) or set(document) != {"format", "formatVersion", "profiles"} or document.get("format") != FORMAT or document.get("formatVersion") not in {1,VERSION} or not isinstance(document.get("profiles"), list):
         raise ValueError("Unsupported API connection store format")
     rows = [_profile(row, require_id=True) for row in document["profiles"]]
     if len(rows) > MAX_PROFILES:
@@ -176,3 +194,31 @@ def has_secret(profile_id: str) -> bool:
     from .credentials import get_safe_keyring
     try: return bool(get_safe_keyring().get_password(VAULT_SERVICE, profile_id))
     except Exception: return False
+
+
+def request_oauth_token(profile:dict[str,Any],client_secret:str,requester:Any,timeout:float=20)->tuple[str,float]:
+    """Exchange client credentials using the restricted HTTP requester; never cache or persist the token here."""
+    if profile.get("authType")!="oauth_client_credentials":raise ValueError("API connection does not use OAuth client credentials")
+    from urllib.parse import urlencode,quote_plus
+    from base64 import b64encode
+    fields={"grant_type":"client_credentials"}
+    if profile.get("scope"):fields["scope"]=profile["scope"]
+    if profile.get("audience"):fields["audience"]=profile["audience"]
+    headers={"Accept":"application/json","Content-Type":"application/x-www-form-urlencoded"}
+    if profile.get("clientAuthMethod","client_secret_basic")=="client_secret_basic":
+        pair=f"{quote_plus(profile['clientId'],safe='')}:{quote_plus(client_secret,safe='')}".encode("ascii")
+        headers["Authorization"]="Basic "+b64encode(pair).decode("ascii")
+    else:
+        fields["client_id"]=profile["clientId"];fields["client_secret"]=client_secret
+    response=requester(profile["tokenUrl"],"POST",headers,urlencode(fields).encode("ascii"),timeout,65_536)
+    status=int(response.get("status",0))
+    if status<200 or status>=300:raise ValueError(f"OAuth token endpoint returned HTTP {status}")
+    try:document=json.loads(str(response.get("body","")))
+    except (ValueError,TypeError):raise ValueError("OAuth token endpoint returned invalid JSON")
+    if not isinstance(document,dict):raise ValueError("OAuth token response must be a JSON object")
+    token=document.get("access_token");token_type=document.get("token_type","Bearer")
+    if not isinstance(token,str) or not token or len(token)>8192 or "\r" in token or "\n" in token:raise ValueError("OAuth response has no valid access_token")
+    if not isinstance(token_type,str) or token_type.casefold()!="bearer":raise ValueError("OAuth response must issue a Bearer token")
+    expires=document.get("expires_in",300)
+    if isinstance(expires,bool) or not isinstance(expires,(int,float)) or not 1<=expires<=86_400:raise ValueError("OAuth expires_in must be between 1 and 86,400 seconds")
+    return token,float(expires)

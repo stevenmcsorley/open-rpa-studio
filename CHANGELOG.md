@@ -1,4 +1,8 @@
 # Changelog
+## 0.1.35
+- Added OAuth 2.0 client-credentials authentication to API connection profiles, including client-secret Basic and form-body methods, scope/audience, restricted token exchange, in-memory expiry-aware token reuse, and token-aware connection tests. Existing v1 API connection files remain readable and migrate on save.
+- OAuth token exchange and the connection-test UI path have mocked coverage; no provider account was available for live OAuth acceptance. Verification: 253 Python tests, 121 frontend tests, frontend production build, `cargo check --locked`, and `uv lock --check` pass. Windows NSIS installer: 69.13 MiB, SHA-256 `3f55c27de40c028bc4e84f2701e3c433d56f3efead5428a74a28338523db25c5`.
+
 ## 0.1.34
 - MCP project synchronization now selects the single newly created or changed workflow after a clean reload, so newly built workflows appear directly in the designer. Studio identifies the MCP-created/updated workflow in its status message. Multiple simultaneous changes keep the current selection; unsaved local edits still require a deliberate reload.
 - Added focused workflow-change detection tests. Verification: 247 Python tests, 121 frontend tests and the production frontend build pass. Windows NSIS installer: 69.12 MiB, SHA-256 `8e13a9bde3f4f5ca567809dbfebd42a3df1260397569dbb0b34879defc65cf36`.

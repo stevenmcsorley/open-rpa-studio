@@ -32,12 +32,24 @@ def test_api_connection_profiles_keep_secrets_out_of_local_json(tmp_path,monkeyp
     assert not api_connections.has_secret(profile["id"])
 
 
+def test_legacy_api_connection_store_is_readable_after_oauth_schema_upgrade(tmp_path,monkeypatch):
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile_id="a2b4d8d0-828a-4ee0-b43f-f9674ad7c2f1"
+    path=tmp_path/"legacy.json"
+    path.write_text(json.dumps({"format":"openrpa.api-connections","formatVersion":1,"profiles":[{"id":profile_id,"name":"Old API","baseUrl":"https://api.example/v1","authType":"bearer","apiKeyHeader":"X-API-Key","headers":{},"minIntervalSeconds":0}]}),encoding="utf-8")
+    rows=api_connections.list_profiles(path)
+    assert rows[0]["id"]==profile_id and rows[0]["authType"]=="bearer" and rows[0]["tokenUrl"]==""
+    assert json.loads(path.read_text(encoding="utf-8"))["formatVersion"]==1
+
+
 @pytest.mark.parametrize("values",[
     {"name":"Bad","baseUrl":"http://api.example"},
     {"name":"Bad","baseUrl":"https://user:pass@api.example"},
     {"name":"Bad","baseUrl":"https://api.example","headers":{"Authorization":"secret"}},
     {"name":"Bad","baseUrl":"https://api.example","headers":{"X-Token":"secret"}},
     {"name":"Bad","baseUrl":"https://api.example","authType":"api_key_header","apiKeyHeader":"X-API-Key","headers":{"x-api-key":"not-a-secret"}},
+    {"name":"Bad OAuth","baseUrl":"https://api.example","authType":"oauth_client_credentials","tokenUrl":"http://auth.example/token","clientId":"client"},
+    {"name":"Bad OAuth","baseUrl":"https://api.example","authType":"oauth_client_credentials","tokenUrl":"https://auth.example/token","clientId":""},
     {"name":"Bad","baseUrl":"https://api.example","headers":{"X-Okay":"line\nbreak"}},
     {"name":"Bad","baseUrl":"https://api.example","minIntervalSeconds":61},
 ])
@@ -89,6 +101,42 @@ def test_api_request_requires_network_and_rejects_host_or_path_escape(tmp_path,m
     assert result.status=="failed" and result.error["code"]=="network-permission-denied"
 
 
+def test_oauth_client_credentials_is_exchanged_once_and_token_stays_ephemeral(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"OAuth API","baseUrl":"https://api.example.test/v1","authType":"oauth_client_credentials","tokenUrl":"https://auth.example.test/oauth/token","clientId":"client","scope":"orders.read","audience":"orders","clientAuthMethod":"client_secret_basic"})
+    monkeypatch.setattr(api_connections,"read_secret",lambda profile_id:"client-secret")
+    requests=[]
+    def fake_request(url,method,headers,body,timeout,max_bytes):
+        requests.append((url,method,headers,body,timeout,max_bytes))
+        if url==profile["tokenUrl"]:
+            return {"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps({"access_token":"ephemeral-access-token","token_type":"Bearer","expires_in":3600})}
+        return {"status":200,"headers":{"Content-Type":"application/json"},"body":"{\"ok\":true}"}
+    monkeypatch.setattr(engine,"restricted_http_request",fake_request)
+    activities=[{"id":f"fetch-{index}","type":"api_request","connectionId":profile["id"],"method":"GET","path":f"/orders/{index}","result":f"response{index}"} for index in (1,2)]
+    root,project=_project(tmp_path,{"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":activities})
+    audits=[];result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json",audit=lambda action,details:audits.append((action,details))))
+    assert result.status=="succeeded"
+    assert [item[0] for item in requests]==[profile["tokenUrl"],"https://api.example.test/v1/orders/1","https://api.example.test/v1/orders/2"]
+    assert requests[0][2]["Authorization"].startswith("Basic ")
+    assert b"grant_type=client_credentials" in requests[0][3] and b"scope=orders.read" in requests[0][3]
+    assert requests[1][2]["Authorization"]=="Bearer ephemeral-access-token" and requests[2][2]["Authorization"]=="Bearer ephemeral-access-token"
+    assert "ephemeral-access-token" not in json.dumps(result.__dict__)
+    assert audits.count(("api.oauth.token",{"connectionId":profile["id"],"host":"auth.example.test"}))==1
+
+
+def test_oauth_form_auth_does_not_log_credentials_and_rejects_bad_responses(monkeypatch):
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections._profile({"name":"OAuth","baseUrl":"https://api.example","authType":"oauth_client_credentials","tokenUrl":"https://auth.example/token","clientId":"client id","scope":"read","clientAuthMethod":"client_secret_post"})
+    seen=[]
+    token,expires=api_connections.request_oauth_token(profile,"private-secret",lambda *args:(seen.append(args) or {"status":200,"body":"{\"access_token\":\"token-value\",\"expires_in\":120}"}))
+    assert token=="token-value" and expires==120
+    assert b"client_id=client+id" in seen[0][3] and b"client_secret=private-secret" in seen[0][3]
+    assert "private-secret" not in str(seen[0][2])
+    with pytest.raises(ValueError,match="HTTP 401"):
+        api_connections.request_oauth_token(profile,"private-secret",lambda *args:{"status":401,"body":"sensitive error body"})
+
+
 def test_local_bridge_manages_connections_tests_only_status_and_never_saves_secret(tmp_path,monkeypatch):
     from openrpa import bridge,network,credentials
     monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
@@ -110,3 +158,25 @@ def test_local_bridge_manages_connections_tests_only_status_and_never_saves_secr
     assert not vault.values
     bridge.handle({"id":3,"method":"api.connections.delete","params":{"profileId":profile["id"]}})
     assert replies[-1]["result"]["deleted"] and not vault.values
+
+
+def test_oauth_connection_test_discards_token_and_response_body(tmp_path,monkeypatch):
+    from openrpa import bridge,network,credentials
+    monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    vault=FakeKeyring();monkeypatch.setattr(credentials,"get_safe_keyring",lambda:vault)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"OAuth Orders","baseUrl":"https://orders.example/v1","authType":"oauth_client_credentials","tokenUrl":"https://login.example/token","clientId":"client"})
+    api_connections.store_secret(profile["id"],"private-client-secret")
+    calls=[]
+    def response(url,*args):
+        calls.append(url)
+        return {"status":200,"headers":{"Content-Type":"application/json"},"body":"{\"access_token\":\"private-access-token\",\"expires_in\":60}"} if url==profile["tokenUrl"] else {"status":204,"headers":{"Content-Type":"application/json"},"body":"never surface this response"}
+    monkeypatch.setattr(network,"request",response)
+    class History:
+        def audit(self,*args):pass
+    replies=[];monkeypatch.setattr(bridge,"send",replies.append);monkeypatch.setattr(bridge,"history",History())
+    bridge.handle({"id":9,"method":"api.connections.test","params":{"profileId":profile["id"],"path":"/health","allowNetwork":True}})
+    assert calls==[profile["tokenUrl"],"https://orders.example/v1/health"]
+    assert replies[-1]["result"]=={"status":204,"ok":True,"contentType":"application/json"}
+    assert "private-client-secret" not in json.dumps(replies[-1]) and "private-access-token" not in json.dumps(replies[-1])
+    assert "never surface this response" not in json.dumps(replies[-1])
