@@ -1,4 +1,6 @@
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -28,6 +30,41 @@ def test_remote_provider_requires_https_and_public_host():
         ai._endpoint("openai_compatible","https://127.0.0.1/v1","/models")
 
 
+def test_provider_http_error_classifies_unsupported_schema_without_exposing_response_body(monkeypatch):
+    monkeypatch.setattr(ai,"restricted_request",lambda *args,**kwargs:{"status":400,"body":'{"error":{"message":"response_format json_schema is not supported; customer prompt secret"}}'})
+    with pytest.raises(ai.ProviderHttpError) as failure:
+        ai._call("https://api.example/v1/chat/completions",False,"POST",body={})
+    assert failure.value.rejects_json_schema() is True
+    assert "customer prompt secret" not in str(failure.value)
+
+
+def test_local_openai_compatible_server_acceptance_retries_and_returns_schema_guided_json():
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    requests=[]
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body=json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))))
+            requests.append(body)
+            if "response_format" in body:
+                self.send_response(400);self.send_header("Content-Type","application/json");self.end_headers()
+                self.wfile.write(b'{"error":{"message":"response_format json_schema is not supported"}}')
+                return
+            payload={"choices":[{"message":{"content":json.dumps(draft)}}]}
+            encoded=json.dumps(payload).encode()
+            self.send_response(200);self.send_header("Content-Type","application/json");self.send_header("Content-Length",str(len(encoded)));self.end_headers()
+            self.wfile.write(encoded)
+        def log_message(self,*_args):pass
+    server=ThreadingHTTPServer(("127.0.0.1",0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        result=ai.draft("local_openai_compatible","test-model","write a log",["log"],f"http://127.0.0.1:{server.server_port}/v1")
+    finally:
+        server.shutdown();thread.join(timeout=2);server.server_close()
+    assert result==draft
+    assert len(requests)==2
+    assert "response_format" in requests[0] and "response_format" not in requests[1]
+
+
 def test_models_calls_openai_compatible_endpoint(monkeypatch):
     seen={}
     def call(url,local,**kwargs):
@@ -52,6 +89,53 @@ def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
     assert len(messages)==2 and messages[0]["role"]=="system" and messages[1]["role"]=="user"
     assert json.loads(messages[1]["content"])=={"task_description":"make a log"}
     assert "make a log" not in messages[0]["content"]
+
+
+def test_openai_compatible_retries_once_without_vendor_json_schema_when_explicitly_unsupported(monkeypatch):
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]};warnings=[]
+    calls=[]
+    def call(url,local,method="GET",**kwargs):
+        calls.append(kwargs["body"])
+        if len(calls)==1:
+            raise ai.ProviderHttpError(400,'{"error":{"message":"response_format json_schema is not supported"}}')
+        return {"choices":[{"message":{"content":json.dumps(draft)}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1",on_compatibility_fallback=warnings.append)
+    assert result==draft
+    assert len(calls)==2
+    assert calls[0]["response_format"]["type"]=="json_schema"
+    assert "response_format" not in calls[1]
+    assert "JSON Schema:" in calls[1]["messages"][0]["content"]
+    assert json.loads(calls[1]["messages"][1]["content"])=={"task_description":"make a log"}
+    assert len(warnings)==1 and "retried once" in warnings[0]
+
+
+def test_openai_compatible_fallback_still_rejects_malformed_json_without_another_retry(monkeypatch):
+    calls=[]
+    def call(*args,**kwargs):
+        calls.append(kwargs["body"])
+        if len(calls)==1:raise ai.ProviderHttpError(400,'{"error":{"message":"response_format is not supported"}}')
+        return {"choices":[{"message":{"content":"not-json"}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    with pytest.raises(ValueError,match="malformed structured output"):
+        ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1")
+    assert len(calls)==2
+
+
+@pytest.mark.parametrize("status,body",[
+    (400,'{"error":{"message":"invalid API key"}}'),
+    (500,'{"error":{"message":"response_format json_schema unsupported"}}'),
+])
+def test_openai_compatible_does_not_retry_unrelated_or_server_errors(monkeypatch,status,body):
+    calls=[]
+    def call(*args,**kwargs):
+        calls.append(kwargs["body"])
+        raise ai.ProviderHttpError(status,body)
+    monkeypatch.setattr(ai,"_call",call)
+    with pytest.raises(ai.ProviderHttpError,match=f"HTTP {status}") as error:
+        ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1")
+    assert len(calls)==1
+    assert "invalid API key" not in str(error.value)
 
 
 @pytest.mark.parametrize("provider,base_url",[

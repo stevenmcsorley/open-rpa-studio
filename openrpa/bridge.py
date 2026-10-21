@@ -424,8 +424,13 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             types=[x["type"] for x in ACTIVITY_CATALOG]
             execution_model=str(params.get("executionModel","sequence"))
             history.audit("ai.draft",{"provider":provider,"model":model[:200],"workflowModel":execution_model,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
+            compatibility_warnings=[]
+            def record_ai_compatibility_fallback(message: str) -> None:
+                compatibility_warnings.append(message)
+                history.audit("ai.structured_output_fallback",{"provider":provider,"model":model[:200]})
             draft=ai_providers.draft(provider,model,params.get("prompt",""),types,params.get("baseUrl"),
-                params.get("credentialService"),params.get("credentialUsername"),execution_model,ai_cancel)
+                params.get("credentialService"),params.get("credentialUsername"),execution_model,ai_cancel,
+                on_compatibility_fallback=record_ai_compatibility_fallback)
             if ai_cancel is not None and ai_cancel.is_set():
                 raise ai_providers.RequestCancelled("Provider request was cancelled")
             payload_key={"sequence":"activities","flowchart":"flowchart","state_machine":"stateMachine"}.get(execution_model)
@@ -453,7 +458,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             workflow={"format":"openrpa.workflow","formatVersion":1,"name":"AI Draft","variables":[],"arguments":[],"activities":[] if execution_model!="sequence" else activities}
             if execution_model!="sequence":workflow["executionModel"]=execution_model;workflow["flowchart" if execution_model=="flowchart" else "stateMachine"]=payload
             problems=validate_workflow(workflow,set(params.get("workflows",["Main"])))
-            result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider}
+            result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider,"warnings":compatibility_warnings}
         else:
             raise ValueError(f"Unknown bridge method: {method}")
         send({"id": request.get("id"), "result": result})

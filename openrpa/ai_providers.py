@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from .credentials import get_safe_keyring
@@ -24,6 +24,40 @@ PROVIDERS = {
     "local_openai_compatible": {"name":"Local OpenAI-compatible server","local":True,"defaultBaseUrl":"http://127.0.0.1:8000/v1","requiresCredential":False,"kind":"openai"},
 }
 MAX_RESPONSE_BYTES=2_000_000
+
+
+class ProviderHttpError(ValueError):
+    """HTTP failure with bounded provider diagnostics kept out of user-facing text."""
+    def __init__(self,status: int,body: str):
+        super().__init__(f"Provider request failed with HTTP {status}")
+        self.status=status
+        self._diagnostic=self._diagnostic_text(body)
+
+    @staticmethod
+    def _diagnostic_text(body: str) -> str:
+        try:
+            parsed=json.loads(body[:MAX_RESPONSE_BYTES])
+        except (TypeError,json.JSONDecodeError):
+            return body[:8192].lower()
+        error=parsed.get("error") if isinstance(parsed,dict) else None
+        values=[]
+        if isinstance(error,dict):
+            values.extend(error.get(key) for key in ("code","type","message","param"))
+        elif isinstance(error,str):
+            values.append(error)
+        if isinstance(parsed,dict):
+            values.extend(parsed.get(key) for key in ("message","detail","code","type"))
+        return " ".join(value.lower() for value in values if isinstance(value,str))[:8192]
+
+    def rejects_json_schema(self) -> bool:
+        if self.status not in {400,404,422}:
+            return False
+        diagnostic=self._diagnostic
+        mentions_schema=any(term in diagnostic for term in ("response_format","json_schema","json schema","structured output"))
+        rejects_parameter=any(term in diagnostic for term in ("unsupported","not supported","does not support","doesn't support","not support","unrecognized","unknown parameter","unknown field","invalid parameter","not available"))
+        return mentions_schema and rejects_parameter
+
+
 def catalog() -> list[dict[str,Any]]:
     return [{"id":key,**value} for key,value in PROVIDERS.items()]
 
@@ -73,7 +107,7 @@ def _call(url: str, local: bool, method: str="GET", headers: dict[str,str]|None=
         result=(request_loopback(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,cancel)
                 if local else restricted_request(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,cancel))
         if int(result["status"])<200 or int(result["status"])>=300:
-            raise ValueError(f"Provider request failed with HTTP {result['status']}")
+            raise ProviderHttpError(int(result["status"]),str(result.get("body","")))
         try: return json.loads(str(result["body"]))
         except json.JSONDecodeError as exc: raise ValueError("Provider returned invalid JSON") from exc
     except RequestCancelled: raise
@@ -175,7 +209,7 @@ def _parse_chat_completion_draft(response: dict[str,Any]) -> dict[str,Any]:
 
 def draft(provider: str, model: str, prompt: str, activity_types: list[str], base_url: str|None=None,
           credential_service: str|None=None, credential_username: str|None=None, execution_model: str="sequence",
-          cancel: threading.Event | None=None) -> dict[str,Any]:
+          cancel: threading.Event | None=None,on_compatibility_fallback: Callable[[str],None] | None=None) -> dict[str,Any]:
     if provider not in PROVIDERS: raise ValueError(f"Unknown AI provider: {provider}")
     if not isinstance(prompt,str) or not prompt.strip() or len(prompt)>12_000: raise ValueError("Describe the workflow in 1–12,000 characters")
     if not isinstance(model,str) or not model.strip() or len(model)>200: raise ValueError("Choose a model name")
@@ -226,7 +260,18 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
         try: return json.loads(text)
         except (TypeError,json.JSONDecodeError) as exc: raise ValueError("OpenAI Responses API returned malformed structured output") from exc
     endpoint,local=_endpoint(provider,base_url,"/chat/completions")
-    response=_call(endpoint,local,"POST",body={"model":model,"temperature":0,"messages":[{"role":"system","content":instructions},{"role":"user","content":task_payload}],
-        "response_format":{"type":"json_schema","json_schema":{"name":"open_rpa_workflow","strict":False,"schema":schema}}},timeout=180,secret=secret,provider=provider,cancel=cancel)
+    messages=[{"role":"system","content":instructions},{"role":"user","content":task_payload}]
+    body={"model":model,"temperature":0,"messages":messages,
+        "response_format":{"type":"json_schema","json_schema":{"name":"open_rpa_workflow","strict":False,"schema":schema}}}
+    try:
+        response=_call(endpoint,local,"POST",body=body,timeout=180,secret=secret,provider=provider,cancel=cancel)
+    except ProviderHttpError as exc:
+        if not exc.rejects_json_schema():
+            raise
+        if on_compatibility_fallback is not None:
+            on_compatibility_fallback("The endpoint rejected JSON Schema mode; Studio retried once with schema-guided JSON and will still validate the draft locally.")
+        fallback_messages=[{"role":"system","content":instructions+"\n\nCompatibility mode: output exactly one raw JSON object, without Markdown fences, conforming to this JSON Schema:\n"+json.dumps(schema,ensure_ascii=False,separators=(",",":"))},messages[1]]
+        fallback_body={"model":model,"temperature":0,"messages":fallback_messages}
+        response=_call(endpoint,local,"POST",body=fallback_body,timeout=180,secret=secret,provider=provider,cancel=cancel)
     return _parse_chat_completion_draft(response)
 

@@ -24,6 +24,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *Browser workflows can use up to ten author-defined alternatives. The engine uses a fallback only when exactly one alternative resolves uniquely and records the choice without logging selector text.*
 
+![Open RPA Studio displaying an AI provider compatibility warning above a draft preview](docs/assets/ai-schema-fallback.png)
+
+*The draft panel discloses a schema-guided retry when a compatible endpoint rejects JSON Schema mode. The local HTTP acceptance test verifies the adapter exchange; this screenshot illustrates the resulting UI state.*
+
 ![Open RPA Studio sequence editor with its navigable nested workflow outline open beside an If branch and a selected branch activity](docs/assets/workflow-outline.png)
 
 *The workflow outline includes branch context for nested activities and stays pinned while the canvas scrolls. Select an entry to focus that activity and open its properties.*
