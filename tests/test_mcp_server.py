@@ -174,6 +174,8 @@ def test_live_desktop_mcp_action_is_permission_gated_and_audited_without_values(
     monkeypatch.setattr(desktop_accessibility,"drag",lambda *args:drag_calls.append(args))
     range_calls=[]
     monkeypatch.setattr(desktop_accessibility,"set_range_value",lambda *args:range_calls.append(args))
+    scroll_calls=[]
+    monkeypatch.setattr(desktop_accessibility,"scroll_into_view",lambda *args:scroll_calls.append(args))
     monkeypatch.setattr(desktop_accessibility,"read_grid",lambda *_args,**_kwargs:([{"Name":"private cell value"}],{"totalRows":1,"totalColumns":1,"rowsRead":1,"columnsRead":1,"truncated":False,"redactedCells":0,"outputChars":28}))
     launched=[]
     class FakeChild:
@@ -191,6 +193,7 @@ def test_live_desktop_mcp_action_is_permission_gated_and_audited_without_values(
     assert "drag" in tools["openrpa_desktop_action"]["inputSchema"]["properties"]["action"]["enum"]
     assert "read_grid" in tools["openrpa_desktop_action"]["inputSchema"]["properties"]["action"]["enum"]
     assert "set_range_value" in tools["openrpa_desktop_action"]["inputSchema"]["properties"]["action"]["enum"]
+    assert "scroll_into_view" in tools["openrpa_desktop_action"]["inputSchema"]["properties"]["action"]["enum"]
     grid_result=call(server,"openrpa_desktop_action",{"action":"read_grid","windowTitle":"QA Window","processId":73,"automationId":"orders","controlType":"DataGrid","maxRows":5,"maxColumns":4,"maxOutputChars":5000})
     assert grid_result["structuredContent"]["records"]==[{"Name":"private cell value"}]
     drag_result=call(server,"openrpa_desktop_action",{"action":"drag","windowTitle":"QA Window","processId":73,"sourceAutomationId":"source","sourceControlType":"ListItem","targetAutomationId":"target","targetControlType":"ListItem","durationMilliseconds":250})
@@ -199,6 +202,9 @@ def test_live_desktop_mcp_action_is_permission_gated_and_audited_without_values(
     range_result=call(server,"openrpa_desktop_action",{"action":"set_range_value","windowTitle":"QA Window","processId":73,"automationId":"zoom","controlType":"Slider","numericValue":0.75})
     assert range_result["structuredContent"]=={"action":"set_range_value","completed":True}
     assert range_calls==[("QA Window",None,"zoom","Slider",0.75,73)]
+    scrolled=call(server,"openrpa_desktop_action",{"action":"scroll_into_view","windowTitle":"QA Window","processId":73,"automationId":"archive","controlType":"TreeItem"})
+    assert scrolled["structuredContent"]=={"action":"scroll_into_view","completed":True}
+    assert scroll_calls==[("QA Window",None,"archive","TreeItem",73)]
     invalid_range=call(server,"openrpa_desktop_action",{"action":"set_range_value","windowTitle":"QA Window","automationId":"zoom","controlType":"Slider","numericValue":float("inf")})
     assert invalid_range["isError"] is True
     identity={"windowTitle":"QA Window","processId":73,"name":"Document","automationId":"editor","controlType":"Edit"}

@@ -7,8 +7,8 @@
     "component": {
       "type": "application",
       "name": "Open RPA Studio",
-      "version": "0.1.114",
-      "purl": "pkg:generic/open-rpa-studio@0.1.114"
+      "version": "0.1.115",
+      "purl": "pkg:generic/open-rpa-studio@0.1.115"
     },
     "properties": [
       {

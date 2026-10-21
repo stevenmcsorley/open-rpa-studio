@@ -87,6 +87,8 @@ def main() -> int:
             raise RuntimeError("Frozen MCP lacks accessible multi-item list selection")
         if "set_range_value" not in desktop_operations:
             raise RuntimeError("Frozen MCP lacks bounded native slider/spinner value setting")
+        if "scroll_into_view" not in desktop_operations:
+            raise RuntimeError("Frozen MCP lacks native off-screen desktop scrolling")
         if desktop_schema.get("properties", {}).get("values", {}).get("maxItems") != 100:
             raise RuntimeError("Frozen MCP multi-item selection is not bounded to 100 names")
         if set(desktop_schema.get("properties", {}).get("mode", {}).get("enum", [])) != {"replace", "add", "remove"}:

@@ -1,3 +1,7 @@
+## 0.1.115
+- Added `scroll_into_view` to the direct live desktop MCP action so connected agents can reveal uniquely selected off-screen controls without coordinate automation. The frozen bridge acceptance now checks that MCP operation.
+- Verification: live MCP desktop action, Windows UIA and Linux AT-SPI targeted suites passed (100 tests total); frontend production build passed. Full Python suite 507 passed; frontend suite 179 passed; production build, frozen MCP acceptance and Windows x64 NSIS installer build passed. Installer: `release/Open-RPA-Studio-Setup-0.1.115-x64.exe` (73,023,070 bytes; SHA-256 `3038cf949b84b98d1bb66a8b65751546bcf3cc8f8ba06d9d195a7d6cdfddc4e2`).
+
 ## 0.1.114
 - Added native Scroll Control Into View for uniquely identified off-screen controls through Windows UIA ScrollItem and Linux AT-SPI Component patterns. Desktop inspection exposes off-screen Windows UIA controls when they advertise the scroll pattern, and marks visibility in the inspector. No coordinate fallback is used.
 - Verification: full Python suite 507 passed; frontend suite 179 passed; production Vite build and frozen MCP acceptance passed. Windows x64 NSIS installer: `release/Open-RPA-Studio-Setup-0.1.114-x64.exe` (73,023,543 bytes; SHA-256 `b49ea9027b66883de4b08e14b7fca1f8f6c83251e4f5f55d1396bb275a4da3ca`).
