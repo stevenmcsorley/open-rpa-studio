@@ -25,6 +25,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install locked Python development dependencies
         run: uv sync --locked --extra dev --extra ocr --extra browser --extra desktop --extra credentials
+      - name: Install Playwright Chromium runtime
+        run: uv run --locked --extra browser python -m playwright install chromium
       - name: Python engine tests
         run: uv run --locked --extra dev pytest -q
       - name: Install locked frontend dependencies
