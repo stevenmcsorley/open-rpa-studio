@@ -37,7 +37,11 @@ By default, tools are read-only: the run tool is not advertised. Add `--allow-ru
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review" --allow-run --allow-network
 ```
 
-Add `--allow-edit` only when the AI client should be able to create or update saved workflows. Do not edit the same project simultaneously in Studio; an already-open editor can later save stale in-memory content over an MCP edit. Reopen the project in Studio after agent edits. Use one MCP server process per project.
+Add `--allow-edit` only when the AI client should be able to create or update saved workflows. Studio checks the open project's content signature and refreshes stable external edits automatically when there are no unsaved local changes. If local edits are pending, Studio shows an explicit reload action so it does not silently discard them. Avoid editing the same workflow in both places before resolving that prompt. Use one MCP server process per project.
+
+### Seeing MCP workflows in Studio
+
+The MCP server is bound to one project folder when it starts. Studio displays the project currently open in its own window, so an MCP-created workflow will appear there only when Studio has that same `project.json` open. Codex's default `Codex MCP Workspace` is a separate project folder; open that project in Studio if the AI client is connected to it. For the desktop app, stable external edits are detected within a few seconds. Projects with unsaved Studio changes show a reload action instead of replacing the editor state.
 
 The MCP client launches the process. Do not launch it in a separate terminal when configuring a stdio client. Diagnostics go to stderr; stdout is reserved for JSON-RPC messages.
 

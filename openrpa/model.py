@@ -106,6 +106,34 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code": "breakpoint-condition-disabled", "message": "A conditional breakpoint requires the activity breakpoint to be enabled", "activityId": str(aid or "")})
                 elif not isinstance(condition, str) or len(condition) > 2048:
                     problems.append({"code": "breakpoint-condition", "message": "Breakpoint condition must be text no longer than 2,048 characters", "activityId": str(aid or "")})
+            if typ == "http_paginate":
+                url=item.get("url")
+                if not isinstance(url,str) or not url.strip() or len(url)>8192:
+                    problems.append({"code":"api-url","message":"Paginated API Read needs a URL or expression of at most 8,192 characters","activityId":str(aid or "")})
+                for field_name, default in (("pageParam","page"),("pageSizeParam","limit"),("itemsPath","data.items")):
+                    value=item.get(field_name,default)
+                    if not isinstance(value,str) or len(value)>512 or (field_name!="itemsPath" and value and not value.replace("_", "a").isalnum()):
+                        problems.append({"code":"api-pagination-field","message":f"Paginated API Read {field_name} must be bounded text using letters, numbers, and underscores","activityId":str(aid or "")})
+                if item.get("pageParam","page") and item.get("pageParam","page")==item.get("pageSizeParam","limit"):
+                    problems.append({"code":"api-pagination-params","message":"Page number and page size parameters must be different","activityId":str(aid or "")})
+                headers=item.get("headers",{})
+                if not isinstance(headers,dict) or len(headers)>50 or any(not isinstance(k,str) or not k or len(k)>256 or "\r" in k or "\n" in k or not isinstance(v,str) or len(v)>8192 or "\r" in v or "\n" in v for k,v in headers.items()):
+                    problems.append({"code":"api-headers","message":"Paginated API Read headers must be an object of at most 50 bounded text values","activityId":str(aid or "")})
+                elif any(k.lower() in {"host","content-length","transfer-encoding","connection"} for k in headers):
+                    problems.append({"code":"api-header-restricted","message":"Paginated API Read cannot override transport headers","activityId":str(aid or "")})
+                for field_name, default, minimum, maximum in (("pageSize",100,1,1000),("maxPages",10,1,50),("maxItems",10_000,1,100_000),("maxTotalBytes",5_000_000,1024,20_000_000)):
+                    value=item.get(field_name,default)
+                    if not isinstance(value,int) or isinstance(value,bool) or not minimum<=value<=maximum:
+                        problems.append({"code":"api-limit","message":f"Paginated API Read {field_name} must be an integer from {minimum} to {maximum}","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",20)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=60:
+                    problems.append({"code":"api-timeout","message":"Paginated API Read timeoutSeconds must be between 1 and 60","activityId":str(aid or "")})
+                for field_name, default, optional in (("result","items",False),("metadataResult","pagination",True)):
+                    value=item.get(field_name,default)
+                    if not isinstance(value,str) or (optional and value and not value.isidentifier()) or (not optional and not value.isidentifier()):
+                        problems.append({"code":"api-result","message":f"Paginated API Read {field_name} must be a variable name" if not optional else "Paginated API Read metadataResult must be empty or a variable name","activityId":str(aid or "")})
+                if item.get("metadataResult","pagination") and item.get("metadataResult","pagination")==item.get("result","items"):
+                    problems.append({"code":"api-result-conflict","message":"Paginated API Read result and metadataResult must use different variables","activityId":str(aid or "")})
             if typ == "if":
                 if not isinstance(item.get("condition"), str):
                     problems.append({"code": "if-condition", "message": "If activity needs a condition expression", "activityId": str(aid or "")})
@@ -426,6 +454,8 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"browser-wait-until","message":"Browser waitUntil must be commit, domcontentloaded, load, or networkidle","activityId":str(aid or "")})
             elif typ=="browser_launch" and "headless" in item and not isinstance(item["headless"],bool):
                 problems.append({"code":"browser-headless","message":"Browser Launch headless must be a boolean","activityId":str(aid or "")})
+            elif typ=="browser_launch" and item.get("channel","chromium") not in {"chromium","chrome","msedge"}:
+                problems.append({"code":"browser-channel","message":"Browser Launch channel must be chromium, chrome, or msedge","activityId":str(aid or "")})
             if typ in {"desktop_ui_click","desktop_ui_fill","desktop_ui_text","desktop_ui_wait"}:
                 window_title=item.get("windowTitle")
                 if not isinstance(window_title,str) or not window_title.strip() or len(window_title)>512:
@@ -700,7 +730,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "image_ocr", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
+    "wait", "http_request", "http_paginate", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_table_read", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",

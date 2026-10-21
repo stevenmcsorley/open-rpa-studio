@@ -2,7 +2,7 @@
 
 ## Browser
 
-Install the optional Playwright package and Chromium. A workflow can launch Chromium, navigate, click, fill, select an option, check/uncheck controls, read element text, take screenshots, and close it. Locator kinds include accessible role, label, visible text, placeholder, test ID, and CSS. Role and label selectors are preferred; CSS is available for applications with incomplete accessibility metadata.
+Install the optional Playwright package and Chromium. Browser Launch defaults to bundled Chromium; set its `channel` to `chrome` or `msedge` to use an installed browser instead. If the bundled Chromium executable is missing, the engine reports the install command and available channel options. A workflow can navigate, click, fill, select an option, check/uncheck controls, read element text, take screenshots, and close the browser. Locator kinds include accessible role, label, visible text, placeholder, test ID, and CSS. Role and label selectors are preferred; CSS is available for applications with incomplete accessibility metadata.
 
 Browser interaction activities may also declare up to ten explicit `selectorFallbacks` (`selectorKind`, `selector`, and optional `exact`). The engine first requires the primary locator to resolve to exactly one control. If it does not, a fallback is accepted only when exactly one configured alternative resolves uniquely and none is ambiguous. It does not fuzzy-match, infer, or click a “similar” element. Hidden/detached waits and hidden assertions preserve their expected absence semantics and do not use fallbacks. Fallback use is recorded by activity ID and alternative index; selector text and page content are excluded from audit events.
 

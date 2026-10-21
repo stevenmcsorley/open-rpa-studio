@@ -47,7 +47,7 @@
 
 Open RPA Studio is independent of Flowbench. This roadmap records upcoming product capabilities; it does not claim completed parity with another automation product.
 
-## Next major capability: visual API connector builder
+## API connector builder
 
 **Goal:** make API-driven automations approachable without hand-authoring generic HTTP request fields or automating a website's UI.
 
@@ -60,6 +60,8 @@ The connector milestone will build on the existing restricted HTTP client, workf
 - Safe response parsing and JSON-path mapping into workflow variables and data rows.
 - Permission review, destination checks, redacted diagnostics, and audit evidence for every external request.
 - AI draft support using the same validated activities and saved-connection references, without granting the model access to secret values.
+
+**First increment delivered:** the native **Paginated API Read** activity performs bounded page-numbered GETs, maps a JSON array into a workflow variable, reports page/count/byte/truncation metadata, checks cancellation between requests, rejects unsafe header shapes and fails closed on request errors. Network permission and the restricted public HTTP client apply. See [API activity documentation](API-ACTIVITIES.md). This does not complete the connector builder: named connection profiles, OAuth, cursor/next-link pagination, pacing, retries, richer mapping, and dedicated visual configuration remain to be built and accepted.
 
 Delivery gates: connection-profile validation and vault storage; a real authenticated request against a controlled local test server; pagination and retry safety; editable UI authoring; full engine and packaging acceptance. Unsupported OAuth flows, private-network targets, redirects, and provider-specific pagination must be explicit rather than implied to work.
 

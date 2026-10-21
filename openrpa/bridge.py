@@ -163,6 +163,23 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             for key, rel in project["workflows"].items():
                 workflows[key] = json.loads(project_file(root, rel).read_text(encoding="utf-8"))
             result = {"project": project, "root": str(root), "workflows": workflows}
+        elif method == "project.signature":
+            root = Path(params["root"]).expanduser().resolve()
+            project_path = (root / "project.json").resolve()
+            project_path.relative_to(root)
+            project, loaded_root = load_project(project_path)
+            if loaded_root != root:
+                raise ValueError("Project root changed while checking for external edits.")
+            digest = hashlib.sha256()
+            digest.update(project_path.read_bytes())
+            for name, relative in sorted(project["workflows"].items()):
+                workflow_path = project_file(root, relative)
+                digest.update(name.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(relative.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(workflow_path.read_bytes())
+            result = {"sha256": digest.hexdigest()}
         elif method == "project.create":
             root = Path(params["path"]).expanduser().resolve()
             root.mkdir(parents=True, exist_ok=True)

@@ -393,6 +393,88 @@ def test_retry_scope_retries_selected_error_and_restores_variables(tmp_path: Pat
     assert attempts==[{"event":"retry-attempt-failed","activityId":"retry","attempt":1,"maxAttempts":3,"errorCode":"http-timeout","willRetry":True}]
     assert any(event.get("event")=="retry-succeeded" for event in result.logs)
 
+def test_paginated_api_read_fetches_bounded_pages_and_reports_metadata(tmp_path: Path, monkeypatch):
+    from urllib.parse import urlsplit, parse_qs
+    project={"format":"openrpa.project","formatVersion":1,"name":"API","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"API","variables":[],"arguments":[],"activities":[
+        {"id":"read-api","type":"http_paginate","url":"https://api.example.org/v1/items?tenant=public&page=99","headers":{"Authorization":"Bearer example-placeholder"},"pageParam":"page","pageSizeParam":"limit","pageSize":2,"itemsPath":"data.items","maxPages":5,"maxItems":10,"maxTotalBytes":20000,"timeoutSeconds":5,"result":"items","metadataResult":"apiMeta"}
+    ]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    calls=[]
+    def response(url,method,headers,body,timeout,max_bytes):
+        calls.append((url,method,headers,body,timeout,max_bytes))
+        query=parse_qs(urlsplit(url).query)
+        page=int(query["page"][0])
+        rows=[{"id":1},{"id":2}] if page==1 else [{"id":3}]
+        return {"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps({"data":{"items":rows}}),"redirectBlocked":False}
+    monkeypatch.setattr("openrpa.engine.restricted_http_request",response)
+    result=run_project(project,tmp_path,options=RunOptions(allow_network=True))
+    assert result.status=="succeeded"
+    assert [row["id"] for row in result.variables["items"]]==[1,2,3]
+    assert result.variables["apiMeta"]=={"pagesFetched":2,"itemCount":3,"responseBytes":75,"truncated":False}
+    assert len(calls)==2
+    assert all(call[1]=="GET" and call[2]["Authorization"]=="Bearer example-placeholder" for call in calls)
+    assert [parse_qs(urlsplit(call[0]).query) for call in calls]==[
+        {"tenant":["public"],"page":["1"],"limit":["2"]},
+        {"tenant":["public"],"page":["2"],"limit":["2"]},
+    ]
+
+def test_paginated_api_read_enforces_limits_network_permission_and_cancel(tmp_path: Path,monkeypatch):
+    project={"format":"openrpa.project","formatVersion":1,"name":"API","main":"Main","workflows":{"Main":"main.json"}}
+    activity={"id":"read","type":"http_paginate","url":"https://api.example.org/items","pageSize":1,"maxPages":2,"maxItems":2,"maxTotalBytes":2048,"itemsPath":"items","result":"items"}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"API","variables":[],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    bad={**workflow,"activities":[{**activity,"maxPages":51,"pageParam":"same","pageSizeParam":"same"}]}
+    codes={problem["code"] for problem in validate_workflow(bad)}
+    assert {"api-limit","api-pagination-params"}<=codes
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    denied=run_project(project,tmp_path)
+    assert denied.status=="failed" and denied.error["code"]=="network-permission-denied"
+    monkeypatch.setattr("openrpa.engine.restricted_http_request",lambda *args:{"status":200,"headers":{},"body":json.dumps({"items":[{"id":1},{"id":2}]}),"redirectBlocked":False})
+    cancelled=[False]; requests=[]
+    def cancel_after_response(*args):
+        requests.append(args[0]);cancelled[0]=True
+        return {"status":200,"headers":{},"body":json.dumps({"items":[{"id":1}]}),"redirectBlocked":False}
+    monkeypatch.setattr("openrpa.engine.restricted_http_request",cancel_after_response)
+    cancelled_result=run_project(project,tmp_path,options=RunOptions(allow_network=True,cancel=lambda:cancelled[0]))
+    assert cancelled_result.status=="cancelled"
+    assert len(requests)==1
+
+def test_paginated_api_read_can_use_a_vault_credential_without_returning_it(tmp_path: Path,monkeypatch):
+    from openrpa import engine
+    project={"format":"openrpa.project","formatVersion":1,"name":"API secret","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"API secret","variables":[],"arguments":[],"activities":[
+        {"id":"get-token","type":"credential_get","service":"test-api","username":"robot","result":"token"},
+        {"id":"read","type":"http_paginate","url":"https://api.example.org/items","headers":{"Authorization":"Bearer {{ token }}"},"itemsPath":"items","maxPages":1,"result":"items"}
+    ]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    class Vault:
+        def get_password(self,service,username):
+            assert (service,username)==("test-api","robot")
+            return "highly-sensitive-token"
+    captured={}
+    monkeypatch.setattr(engine,"get_safe_keyring",lambda:Vault())
+    def request(url,method,headers,body,timeout,max_bytes):
+        captured.update(headers)
+        return {"status":200,"headers":{},"body":"{\"items\":[{\"id\":1}]}","redirectBlocked":False}
+    monkeypatch.setattr(engine,"restricted_http_request",request)
+    result=run_project(project,tmp_path,options=RunOptions(allow_network=True))
+    assert result.status=="succeeded"
+    assert captured["Authorization"]=="Bearer highly-sensitive-token"
+    assert "highly-sensitive-token" not in json.dumps(result.variables)
+
+def test_paginated_api_read_rejects_error_status_and_non_array_items(tmp_path: Path,monkeypatch):
+    project={"format":"openrpa.project","formatVersion":1,"name":"API","main":"Main","workflows":{"Main":"main.json"}}
+    activity={"id":"read","type":"http_paginate","url":"https://api.example.org/items","maxPages":1,"itemsPath":"items","result":"items"}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"API","variables":[],"arguments":[],"activities":[activity]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    monkeypatch.setattr("openrpa.engine.restricted_http_request",lambda *args:{"status":503,"headers":{},"body":"service unavailable","redirectBlocked":False})
+    error=run_project(project,tmp_path,options=RunOptions(allow_network=True))
+    assert error.status=="failed" and error.error["code"]=="api-http-status"
+    monkeypatch.setattr("openrpa.engine.restricted_http_request",lambda *args:{"status":200,"headers":{},"body":json.dumps({"items":None}),"redirectBlocked":False})
+    malformed=run_project(project,tmp_path,options=RunOptions(allow_network=True))
+    assert malformed.status=="failed" and malformed.error["code"]=="api-items-type"
+
 def test_retry_scope_respects_error_filter_and_requires_safety(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Retry filter","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Retry filter","variables":[],"arguments":[],"activities":[

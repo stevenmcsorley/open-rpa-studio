@@ -4,11 +4,15 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-See the [product roadmap](docs/ROADMAP.md) for the next major capability: a visual API connector builder with reusable credential-backed connections, authentication, pagination, rate limits, and safe response mapping.
+The first API integration capability is available as a bounded, page-numbered JSON **Paginated API Read** activity. See [API activity documentation](docs/API-ACTIVITIES.md) for limits, permissions, and current protocol support. The broader visual connector builder with reusable OAuth-backed connections, cursor pagination, rate limits, and safe mapping remains on the [roadmap](docs/ROADMAP.md).
 
 ![Open RPA Studio browser preview showing the CSV workflow in the flowchart designer, with the selected node, properties inspector and graph minimap](docs/assets/studio-overview.png)
 
 *The screenshot shows the isolated browser preview and the flowchart minimap. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
+
+![Open RPA Studio authoring a bounded paginated JSON API read with its activity properties visible](docs/assets/api-pagination-activity.png)
+
+*Paginated API Read exposes page and record limits, response mapping, and metadata directly in the workflow properties. The screenshot is from the isolated browser preview; actual requests run only in the desktop engine after network permission is granted.*
 
 ![Open RPA Studio run history with workflow search, status filtering and a selected run's saved activity and event evidence](docs/assets/run-history-filters.png)
 
@@ -108,6 +112,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Export and import deterministic `.orpa` project packages from the desktop toolbar. Exports validate workflows and exclude secret files; imports verify the manifest, file hashes and paths before extracting to an empty folder.
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
 - Search a categorized activity catalog, configure activity properties, reorder sequence actions, edit nested control-flow branches, and zoom sequence canvases from 50% to 150% with a reset control.
+- Read page-numbered JSON APIs through bounded **Paginated API Read** requests. The activity supports header expressions, JSON item paths, response and page limits, cancellation checks, audit events, and explicit network permission; see [API activity documentation](docs/API-ACTIVITIES.md).
 - Search configured text across workflows, nested control-flow branches, flowcharts and state machines with Ctrl+Shift+F. Results show workflow context and navigate to the selected activity or graph element; search excludes credential-like fields and variable or argument defaults.
 - Collapse or reopen the Output pane to give the workflow designer more vertical room; the output tabs remain accessible while collapsed.
 - Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file. Flowchart action nodes can contain editable nested If/Else, loop, Switch, and Try/Catch/Finally activities in the properties inspector.
@@ -131,7 +136,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Choose whether AI drafts an activity sequence, connected flowchart, or state machine. Model-specific schemas and the same local workflow validator are applied before a draft can replace the current workflow.
 - Stop an in-flight AI draft from the native Studio panel; cancellation travels through the bridge to the provider socket, while warning that a provider may continue processing after it receives a request.
 - Test configured AI endpoints from the model picker. Studio reports reachability, model count and request time, and distinguishes an empty model catalogue from a connection failure without sending a prompt.
-- Connect a compatible AI agent to one project over the local stdio Model Context Protocol server. It supports project/workflow discovery, the canonical native activity catalog, workflow reading, draft-bundle validation without writes, opt-in creation and updates with optimistic concurrency, permission planning and opt-in execution. Permission planning flags browser navigation as network access. The Windows installer bundles this command in `engine/openrpa-bridge.exe`; see [MCP client integration](docs/MCP-INTEGRATION.md).
+- Connect a compatible AI agent to one project over the local stdio Model Context Protocol server. It supports project/workflow discovery, the canonical native activity catalog, workflow reading, draft-bundle validation without writes, opt-in creation and updates with optimistic concurrency, permission planning and opt-in execution. When Studio has the same project open, saved MCP edits refresh automatically unless there are unsaved local edits. Permission planning flags browser navigation as network access. The Windows installer bundles this command in `engine/openrpa-bridge.exe`; see [MCP client integration](docs/MCP-INTEGRATION.md).
 
 ### Workflow execution
 

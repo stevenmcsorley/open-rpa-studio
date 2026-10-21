@@ -1,4 +1,15 @@
 # Changelog
+## 0.1.31
+- Added **Paginated API Read**, a native bounded GET activity for page-numbered JSON APIs. It maps a selected JSON array into records, reports page/count/byte/truncation metadata, observes cancellation between pages, limits pages/items/bytes, rejects unsafe headers, and requires the existing per-run network permission and restricted egress client. It can use OS-vault credentials from the existing Credential Get activity through header expressions without persisting secrets in the workflow.
+- Added API activity documentation, MCP network preflight, browser-preview catalog support and a public screenshot. Cursor/next-link pagination, OAuth, reusable connection profiles, pacing and advanced response mapping remain future work.
+- Verification: 232 Python tests and 119 frontend tests pass; production frontend build, Rust host check and locked dependency check pass. A live workflow-engine GET to JSONPlaceholder fetched two pages and four records in 670 ms with the expected `truncated=true` at the configured page cap. Windows NSIS installer is 69.06 MiB, SHA-256 `ca3addfec4394eeb8462e75f4beeae68df97d133f1a6cd706b02af7d1e2c517c`.
+
+## 0.1.32
+- Studio now detects stable external project changes, including edits made by the bound Open RPA MCP server. It reloads clean projects automatically and offers an explicit reload when local edits are unsaved, preserving in-memory work.
+- Added `project.signature` to the native bridge for validated, content-based project change detection.
+- Browser Launch can target installed Chrome or Microsoft Edge when bundled Playwright Chromium is unavailable; missing Chromium now reports an actionable setup error.
+- Verification: 235 Python tests and 119 frontend tests pass; production frontend build, `cargo check --locked`, and `uv lock --check` pass. Actual MCP execution `233a8837-e829-4218-909f-a6878671d438` succeeded: Chrome opened Google (which returned anti-automation content), a public Nasdaq quote supplied MSFT $528.1132 at 4:33 AM ET, and the workflow logged the source and timestamp. Windows NSIS installer: 69.06 MiB, SHA-256 `88ae019abd43248d017183f4ad542de2340dbbd5bdabd8df14e0f1bbb0ba5c87`.
+
 ## Unreleased
 
 - Added Read Web Table, a Playwright activity that extracts a unique HTML table into editable workflow records with duplicate-header handling, optional header rows, strict row/column/response-size/time limits, pre-run read classification, and explicit errors instead of silent truncation. Added authoring support in the browser preview, regression coverage, documentation, and a public Studio screenshot.

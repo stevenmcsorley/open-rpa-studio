@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from .expressions import evaluate, interpolate
 from .model import WorkflowError, validate_workflow, validate_workflow_bindings
@@ -1254,6 +1254,78 @@ class WorkflowEngine:
             except (OSError, TimeoutError, ValueError) as exc:
                 code="http-timeout" if isinstance(exc,TimeoutError) else "http-error"
                 raise WorkflowError(f"HTTP request failed: {exc}", a["id"], code) from exc
+        elif kind == "http_paginate":
+            if not self.options.allow_network:
+                raise WorkflowError("API access requires explicit per-run network permission", a["id"], "network-permission-denied")
+            try:
+                base_url = str(interpolate(a["url"], v))
+                parsed = urlsplit(base_url)
+                if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.fragment:
+                    raise ValueError("Paginated API URL must be an absolute HTTP(S) URL without embedded credentials or a fragment")
+                page_param = str(a.get("pageParam", "page"))
+                size_param = str(a.get("pageSizeParam", "limit"))
+                if page_param and page_param == size_param:
+                    raise ValueError("Page number and page size parameters must be different")
+                page_size = int(a.get("pageSize", 100))
+                max_pages = int(a.get("maxPages", 10))
+                max_items = int(a.get("maxItems", 10_000))
+                max_total_bytes = int(a.get("maxTotalBytes", 5_000_000))
+                timeout = float(a.get("timeoutSeconds", 20))
+                items_path = str(a.get("itemsPath", ""))
+                headers = {str(k): str(interpolate(val, v)) for k, val in a.get("headers", {}).items()}
+                items: list[Any] = []
+                total_bytes = 0
+                pages = 0
+                truncated = False
+                result_name = a.get("result", "items")
+                metadata_name = a.get("metadataResult", "pagination")
+                for page_number in range(1, max_pages + 1):
+                    self._check_cancel()
+                    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key not in {page_param, size_param}]
+                    if page_param:
+                        query.append((page_param, str(page_number)))
+                    if size_param:
+                        query.append((size_param, str(page_size)))
+                    page_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), ""))
+                    self.options.audit("http.request", {"activityId": a["id"], "method": "GET", "host": parsed.hostname, "scheme": parsed.scheme, "page": page_number})
+                    response = restricted_http_request(page_url, "GET", headers, None, timeout, min(max_total_bytes, 5_000_000))
+                    status = response.get("status")
+                    if not isinstance(status, int) or not 200 <= status < 300:
+                        raise WorkflowError(f"Paginated API returned HTTP status {status}", a["id"], "api-http-status")
+                    body_text = response.get("body", "")
+                    if not isinstance(body_text, str):
+                        raise WorkflowError("Paginated API response body was not text", a["id"], "api-response")
+                    total_bytes += len(body_text.encode("utf-8"))
+                    if total_bytes > max_total_bytes:
+                        raise WorkflowError("Paginated API exceeded the configured total response limit", a["id"], "api-total-size-limit")
+                    try:
+                        document = json.loads(body_text)
+                        selected: Any = document
+                        if items_path:
+                            for part in items_path.split("."):
+                                selected = selected[int(part)] if isinstance(selected, list) and part.isdigit() else selected[part]
+                    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as exc:
+                        raise WorkflowError(f"Could not read JSON items at '{items_path}': {exc}", a["id"], "api-items-path") from exc
+                    if not isinstance(selected, list):
+                        raise WorkflowError("The configured JSON items path must resolve to an array", a["id"], "api-items-type")
+                    pages += 1
+                    remaining = max_items - len(items)
+                    items.extend(selected[:remaining])
+                    if len(selected) > remaining:
+                        truncated = True
+                        break
+                    if len(selected) < page_size:
+                        break
+                    if page_number == max_pages:
+                        truncated = True
+                v[result_name] = items
+                if metadata_name:
+                    v[metadata_name] = {"pagesFetched": pages, "itemCount": len(items), "responseBytes": total_bytes, "truncated": truncated}
+            except WorkflowError:
+                raise
+            except (OSError, TimeoutError, ValueError, TypeError) as exc:
+                code = "http-timeout" if isinstance(exc, TimeoutError) else "api-request-error"
+                raise WorkflowError(f"Paginated API request failed: {exc}", a["id"], code) from exc
         elif kind.startswith("browser_"):
             self._browser_activity(a, v, logs)
         elif kind.startswith("desktop_"):
@@ -1288,7 +1360,16 @@ class WorkflowEngine:
             except ImportError as exc:
                 raise WorkflowError("Browser automation requires optional Playwright and its browser runtime. See docs/AUTOMATION_ADAPTERS.md", a["id"], "runtime-unavailable") from exc
             self._browser_runtime = sync_playwright().start()
-            self._browser = self._browser_runtime.chromium.launch(headless=bool(a.get("headless", False)))
+            channel=a.get("channel","chromium")
+            launcher=self._browser_runtime.chromium
+            options={"headless":bool(a.get("headless",False))}
+            if channel!="chromium":options["channel"]=channel
+            try:
+                self._browser = launcher.launch(**options)
+            except Exception as exc:
+                if channel=="chromium" and "Executable doesn't exist" in str(exc):
+                    raise WorkflowError("Playwright Chromium is not installed in this environment. Install it with 'playwright install chromium', or set Browser Launch channel to 'chrome' or 'msedge' to use an installed browser.",a["id"],"browser-runtime-missing") from exc
+                raise WorkflowError(f"Could not launch browser channel '{channel}': {exc}",a["id"],"browser-launch-failed") from exc
             self._browser_context = self._browser.new_context()
             self._browser_page = self._browser_context.new_page()
             self._browser_page.set_default_timeout(30_000)

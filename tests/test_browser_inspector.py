@@ -87,6 +87,29 @@ def test_real_chromium_snapshot_selectors_drive_engine_browser_activities():
         browser.close()
 
 
+def test_browser_launch_accepts_installed_browser_channel(monkeypatch):
+    import playwright.sync_api
+    from openrpa.engine import WorkflowEngine
+    launched=[]
+    class Page:
+        def set_default_timeout(self,value): pass
+        def set_default_navigation_timeout(self,value): pass
+        def route(self,*args): pass
+    class Context:
+        def new_page(self): return Page()
+    class Browser:
+        def new_context(self): return Context()
+    class Chromium:
+        def launch(self,**kwargs): launched.append(kwargs);return Browser()
+    class Runtime:
+        chromium=Chromium()
+        def stop(self): pass
+    monkeypatch.setattr(playwright.sync_api,"sync_playwright",lambda: type("Starter",(),{"start":lambda self:Runtime()})())
+    engine=object.__new__(WorkflowEngine);engine._browser_page=None;engine._browser_runtime=None;engine._browser=None;engine._browser_context=None
+    engine._browser_activity({"id":"launch","type":"browser_launch","channel":"chrome","headless":True},{})
+    assert launched==[{"headless":True,"channel":"chrome"}]
+
+
 def test_real_chromium_recorder_captures_editable_selectors_without_field_values():
     playwright=pytest.importorskip("playwright.sync_api")
     with playwright.sync_playwright() as runtime:

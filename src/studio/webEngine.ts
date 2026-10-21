@@ -300,7 +300,7 @@ export async function run(w:Workflow,allowNetwork:boolean,emitExternal:(e:any)=>
       }
       case'transform_field':{const rows=typeof a.rows==='string'&&a.rows in variables?variables[a.rows]:val(a.rows,variables);const op=a.operation;variables[a.result||'rows']=rows.map((row:any)=>{const copy={...row};if(copy[a.field]!=null){let text=String(copy[a.field]);if(op==='trim')text=text.trim();else if(op==='upper')text=text.toUpperCase();else if(op==='lower')text=text.toLowerCase();else if(op==='regex_replace')text=text.replace(new RegExp(a.pattern,'g'),String(a.replacement??''));else throw Error(`Unsupported field transform ${op}`);copy[a.field]=text}return copy});break}
       case'wait':await new Promise(r=>setTimeout(r,Math.min(300000,Number(val(a.seconds,variables))*1000)));break;
-      case'http_request':if(!allowNetwork)throw Error('Network access requires run permission');throw Error('HTTP in browser preview is disabled; use the desktop engine');
+      case'http_request':case'http_paginate':if(!allowNetwork)throw Error('Network access requires run permission');throw Error('HTTP in browser preview is disabled; use the desktop engine');
       case'browser_wait':case'browser_assert':case'browser_table_read':throw Error(`${a.type} requires the desktop Playwright engine`);
       case'sqlite_query':case'file_read_text':case'file_write_text':case'file_copy':case'file_list':case'file_move':case'file_delete':case'csv_read':case'csv_write':case'xlsx_read':case'xlsx_write':case'pdf_read_text':case'image_ocr':case'json_parse':case'json_write':case'regex_replace':case'regex_match':throw Error(`${a.type} requires the desktop filesystem engine`);
       default:throw Error(`Unsupported activity ${a.type}`)

@@ -30,6 +30,22 @@ def test_native_bridge_exports_and_imports_verified_project_package(tmp_path, mo
     assert audit[-1][1]["sha256"]==exported["sha256"]
 
 
+def test_project_signature_tracks_external_workflow_changes(tmp_path, monkeypatch):
+    replies=[]
+    monkeypatch.setattr(bridge,"send",replies.append)
+    root=tmp_path/"project"
+    bridge.handle({"id":1,"method":"project.create","params":{"path":str(root),"name":"Live sync"}})
+    bridge.handle({"id":2,"method":"project.signature","params":{"root":str(root)}})
+    before=replies[-1]["result"]["sha256"]
+    workflow=root/"workflows"/"main.workflow.json"
+    value=json.loads(workflow.read_text(encoding="utf-8"))
+    value["activities"]=[{"id":"live","type":"log","level":"info","message":"created externally"}]
+    workflow.write_text(json.dumps(value),encoding="utf-8")
+    bridge.handle({"id":3,"method":"project.signature","params":{"root":str(root)}})
+    after=replies[-1]["result"]["sha256"]
+    assert before!=after
+
+
 def test_native_bridge_package_import_rejects_nonempty_destination(tmp_path, monkeypatch):
     replies=[]
     monkeypatch.setattr(bridge,"send",replies.append)

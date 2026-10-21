@@ -2,6 +2,7 @@ import json
 import os
 import copy
 import hashlib
+import io
 import subprocess
 import sys
 import threading
@@ -48,6 +49,18 @@ def test_tools_are_project_scoped_and_execution_is_opt_in(tmp_path):
     assert "--allow-edit" in denied["content"][0]["text"]
 
 
+def test_mcp_stdio_escapes_unicode_for_legacy_windows_code_pages(tmp_path):
+    make_project(tmp_path,[{"id":"hello","type":"log","level":"info","message":"price £528 · current"}])
+    server=ProjectMCPServer(str(tmp_path))
+    request={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"openrpa_read_workflow","arguments":{"name":"Main"}}}
+    output=io.StringIO()
+    assert server.serve(io.BytesIO((json.dumps(request)+"\n").encode()),output)==0
+    line=output.getvalue().strip()
+    assert "\\u00a3" in line and "\\u00b7" in line
+    response=json.loads(line)
+    assert response["result"]["structuredContent"]["workflow"]["activities"][0]["message"]=="price £528 · current"
+
+
 def test_mcp_activity_catalog_is_native_and_labels_required_permissions(tmp_path):
     from openrpa.activity_catalog import ACTIVITY_CATALOG
 
@@ -57,6 +70,7 @@ def test_mcp_activity_catalog_is_native_and_labels_required_permissions(tmp_path
     assert [item["type"] for item in result] == [item["type"] for item in ACTIVITY_CATALOG]
     by_type = {item["type"]: item for item in result}
     assert by_type["browser_navigate"]["requiredPermissions"] == ["network"]
+    assert by_type["http_paginate"]["requiredPermissions"] == ["network"]
     assert by_type["desktop_click"]["requiredPermissions"] == ["desktop"]
     assert by_type["credential_get"]["requiredPermissions"] == ["credentials"]
     assert by_type["file_delete"]["requiredPermissions"] == ["destructive"]
@@ -70,6 +84,16 @@ def test_browser_navigation_is_preflighted_as_network_access(tmp_path):
     result = call(server, "openrpa_run_workflow", {"name": "Main"})
     assert result["isError"] is True
     assert "browser navigation" in result["content"][0]["text"]
+    assert "--allow-network" in result["content"][0]["text"]
+
+def test_paginated_api_is_preflighted_as_network_access(tmp_path):
+    make_project(tmp_path, [{"id":"api-read","type":"http_paginate","url":"https://api.example.org/items","itemsPath":"items","result":"items"}])
+    server=ProjectMCPServer(str(tmp_path),allow_run=True)
+    plan=call(server,"openrpa_plan_workflow",{"name":"Main"})["structuredContent"]
+    assert plan["requires"]["network"] is True
+    result=call(server,"openrpa_run_workflow",{"name":"Main"})
+    assert result["isError"] is True
+    assert "HTTP" in result["content"][0]["text"]
     assert "--allow-network" in result["content"][0]["text"]
 
 

@@ -23,6 +23,7 @@ function localRpc(method:string, params:Record<string,unknown>):Promise<any> {
   const id=++sequence; return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});localEngine!.postMessage({id,method,params});});
 }
 export async function openProject(path:string):Promise<BridgeResult>{return rpc('project.open',{path});}
+export async function projectSignature(root:string):Promise<string>{const result=await rpc('project.signature',{root});return result.sha256;}
 export async function createProject(path:string,name:string):Promise<BridgeResult>{return rpc('project.create',{path,name});}
 export async function saveProject(root:string,project:Project,workflows:Record<string,Workflow>):Promise<void>{await rpc('project.save',{root,project,workflows});}
 export async function exportProjectPackage(root:string,destination:string):Promise<{path:string;files:number;sha256:string}>{return rpc('project.package.export',{root,destination});}
