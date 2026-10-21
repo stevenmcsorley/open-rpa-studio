@@ -1,3 +1,7 @@
+## 0.1.116
+- Added live API response shape discovery to the API Request editor. A GET request can inspect a bounded, value-free sample from a saved API connection and suggest editable response mappings; public egress, request size, traversal, and sensitive-field checks apply.
+- Verification: Python suite 521 passed; frontend suite 192 passed; production Vite build, frozen MCP acceptance, and Windows host check passed in CI. Windows x64 NSIS installer built locally (73,047,688 bytes; SHA-256 `cc2e3f9f9612fcc73f610111d62c58f5799c505886e249baa9cb922f9312d554`).
+
 ## 0.1.115
 - Added `scroll_into_view` to the direct live desktop MCP action so connected agents can reveal uniquely selected off-screen controls without coordinate automation. The frozen bridge acceptance now checks that MCP operation.
 - Verification: live MCP desktop action, Windows UIA and Linux AT-SPI targeted suites passed (100 tests total); frontend production build passed. Full Python suite 507 passed; frontend suite 179 passed; production build, frozen MCP acceptance and Windows x64 NSIS installer build passed. Installer: `release/Open-RPA-Studio-Setup-0.1.115-x64.exe` (73,023,070 bytes; SHA-256 `3038cf949b84b98d1bb66a8b65751546bcf3cc8f8ba06d9d195a7d6cdfddc4e2`).
