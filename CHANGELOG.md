@@ -1,4 +1,11 @@
 # Changelog
+## Unreleased
+
+- Added a flowchart minimap showing graph topology, selected node and the visible canvas viewport, with pointer and keyboard navigation.
+- Fixed large flowcharts expanding the designer beyond its allocated workspace; long graphs now scroll inside the canvas. The Fit control accounts for both graph dimensions.
+- Refreshed the public README screenshot to show the flowchart editor and minimap.
+- Verification: 53 frontend tests and the production Vite build pass; a live 11-node browser workflow confirmed minimap navigation changes the canvas scroll position.
+
 ## 0.1.28 — Local MCP server for AI clients
 
 - Added a provider-neutral Model Context Protocol stdio server for one explicitly selected local project. Tools list workflows, read and validate workflows, inspect permission plans, update a workflow with an expected SHA-256 and opt-in validation, and (only when enabled at startup) run workflows through the existing engine.
