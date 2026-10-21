@@ -38,11 +38,37 @@ def test_tools_are_project_scoped_and_execution_is_opt_in(tmp_path):
     assert not info["projectRootExposed"]
     assert "openrpa_run_workflow" not in {item["name"] for item in server._tools()}
     assert "openrpa_update_workflow" not in {item["name"] for item in server._tools()}
+    assert "openrpa_activity_catalog" in {item["name"] for item in server._tools()}
     assert call(server, "openrpa_validate_project")["structuredContent"]["valid"]
     assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["workflow"]["name"] == "Main"
     denied = call(server, "openrpa_update_workflow", {"name": "Main"})
     assert denied["isError"] is True
     assert "--allow-edit" in denied["content"][0]["text"]
+
+
+def test_mcp_activity_catalog_is_native_and_labels_required_permissions(tmp_path):
+    from openrpa.activity_catalog import ACTIVITY_CATALOG
+
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path))
+    result = call(server, "openrpa_activity_catalog")["structuredContent"]["activities"]
+    assert [item["type"] for item in result] == [item["type"] for item in ACTIVITY_CATALOG]
+    by_type = {item["type"]: item for item in result}
+    assert by_type["browser_navigate"]["requiredPermissions"] == ["network"]
+    assert by_type["desktop_click"]["requiredPermissions"] == ["desktop"]
+    assert by_type["credential_get"]["requiredPermissions"] == ["credentials"]
+    assert by_type["file_delete"]["requiredPermissions"] == ["destructive"]
+
+
+def test_browser_navigation_is_preflighted_as_network_access(tmp_path):
+    make_project(tmp_path, [{"id": "navigate", "type": "browser_navigate", "url": "https://example.org"}])
+    server = ProjectMCPServer(str(tmp_path), allow_run=True)
+    plan = call(server, "openrpa_plan_workflow", {"name": "Main"})["structuredContent"]
+    assert plan["requires"]["network"] is True
+    result = call(server, "openrpa_run_workflow", {"name": "Main"})
+    assert result["isError"] is True
+    assert "browser navigation" in result["content"][0]["text"]
+    assert "--allow-network" in result["content"][0]["text"]
 
 
 def test_opt_in_edit_requires_current_digest_and_validation(tmp_path, monkeypatch):
@@ -105,6 +131,7 @@ def test_stdio_protocol_end_to_end(tmp_path):
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "openrpa_list_workflows", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "openrpa_activity_catalog", "arguments": {}}},
     ]
     payload = "".join(json.dumps(line) + "\n" for line in request_lines)
     process = subprocess.run([sys.executable, "-m", "openrpa", "mcp", str(tmp_path)], cwd=repository,
@@ -112,9 +139,11 @@ def test_stdio_protocol_end_to_end(tmp_path):
     assert process.returncode == 0, process.stderr
     assert process.stderr == ""
     responses = [json.loads(line) for line in process.stdout.splitlines()]
-    assert [response["id"] for response in responses] == [1, 2, 3]
+    assert [response["id"] for response in responses] == [1, 2, 3, 4]
     assert responses[0]["result"]["serverInfo"]["name"] == "open-rpa-studio"
     assert responses[2]["result"]["structuredContent"]["workflows"][0]["name"] == "Main"
+    activities = responses[3]["result"]["structuredContent"]["activities"]
+    assert any(item["type"] == "browser_navigate" and item["requiredPermissions"] == ["network"] for item in activities)
 
 
 def test_run_opt_in_executes_a_real_workflow_and_records_durable_history(tmp_path, monkeypatch):

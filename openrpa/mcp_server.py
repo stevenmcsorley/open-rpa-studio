@@ -19,6 +19,7 @@ from typing import Any
 from .engine import RunOptions, run_project
 from .history import RunHistory
 from .model import load_project, validate_workflow, validate_workflow_bindings
+from .activity_catalog import ACTIVITY_CATALOG
 
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 MAX_FRAME_BYTES = 4_000_000
@@ -122,9 +123,10 @@ class ProjectMCPServer:
         tools = [
             {"name": "openrpa_project_info", "description": "Get the fixed Open RPA project name, workflow names, and available MCP permissions. Does not return workflow contents.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_list_workflows", "description": "List workflow names and execution models in the fixed project.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
+            {"name": "openrpa_activity_catalog", "description": "List native activity types, descriptions, configuration defaults, and required permission grants available to build workflows. Metadata only; it never executes activities.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_read_workflow", "description": "Read one workflow definition. Workflow literals may contain private user data; the MCP client will receive them.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_validate_project", "description": "Validate all saved workflows and cross-workflow bindings without executing them.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
-            {"name": "openrpa_plan_workflow", "description": "Summarize activity types and required network, desktop, or destructive permissions without executing the workflow.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
+            {"name": "openrpa_plan_workflow", "description": "Summarize activity types and required network, desktop, credential, or destructive permissions without executing the workflow.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_list_run_history", "description": "List recent MCP workflow run statuses and identifiers from the durable local MCP run ledger; runtime variable values are excluded.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
         ]
         if self.allow_edit:
@@ -191,8 +193,8 @@ class ProjectMCPServer:
             workflow_name = args.get("name")
             workflow = self._workflow(workflow_name)
             types = self._reachable_types(workflow_name)
-            if "http_request" in types and not self.allow_network:
-                raise PermissionError("This workflow uses HTTP. Restart with --allow-network only after reviewing its destinations.")
+            if types & {"http_request", "browser_navigate"} and not self.allow_network:
+                raise PermissionError("This workflow uses HTTP or browser navigation. Restart with --allow-network only after reviewing its destinations.")
             if any(kind.startswith("desktop_") for kind in types) and not self.allow_desktop:
                 raise PermissionError("This workflow controls the desktop. Restart with --allow-desktop only after reviewing its actions.")
             if "credential_get" in types and not self.allow_credentials:
@@ -241,6 +243,17 @@ class ProjectMCPServer:
                 workflow = self._workflow(workflow_name)
                 rows.append({"name": workflow_name, "executionModel": workflow.get("executionModel", "sequence"), "activityCount": sum(1 for _ in _walk_activities(workflow))})
             return {"workflows": rows}
+        if name == "openrpa_activity_catalog":
+            activities=[]
+            for entry in ACTIVITY_CATALOG:
+                kind=entry["type"]
+                permissions=[]
+                if kind in {"http_request", "browser_navigate"}: permissions.append("network")
+                if kind.startswith("desktop_"): permissions.append("desktop")
+                if kind == "credential_get": permissions.append("credentials")
+                if kind in {"file_delete", "file_move"}: permissions.append("destructive")
+                activities.append({**entry, "requiredPermissions": permissions})
+            return {"activities": activities}
         if name == "openrpa_read_workflow":
             path = self._workflow_file(args.get("name"))
             raw = path.read_bytes()
@@ -263,7 +276,7 @@ class ProjectMCPServer:
             kinds_set = self._reachable_types(args.get("name"))
             activities = list(_walk_activities(workflow))
             kinds = sorted(kinds_set)
-            return {"workflow": args.get("name"), "activityCount": len(activities), "activityTypes": kinds, "requires": {"network": "http_request" in kinds_set, "desktop": any(kind.startswith("desktop_") for kind in kinds_set), "credentials": "credential_get" in kinds_set, "destructive": bool({"file_delete", "file_move"} & kinds_set)}, "note": "Permission scan includes statically invoked project workflows; expressions and runtime data can still change targets."}
+            return {"workflow": args.get("name"), "activityCount": len(activities), "activityTypes": kinds, "requires": {"network": bool({"http_request", "browser_navigate"} & kinds_set), "desktop": any(kind.startswith("desktop_") for kind in kinds_set), "credentials": "credential_get" in kinds_set, "destructive": bool({"file_delete", "file_move"} & kinds_set)}, "note": "Permission scan includes statically invoked project workflows; expressions and runtime data can still change targets."}
         if name == "openrpa_list_run_history":
             limit = args.get("limit", 20)
             if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:

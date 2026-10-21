@@ -10,6 +10,7 @@ The implementation supports MCP protocol versions `2025-11-25`, `2025-06-18`, `2
 |---|---|---:|
 | `openrpa_project_info` | Project name, workflow names and server permission flags | No |
 | `openrpa_list_workflows` | Names, execution models and activity counts | No |
+| `openrpa_activity_catalog` | Native activity descriptions, configuration defaults and per-activity permission requirements | No |
 | `openrpa_read_workflow` | Read one workflow definition | No |
 | `openrpa_update_workflow` | Replace a declared workflow after schema and binding validation, if explicitly enabled | Yes |
 | `openrpa_validate_project` | Validate saved workflows and bindings | No |
@@ -28,7 +29,7 @@ uv sync --locked
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review"
 ```
 
-By default, tools are read-only: the run tool is not advertised. Add `--allow-run` to expose workflow execution. Add `--allow-network`, `--allow-desktop`, `--allow-credentials`, and `--allow-destructive` separately only when the project needs HTTP, desktop control, OS-vault credentials, or file move/delete activities:
+By default, tools are read-only: the run tool is not advertised. Add `--allow-run` to expose workflow execution. Add `--allow-network`, `--allow-desktop`, `--allow-credentials`, and `--allow-destructive` separately only when the project needs HTTP or browser navigation, desktop control, OS-vault credentials, or file move/delete activities:
 
 ```powershell
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review" --allow-run --allow-network
@@ -69,7 +70,7 @@ To permit workflow execution, append `--allow-run` to `args`. To permit validate
 - No TCP, HTTP, cloud or external service listener is created by this MCP server.
 - Workflow execution is unavailable unless `--allow-run` is present at startup.
 - Workflow replacement is unavailable unless `--allow-edit` is present at startup and must use an expected workflow SHA-256.
-- HTTP activities require `--allow-network`; the workflow engine still applies its existing egress rules.
+- HTTP requests and browser navigation require `--allow-network`; the workflow engine still applies its existing egress rules.
 - Desktop activities require `--allow-desktop`.
 - OS credential-vault reads require `--allow-credentials`; the engine redacts retrieved secret values from its returned run variables and logs.
 - `file_delete` and `file_move`, including statically invoked workflows, require `--allow-destructive`.
