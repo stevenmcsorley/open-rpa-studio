@@ -682,6 +682,57 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             response=restricted_http_request(url,"GET",headers,None,10,65536)
             history.audit("api.connection.test",{"profileId":profile["id"],"host":parts.hostname,"status":response.get("status")})
             result={"status":response.get("status"),"ok":200<=int(response.get("status",0))<300,"contentType":next((value for key,value in response.get("headers",{}).items() if key.lower()=="content-type"),"")[:200]}
+        elif method == "api.connections.discover":
+            if params.get("allowNetwork") is not True:raise ValueError("Discovering API response fields requires enabling Allow network")
+            profile=api_connections.get_profile(_api_connections_path(),str(params.get("profileId","")))
+            path=params.get("path","/")
+            if not isinstance(path,str) or len(path)>8192 or not path.startswith("/") or path.startswith("//") or "#" in path or ".." in path.split("?",1)[0].replace("\\","/").split("/"):
+                raise ValueError("API discovery path must start with / and remain inside the configured API host")
+            query=params.get("query",{})
+            if not isinstance(query,dict) or len(query)>100:
+                raise ValueError("API discovery query must be an object with at most 100 parameters")
+            from urllib.parse import urlencode,urljoin,urlsplit
+            query_values=[]
+            for key,value in query.items():
+                if not isinstance(key,str) or not key or len(key)>256 or isinstance(value,(dict,list)) or value is None:
+                    raise ValueError("API discovery query values must be named scalar values")
+                if isinstance(value,str) and ("{{" in value or "}}" in value):
+                    raise ValueError("Replace workflow expressions with concrete values before discovering response fields")
+                query_values.append((key,str(value)))
+            url=urljoin(profile["baseUrl"].rstrip("/")+"/",path.lstrip("/"))
+            parts=urlsplit(url);base=urlsplit(profile["baseUrl"])
+            if (parts.scheme,parts.hostname,parts.port)!=(base.scheme,base.hostname,base.port):raise ValueError("API discovery cannot change the saved connection host")
+            if query_values:
+                from urllib.parse import parse_qsl,urlunsplit
+                merged=parse_qsl(parts.query,keep_blank_values=True)+query_values
+                url=urlunsplit((parts.scheme,parts.netloc,parts.path,urlencode(merged),""))
+            headers=dict(profile["headers"])
+            from .network import request as restricted_http_request
+            if profile["authType"] in {"bearer","api_key_header","oauth_client_credentials"}:
+                secret=api_connections.read_secret(profile["id"])
+                if profile["authType"]=="bearer":headers["Authorization"]="Bearer "+secret
+                elif profile["authType"]=="api_key_header":headers[profile["apiKeyHeader"]]=secret
+                else:
+                    token,expires=api_connections.request_oauth_token(profile,secret,restricted_http_request,10)
+                    headers["Authorization"]="Bearer "+token
+                    history.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname})
+            elif profile["authType"]=="oauth_authorization_code":
+                secret=api_connections.read_secret(profile["id"]) if profile["clientAuthMethod"]!="none" else ""
+                token=api_connections.authorization_code_access_token(profile,restricted_http_request,secret,10)
+                headers["Authorization"]="Bearer "+token
+                history.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname,"grant":"authorization_code"})
+            response=restricted_http_request(url,"GET",headers,None,10,2_000_000)
+            status=int(response.get("status",0));content_type=next((value for key,value in response.get("headers",{}).items() if key.lower()=="content-type"),"")[:200]
+            result={"status":status,"ok":200<=status<300,"contentType":content_type,"candidates":[]}
+            if result["ok"]:
+                body=response.get("body","")
+                if isinstance(body,str):
+                    try:
+                        from .api_discovery import discover_response
+                        result.update(discover_response(body))
+                    except ValueError as exc:
+                        result["discoveryError"]=str(exc)
+            history.audit("api.response.discover",{"profileId":profile["id"],"host":parts.hostname,"status":status,"candidateCount":len(result.get("candidates",[]))})
         elif method == "api.connections.authorize":
             if params.get("allowNetwork") is not True:raise ValueError("Authorizing an API connection requires enabling Allow network")
             profile=api_connections.get_profile(_api_connections_path(),str(params.get("profileId","")))

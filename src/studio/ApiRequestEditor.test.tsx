@@ -89,4 +89,13 @@ describe('API Request response mapping editor',()=>{
     expect(enabled).toContain('Fetch OpenAPI');
     expect(enabled).toContain('no redirects');
   });
+  it('offers value-free response field discovery only for an authorized saved GET connection',()=>{
+    const disabled=renderToStaticMarkup(createElement(ApiRequestEditor,{activity:{id:'fetch',type:'api_request',method:'GET'},connections:[],onChange:()=>{},onImportOperation:()=>{},desktop:true,allowNetwork:false}));
+    const enabled=renderToStaticMarkup(createElement(ApiRequestEditor,{activity:{id:'fetch',type:'api_request',method:'GET',connectionId:'orders'},connections:[{id:'orders',name:'Orders',baseUrl:'https://api.example/v1',authType:'none',apiKeyHeader:'X-API-Key',headers:{},minIntervalSeconds:0,authorizationUrl:'',tokenUrl:'',clientId:'',scope:'',audience:'',clientAuthMethod:'none'}],onChange:()=>{},onImportOperation:()=>{},desktop:true,allowNetwork:true}));
+    expect(disabled).toContain('Discover response fields');
+    expect(disabled).toContain('disabled=""');
+    expect(enabled).toContain('Discover fields');
+    expect(enabled).toContain('response values are discarded');
+    expect(enabled).toContain('not a guaranteed API schema');
+  });
 });

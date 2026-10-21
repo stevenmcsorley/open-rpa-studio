@@ -705,6 +705,69 @@ def test_oauth_connection_test_discards_token_and_response_body(tmp_path,monkeyp
     assert "never surface this response" not in json.dumps(replies[-1])
 
 
+def test_api_response_discovery_returns_only_bounded_structure_and_audits_counts(tmp_path,monkeypatch):
+    from openrpa import bridge,network
+    monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda _url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Orders","baseUrl":"https://orders.example/v1"})
+    body=json.dumps({"data":{"orders":[{"order/id":"private-order","amount":10,"customer":{"name":"Private Person"},"refresh_token":"secret"},{"order/id":"other-order","amount":None,"customer":{"name":"Someone Else"}}]}})
+    calls=[];audits=[]
+    monkeypatch.setattr(network,"request",lambda *args:(calls.append(args) or {"status":200,"headers":{"Content-Type":"application/json"},"body":body}))
+    class History:
+        def audit(self,*args):audits.append(args)
+    replies=[];monkeypatch.setattr(bridge,"send",replies.append);monkeypatch.setattr(bridge,"history",History())
+
+    bridge.handle({"id":1,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders","query":{"status":"paid","limit":5},"allowNetwork":True}})
+
+    result=replies[-1]["result"]
+    assert calls[0][0]=="https://orders.example/v1/orders?status=paid&limit=5"
+    assert calls[0][1:3]==("GET",{}) and calls[0][4:]==(10,2_000_000)
+    candidate=next(item for item in result["candidates"] if item["itemsPointer"]=="/data/orders")
+    assert candidate["stablePointer"] is True
+    assert {item["path"] for item in candidate["fields"]}=={"/amount","/customer/name","/order~1id"}
+    assert "private-order" not in json.dumps(replies[-1]) and "Private Person" not in json.dumps(replies[-1]) and "secret" not in json.dumps(replies[-1])
+    assert audits==[("api.response.discover",{"profileId":profile["id"],"host":"orders.example","status":200,"candidateCount":1})]
+    from openrpa.model import validate_workflow
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","result":"response","responseMapping":{"responseCode":"200","itemsPointer":candidate["itemsPointer"],"fields":[{"name":field["name"],"path":field["path"]} for field in candidate["fields"]],"result":"mappedOrders","maxItems":10000,"maxOutputBytes":5000000}}]}
+    assert validate_workflow(workflow)==[]
+
+
+def test_api_response_discovery_uses_vault_credentials_without_returning_them(tmp_path,monkeypatch):
+    from openrpa import bridge,network,credentials
+    monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda _url:None)
+    vault=FakeKeyring();monkeypatch.setattr(credentials,"get_safe_keyring",lambda:vault)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Orders key","baseUrl":"https://orders.example/v1","authType":"api_key_header","apiKeyHeader":"X-API-Key"})
+    api_connections.store_secret(profile["id"],"private-api-key")
+    calls=[]
+    monkeypatch.setattr(network,"request",lambda *args:(calls.append(args) or {"status":200,"headers":{"Content-Type":"application/json"},"body":"{\"items\":[{\"id\":1}]}"}))
+    replies=[];audits=[];monkeypatch.setattr(bridge,"send",replies.append)
+    class History:
+        def audit(self,*args):audits.append(args)
+    monkeypatch.setattr(bridge,"history",History())
+
+    bridge.handle({"id":1,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders","allowNetwork":True}})
+
+    assert calls[0][2]["X-API-Key"]=="private-api-key"
+    assert "private-api-key" not in json.dumps(replies[-1]) and "private-api-key" not in json.dumps(audits)
+
+
+def test_api_response_discovery_requires_explicit_network_permission_and_concrete_query(tmp_path,monkeypatch):
+    from openrpa import bridge,network
+    monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda _url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Orders","baseUrl":"https://orders.example/v1"})
+    calls=[];monkeypatch.setattr(network,"request",lambda *args:(calls.append(args) or {"status":200,"headers":{},"body":"[]"}))
+    replies=[];monkeypatch.setattr(bridge,"send",replies.append)
+    class History:
+        def audit(self,*_args):pass
+    monkeypatch.setattr(bridge,"history",History())
+    bridge.handle({"id":1,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders","allowNetwork":False}})
+    assert "Allow network" in replies[-1]["error"]["message"] and not calls
+    bridge.handle({"id":2,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders","query":{"cursor":"{{ nextCursor }}"},"allowNetwork":True}})
+    assert "concrete values" in replies[-1]["error"]["message"] and not calls
+
+
 def test_openapi_url_fetch_is_permission_gated_bounded_and_audited(monkeypatch):
     from openrpa import bridge,network
     replies=[];audits=[];calls=[]
