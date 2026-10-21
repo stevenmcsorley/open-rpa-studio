@@ -1,6 +1,8 @@
 # Changelog
 ## Unreleased
 
+- Added project-wide search across workflows, nested activities, sequence branches, flowchart nodes and transitions, state-machine states and transitions, and variable/argument names. Ctrl+Shift+F opens a navigable result list capped at 100 results. Credential-like fields and variable/argument default values are excluded. Added a public screenshot.
+- Verification: all 77 frontend tests pass, including nested-path matching, graph/state coverage, secret-field exclusion and result caps. The production build passes; Playwright verified search results and selecting a match navigates to its editable activity. Python remains at 181 passing tests.
 - Extended conditional breakpoints to flowchart control nodes and state-machine entries. The native debugger evaluates each expression at the boundary before execution, continues only when the condition is false, and fails closed by pausing on invalid expressions. Added a public screenshot of the state-entry inspector.
 - Verification: all 181 Python tests pass, including schema validation and real debugger runs paused at conditional graph and state boundaries; all 72 frontend tests and the production build pass. Playwright captured the state-machine breakpoint editor.
 - Improved OpenAI-compatible draft parsing across LM Studio, OpenRouter and compatible endpoints: accepts text content blocks and a complete `json` fence, and reports refusal, truncation, tool-only and malformed output explicitly.

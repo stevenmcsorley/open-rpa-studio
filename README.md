@@ -16,6 +16,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *Conditional breakpoints on flowchart nodes and state-machine entries use the safe expression language; invalid conditions pause for review.*
 
+![Open RPA Studio project search locating a configured activity message and showing its workflow context](docs/assets/project-wide-search.png)
+
+*Find configured content across project workflows, nested branches and graph models with Ctrl+Shift+F, then jump to the matching activity or state.*
+
 ![Open RPA Studio sequence editor with its navigable nested workflow outline open beside an If branch and a selected branch activity](docs/assets/workflow-outline.png)
 
 *The workflow outline includes branch context for nested activities and stays pinned while the canvas scrolls. Select an entry to focus that activity and open its properties.*
@@ -84,6 +88,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Export and import deterministic `.orpa` project packages from the desktop toolbar. Exports validate workflows and exclude secret files; imports verify the manifest, file hashes and paths before extracting to an empty folder.
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
 - Search a categorized activity catalog, configure activity properties, reorder sequence actions, edit nested control-flow branches, and zoom sequence canvases from 50% to 150% with a reset control.
+- Search configured text across workflows, nested control-flow branches, flowcharts and state machines with Ctrl+Shift+F. Results show workflow context and navigate to the selected activity or graph element; search excludes credential-like fields and variable or argument defaults.
 - Collapse or reopen the Output pane to give the workflow designer more vertical room; the output tabs remain accessible while collapsed.
 - Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file. Flowchart action nodes can contain editable nested If/Else, loop, Switch, and Try/Catch/Finally activities in the properties inspector.
 - Author a state machine with named states, per-state activity sequences, ordered boolean guards, an explicit initial state, and terminal states. State visits obey the workflow execution quota; interrupted workflows are not automatically replayed.
