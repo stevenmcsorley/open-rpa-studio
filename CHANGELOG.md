@@ -687,3 +687,7 @@ This remains an unsigned development release. State-machine workflows do not pro
 - Refresh the README application screenshot.
 - Windows installer SHA-256: `5825bb260ddaf5c220a556a0d1d2a724dda09df53d24e6f18ebd40f99660f792`.
 - Verification: 119 Python tests, 22 frontend tests, Vite production build, Rust check, and isolated NSIS install passed. The installed bridge exposed and round-tripped the Responses profile across processes. Installed bridge SHA-256: `d67c9efa97fbc7f1035beaf1ce8c13fb129e2205594aa80474050c500b2916ea`.
+## 0.1.113
+- Added a durable local MCP job worker with immediate or scheduled single-run submissions, idempotency keys, workflow-content snapshots, queue status inspection and cancellation. Interrupted jobs are marked and never replayed; automatic whole-workflow retries remain disabled.
+- Added a Studio Jobs tab for live queue monitoring and cooperative cancellation, backed by a read-only queue view. Job inputs are not shown by monitoring tools or the Studio UI.
+- Verification: 38 focused Python/MCP tests passed; frontend suite 179 passed; production Vite build, frozen MCP acceptance and Windows x64 NSIS packaging passed. Installer: `release/Open-RPA-Studio-Setup-0.1.113-x64.exe` (69.64 MiB; SHA-256 `ce211af2f26a68f9ff6ecde34c0244b4ce5ec3f290ef6819249823b35b6eb5ea`). See `docs/LOCAL-JOB-ORCHESTRATION.md` for worker guarantees and limitations.

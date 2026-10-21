@@ -24,6 +24,7 @@ from .desktop_recorder import DesktopClickRecorder, create_desktop_recorder, des
 from .activity_catalog import ACTIVITY_CATALOG
 from .active_project import publish_active_project, read_active_project
 from .app_paths import app_data_dir
+from .orchestration import read_jobs, request_job_cancel
 
 cancel_event = threading.Event()
 stdout_lock = threading.Lock()
@@ -56,6 +57,13 @@ def _mcp_history_path(root: Path) -> Path | None:
         return app_data_dir() / f"mcp-run-history-{project_key}.sqlite3"
     except (OSError, RuntimeError):
         return None
+
+def _mcp_job_queue_path(root: Path) -> Path:
+    project_key = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:16]
+    configured = os.environ.get("OPENRPA_DATA_DIR")
+    if configured:
+        return Path(configured).expanduser() / f"job-queue-{project_key}.sqlite3"
+    return app_data_dir() / f"job-queue-{project_key}.sqlite3"
 
 def _mcp_runs(limit: int) -> list[dict[str, Any]]:
     root = read_active_project()
@@ -467,6 +475,22 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             runs.extend(_mcp_runs(limit))
             runs.sort(key=lambda item: item.get("startedAt", ""), reverse=True)
             result = {"runs": runs[:max(1, min(int(limit), 200))]}
+        elif method == "jobs.history":
+            root = read_active_project()
+            limit = params.get("limit", 100)
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
+                raise ValueError("limit must be an integer between 1 and 200")
+            result = {"jobs": read_jobs(_mcp_job_queue_path(root), str(root), limit) if root else []}
+        elif method == "jobs.cancel":
+            root = read_active_project()
+            job_id = params.get("jobId")
+            if root is None or not isinstance(job_id, str) or len(job_id) != 36:
+                raise ValueError("A valid job ID and open Studio project are required")
+            record = request_job_cancel(_mcp_job_queue_path(root), str(root), job_id)
+            if record is None:
+                raise ValueError("The job does not exist for the active Studio project")
+            history.audit("job.cancel_requested_from_studio", {"jobId": job_id, "status": record["status"]})
+            result = {"job": record}
         elif method == "run.get":
             run_id = str(params.get("runId", ""))
             record = history.get_run(run_id)

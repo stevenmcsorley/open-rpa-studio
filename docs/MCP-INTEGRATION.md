@@ -31,6 +31,9 @@ The implementation supports MCP protocol versions `2025-11-25`, `2025-06-18`, `2
 | `openrpa_plan_workflow` | Summarize activity types and statically required permissions | No |
 | `openrpa_list_run_history` | Read recent MCP run statuses from the local durable ledger | No |
 | `openrpa_run_workflow` | Execute one workflow using the local engine | Runs only; visibility and permission opt-ins required |
+| `openrpa_submit_job` | Queue or schedule a saved workflow with an optional idempotency key | Runs when due; requires `--allow-run` |
+| `openrpa_list_jobs` / `openrpa_get_job` | Inspect durable queued, scheduled and completed job state without returning input arguments | No |
+| `openrpa_cancel_job` | Cancel a queued job or request cooperative cancellation of a running job | Stops future/current activity boundaries |
 
 The server follows the project currently open in the local Studio app and never accepts an arbitrary path from a tool caller. Studio publishes its selected project through a private per-user local file; the server checks that pointer before every tool call. If Studio has not opened a project, the server uses the project folder supplied at process startup. This lets a user-level MCP registration work from any Codex workspace while keeping file access attached to the project selected in Studio. Workflow creation, replacement and live editor updates are off by default. When enabled, creation requires the current `projectSha256` from `openrpa_project_info`; it writes a generated, project-relative workflow path and atomically updates the manifest only after validating the new workflow and project bindings. Replacement requires the SHA-256 returned by `openrpa_read_workflow`; the server checks it before and immediately before atomically replacing the declared workflow file. `openrpa_stage_workflow_draft` accepts only schema-valid snapshots and writes an atomic, project-local editor snapshot; it never changes the saved workflow or project manifest. Studio reads that file while the same project is open, opens the matching workflow tab and applies each new snapshot directly to the designer canvas. The active tab shows a subtle live-update indicator while construction is in progress. A final create or update is reflected in the saved project and appears in the same editor tab. Both saved workflow paths validate workflow schemas and cross-workflow bindings. Its static plan follows `invoke_workflow` references; runtime expressions may still change paths or destinations.
 
@@ -43,7 +46,7 @@ uv sync --locked
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review"
 ```
 
-By default, tools are read-only: the run tool and live browser controls are not advertised. Add `--allow-run` to expose workflow execution. Add `--allow-network`, `--allow-desktop`, `--allow-credentials`, and `--allow-destructive` separately only when the project needs HTTP or browser navigation, desktop control, OS-vault credentials, or file move/delete activities. Direct visible-browser MCP controls are exposed only when all three `--allow-run`, `--allow-network`, and `--allow-desktop` grants are present:
+By default, tools are read-only: run and job-queue tools and live browser controls are not advertised. Add `--allow-run` to expose workflow execution and the durable local worker queue. Add `--allow-network`, `--allow-desktop`, `--allow-credentials`, and `--allow-destructive` separately only when the project needs HTTP or browser navigation, desktop control, OS-vault credentials, or file move/delete activities. Direct visible-browser MCP controls are exposed only when all three `--allow-run`, `--allow-network`, and `--allow-desktop` grants are present:
 
 ```powershell
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review" --allow-run --allow-network
@@ -88,6 +91,7 @@ To permit workflow execution, append `--allow-run` to `args`. To permit validate
 - No TCP, HTTP, cloud or external service listener is created by this MCP server.
 - Studio shares its active project with the local MCP process through a private per-user file; an MCP client cannot choose an arbitrary project path.
 - Workflow execution is unavailable unless `--allow-run` is present at startup.
+- Queue submission is unavailable unless `--allow-run` is present at startup. Queued jobs inherit only the server's startup grants; workflow changes and active-project changes before execution fail closed. There is one local worker, scheduled work requires the MCP process to be running at its due time, automatic workflow retries are off, and interrupted jobs are never replayed. See [Local job orchestration](LOCAL-JOB-ORCHESTRATION.md).
 - Workflow replacement is unavailable unless `--allow-edit` is present at startup and must use an expected workflow SHA-256.
 - HTTP requests and browser navigation require `--allow-network`; the workflow engine still applies its existing egress rules.
 - Direct live-browser MCP tools require all of `--allow-run`, `--allow-network`, and `--allow-desktop`. The opened browser is visible and belongs to the MCP process; direct targets must be unique and visible. Browser Inspector networking checks every request against the public-address policy, with the documented browser DNS-rebinding limitation.

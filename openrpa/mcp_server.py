@@ -18,6 +18,7 @@ import threading
 import tempfile
 import time
 import subprocess
+from datetime import datetime, timezone
 from . import __version__
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ from urllib.parse import urlsplit
 
 from .engine import RunOptions, run_project
 from .history import RunHistory
+from .orchestration import JobQueue
 from .model import load_project, validate_workflow, validate_workflow_bindings
 from .activity_catalog import ACTIVITY_CATALOG
 from . import api_connections
@@ -52,6 +54,14 @@ def _history_path(project_root: Path) -> Path:
     if configured:
         return Path(configured).expanduser() / f"mcp-run-history-{project_key}.sqlite3"
     return app_data_dir() / f"mcp-run-history-{project_key}.sqlite3"
+
+
+def _job_queue_path(project_root: Path) -> Path:
+    project_key = hashlib.sha256(str(project_root.resolve()).encode("utf-8")).hexdigest()[:16]
+    configured = os.environ.get("OPENRPA_DATA_DIR")
+    if configured:
+        return Path(configured).expanduser() / f"job-queue-{project_key}.sqlite3"
+    return app_data_dir() / f"job-queue-{project_key}.sqlite3"
 
 
 def _live_draft_path(project_root: Path) -> Path:
@@ -118,6 +128,13 @@ class ProjectMCPServer:
         self._history_lock = threading.Lock()
         self._project_lock = threading.RLock()
         self._history: RunHistory | None = None
+        self._job_queues: dict[str, JobQueue] = {}
+        self._job_worker: threading.Thread | None = None
+        self._job_worker_stop = threading.Event()
+        self._job_worker_wake = threading.Event()
+        self._job_cancel_lock = threading.Lock()
+        self._job_cancellations: dict[str, threading.Event] = {}
+        self._active_job_id: str | None = None
         self._active_project_source = "startup-fallback"
         self._browser_inspector=BrowserInspector()
         atexit.register(self._browser_inspector.close)
@@ -143,6 +160,151 @@ class ProjectMCPServer:
             if self._history is None:
                 self._history = RunHistory(self._history_file)
             return self._history
+
+    def _get_job_queue(self, root: Path | None = None) -> JobQueue:
+        selected = (root or self.root).resolve()
+        key = str(selected)
+        if key not in self._job_queues:
+            self._job_queues[key] = JobQueue(_job_queue_path(selected))
+        return self._job_queues[key]
+
+    def _job_snapshot_digest(self, workflow_name: str) -> str:
+        """Hash the workflow and every statically invoked workflow it depends on."""
+        seen: set[str] = set()
+        contents: dict[str, Any] = {}
+        def visit(name: str) -> None:
+            if name in seen:
+                return
+            seen.add(name)
+            value = self._workflow(name)
+            contents[name] = value
+            for activity in _walk_activities(value):
+                child = activity.get("workflow") if activity.get("type") == "invoke_workflow" else None
+                if isinstance(child, str) and child in self.project["workflows"]:
+                    visit(child)
+        visit(workflow_name)
+        encoded = json.dumps(contents, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _ensure_job_worker(self) -> None:
+        if not self.allow_run:
+            raise PermissionError("Job execution is disabled. Restart the MCP server with --allow-run after reviewing the project and client.")
+        with self._job_cancel_lock:
+            if self._job_worker is None or not self._job_worker.is_alive():
+                self._job_worker_stop.clear()
+                self._job_worker = threading.Thread(target=self._job_worker_loop, name="openrpa-job-worker", daemon=True)
+                self._job_worker.start()
+
+    def _job_worker_loop(self) -> None:
+        while not self._job_worker_stop.is_set():
+            claimed = None
+            queue = None
+            try:
+                with self._project_lock:
+                    self._sync_active_project()
+                    project, root = self.project, self.root
+                    queue = self._get_job_queue(root)
+                    claimed = queue.claim_due(str(root))
+                    snapshot = self._prepare_run_snapshot(claimed["workflow"]) if claimed else None
+                if claimed is None:
+                    self._job_worker_wake.wait(0.5)
+                    self._job_worker_wake.clear()
+                    continue
+                job_id = claimed["jobId"]
+                if snapshot["snapshotSha256"] != claimed["snapshotSha256"]:
+                    queue.finish(job_id, "workflow_changed", error={"code": "workflow-changed", "message": "The workflow or one of its called workflows changed after this job was queued. Submit a new job to run the updated version."})
+                    continue
+                cancellation = threading.Event()
+                with self._job_cancel_lock:
+                    self._active_job_id = job_id
+                    self._job_cancellations[job_id] = cancellation
+                job_history = self._get_history_for(snapshot["root"])
+                job_history.audit("job.started", {"jobId": job_id, "workflow": claimed["workflow"]})
+                watch_stop = threading.Event()
+                def watch_job_cancel() -> None:
+                    while not watch_stop.wait(0.1):
+                        try:
+                            current = queue.get(str(snapshot["root"]), job_id)
+                            if current is None or current["cancelRequested"]:
+                                cancellation.set()
+                                return
+                        except Exception:
+                            return
+                watcher = threading.Thread(target=watch_job_cancel, name="openrpa-job-cancel-watch", daemon=True)
+                watcher.start()
+                try:
+                    self._run_lock.acquire()
+                    try:
+                        with self._project_lock:
+                            self._sync_active_project()
+                            if str(self.root) != claimed["projectPath"]:
+                                queue.finish(job_id, "workflow_changed", error={"code": "project-changed", "message": "Studio's active project changed before the queued job began. Submit it again from the intended project."})
+                                continue
+                            snapshot = self._prepare_run_snapshot(claimed["workflow"])
+                        if snapshot["snapshotSha256"] != claimed["snapshotSha256"]:
+                            queue.finish(job_id, "workflow_changed", error={"code": "workflow-changed", "message": "The workflow or one of its called workflows changed before execution. Submit a new job to run the updated version."})
+                            continue
+                        result = self._run_workflow({"name": claimed["workflow"], "inputs": claimed["inputs"]}, cancellation, snapshot=snapshot, run_lock_held=True)
+                    finally:
+                        self._run_lock.release()
+                    status = result.get("status", "failed")
+                    terminal = "cancelled" if status == "cancelled" else status
+                    queue.finish(job_id, terminal, run_id=result.get("runId"), error=result.get("error"))
+                    job_history.audit("job.finished", {"jobId": job_id, "runId": result.get("runId"), "status": terminal})
+                except Exception as exc:
+                    error = {"code": getattr(exc, "code", "job-execution-failed"), "message": str(exc)[:2000], "type": type(exc).__name__}
+                    queue.finish(job_id, "failed", error=error)
+                    job_history.audit("job.finished", {"jobId": job_id, "status": "failed", "errorCode": error["code"]})
+                finally:
+                    watch_stop.set()
+                    watcher.join(timeout=0.5)
+                    with self._job_cancel_lock:
+                        self._job_cancellations.pop(job_id, None)
+                        self._active_job_id = None
+            except Exception as exc:
+                # A bad job or transient database error must not terminate the worker.
+                if claimed is not None and queue is not None:
+                    try:
+                        queue.finish(claimed["jobId"], "failed", error={"code": "job-worker-error", "message": str(exc)[:2000]})
+                    except Exception:
+                        pass
+                self._job_worker_wake.wait(0.5)
+                self._job_worker_wake.clear()
+
+    def _prepare_run_snapshot(self, workflow_name: str) -> dict[str, Any]:
+        workflow = self._workflow(workflow_name)
+        types = self._reachable_types(workflow_name)
+        if types & {"http_request", "http_paginate", "api_request", "browser_navigate"} and not self.allow_network:
+            raise PermissionError("This workflow uses HTTP or browser navigation, but the MCP server has no --allow-network grant.")
+        persistent_profile = self._requires_browser_profile(workflow_name)
+        if (any(kind.startswith("desktop_") for kind in types) or persistent_profile) and not self.allow_desktop:
+            raise PermissionError("This workflow controls the desktop, but the MCP server has no --allow-desktop grant.")
+        if "credential_get" in types and not self.allow_credentials:
+            raise PermissionError("This workflow reads an OS-vault credential, but the MCP server has no --allow-credentials grant.")
+        if self._requires_api_credentials(workflow_name) and not self.allow_credentials:
+            raise PermissionError("This API workflow needs vault-backed credentials, but the MCP server has no --allow-credentials grant.")
+        if ({"file_delete", "file_move"} & types or self._reachable_delete_api(workflow_name)) and not self.allow_destructive:
+            raise PermissionError("This workflow contains destructive activities, but the MCP server has no --allow-destructive grant.")
+        return {"workflow": workflow, "types": types, "project": self.project, "root": self.root,
+                "snapshotSha256": self._job_snapshot_digest(workflow_name)}
+
+    @staticmethod
+    def _parse_job_time(value: Any) -> str:
+        if value is None:
+            return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        if not isinstance(value, str) or len(value) > 64:
+            raise ValueError("runAt must be an ISO-8601 timestamp with a timezone")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("runAt must be an ISO-8601 timestamp with a timezone") from exc
+        if parsed.tzinfo is None:
+            raise ValueError("runAt must include a timezone")
+        parsed = parsed.astimezone(timezone.utc)
+        now = datetime.now(timezone.utc)
+        if (parsed - now).total_seconds() > 365 * 24 * 3600:
+            raise ValueError("Scheduled jobs may be at most 365 days in the future")
+        return parsed.isoformat(timespec="milliseconds")
 
     def _require_live_browser_grants(self) -> None:
         if not (self.allow_run and self.allow_network and self.allow_desktop):
@@ -272,6 +434,12 @@ class ProjectMCPServer:
             tools.append({"name": "openrpa_update_workflow", "description": "Replace one declared workflow after validating it. Requires the expected SHA-256 from openrpa_read_workflow; editing is unavailable unless enabled when the server starts.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "expectedSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "workflow": {"type": "object", "additionalProperties": True}}, "required": ["name", "expectedSha256", "workflow"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}})
         if self.allow_run:
             tools.append({"name": "openrpa_run_workflow", "description": "Execute a saved workflow in the project currently open in Studio. Network, desktop, credentials and destructive activities require separate startup opt-ins.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "inputs": {"type": "object", "additionalProperties": True}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": False,"destructiveHint": True,"idempotentHint": False,"openWorldHint": True}})
+            tools.extend([
+                {"name":"openrpa_submit_job","description":"Submit a saved workflow to the durable local worker queue. Jobs can start immediately or at an ISO-8601 runAt time. The worker inherits only this MCP server's explicit startup permission grants; workflow changes before execution fail closed. Interrupted jobs are never replayed and automatic retries are disabled.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":100},"inputs":{"type":"object","additionalProperties":True},"runAt":{"type":"string","maxLength":64},"idempotencyKey":{"type":"string","minLength":1,"maxLength":200}},"required":["name"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":False,"openWorldHint":True}},
+                {"name":"openrpa_list_jobs","description":"List durable job queue entries for the active Studio project. Inputs and idempotency keys are not returned.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":200}},"additionalProperties":False},"annotations":{"readOnlyHint":True}},
+                {"name":"openrpa_get_job","description":"Inspect a durable job's status, timestamps, linked run ID and error for the active Studio project. Inputs and idempotency keys are not returned.","inputSchema":{"type":"object","properties":{"jobId":{"type":"string","minLength":36,"maxLength":36}},"required":["jobId"],"additionalProperties":False},"annotations":{"readOnlyHint":True}},
+                {"name":"openrpa_cancel_job","description":"Cancel a queued job or request cooperative cancellation of the active job. Cancellation is checked at workflow activity boundaries.","inputSchema":{"type":"object","properties":{"jobId":{"type":"string","minLength":36,"maxLength":36}},"required":["jobId"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":True}}
+            ])
         return tools
 
     def _stage_workflow_draft(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -535,32 +703,24 @@ class ProjectMCPServer:
             except OSError:
                 return
 
-    def _run_workflow(self, args: dict[str, Any], cancel_event: threading.Event | None) -> dict[str, Any]:
+    def _run_workflow(self, args: dict[str, Any], cancel_event: threading.Event | None, *, snapshot: dict[str, Any] | None = None, run_lock_held: bool = False) -> dict[str, Any]:
         if not self.allow_run:
             raise PermissionError("Workflow execution is disabled. Restart the MCP server with --allow-run after reviewing the project and client.")
-        if not self._run_lock.acquire(blocking=False):
+        if not run_lock_held and not self._run_lock.acquire(blocking=False):
             raise RuntimeError("Another MCP project operation is active.")
         try:
             workflow_name = args.get("name")
-            workflow = self._workflow(workflow_name)
-            types = self._reachable_types(workflow_name)
-            if types & {"http_request", "http_paginate", "api_request", "browser_navigate"} and not self.allow_network:
-                raise PermissionError("This workflow uses HTTP or browser navigation. Restart with --allow-network only after reviewing its destinations.")
-            persistent_profile=self._requires_browser_profile(workflow_name)
-            if (any(kind.startswith("desktop_") for kind in types) or persistent_profile) and not self.allow_desktop:
-                raise PermissionError("This workflow controls the desktop. Restart with --allow-desktop only after reviewing its actions.")
-            if "credential_get" in types and not self.allow_credentials:
-                raise PermissionError("This workflow reads an OS-vault credential. Restart with --allow-credentials only after reviewing its target and data flow.")
-            if self._requires_api_credentials(workflow_name) and not self.allow_credentials:
-                raise PermissionError("This API workflow uses a vault-backed API connection. Restart with --allow-credentials only after reviewing its destination and data flow.")
-            if ({"file_delete", "file_move"} & types or self._reachable_delete_api(workflow_name)) and not self.allow_destructive:
-                raise PermissionError("This workflow contains file delete/move or API DELETE activities. Restart with --allow-destructive only after reviewing their targets.")
+            snapshot = snapshot or self._prepare_run_snapshot(workflow_name)
+            workflow = snapshot["workflow"]
+            types = snapshot["types"]
+            project = snapshot["project"]
+            root = snapshot["root"]
             inputs = args.get("inputs", {})
             if not isinstance(inputs, dict) or len(json.dumps(inputs, ensure_ascii=False)) > 100_000:
                 raise ValueError("Workflow inputs must be an object no larger than 100 KB.")
             workflow_digest = hashlib.sha256(json.dumps(workflow, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
-            history = self._get_history()
-            run_id = history.start(str(self.root), str(self.project.get("name", "")), workflow_name, workflow_digest)
+            history = self._get_history_for(root)
+            run_id = history.start(str(root), str(project.get("name", "")), workflow_name, workflow_digest)
             for permitted, label in ((self.allow_network, "network"), (self.allow_desktop, "desktop"), (self.allow_credentials, "credentials"), (self.allow_destructive, "destructive")):
                 if permitted:
                     history.audit("permission.granted", {"runId": run_id, "permission": label, "source": "mcp-startup-flag"})
@@ -573,7 +733,7 @@ class ProjectMCPServer:
                 if event.get("event") == "activity-started":
                     history.audit("activity.started", {"runId": run_id, "activityId": event.get("activityId"), "type": event.get("type")})
             try:
-                result = run_project(self.project, self.root, workflow_name, inputs=inputs,
+                result = run_project(project, root, workflow_name, inputs=inputs,
                                      options=RunOptions(allow_network=self.allow_network, allow_desktop=self.allow_desktop,
                                                         allow_destructive=self.allow_destructive,
                                                         cancel=cancel_event.is_set if cancel_event else lambda: False,
@@ -588,7 +748,61 @@ class ProjectMCPServer:
                 history.finish(run_id, "failed", None, {"type": type(exc).__name__, "message": str(exc)[:2000]})
                 raise
         finally:
-            self._run_lock.release()
+            if not run_lock_held:
+                self._run_lock.release()
+
+    def _get_history_for(self, root: Path) -> RunHistory:
+        if root.resolve() == self.root.resolve():
+            return self._get_history()
+        return RunHistory(_history_path(root))
+
+    def _submit_job(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.allow_run:
+            raise PermissionError("Job submission is disabled. Restart the MCP server with --allow-run after reviewing the project and client.")
+        workflow_name = args.get("name")
+        inputs = args.get("inputs", {})
+        if not isinstance(inputs, dict) or len(json.dumps(inputs, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 100_000:
+            raise ValueError("Workflow inputs must be an object no larger than 100 KB")
+        snapshot = self._prepare_run_snapshot(workflow_name)
+        available_at = self._parse_job_time(args.get("runAt"))
+        queue = self._get_job_queue(snapshot["root"])
+        record = queue.enqueue(project_path=str(snapshot["root"]), project_name=str(snapshot["project"].get("name", "")),
+                               workflow=workflow_name, snapshot_sha256=snapshot["snapshotSha256"], inputs=inputs,
+                               available_at=available_at, idempotency_key=args.get("idempotencyKey"))
+        self._get_history_for(snapshot["root"]).audit("job.submitted", {"jobId": record["jobId"], "workflow": workflow_name, "availableAt": available_at, "idempotencyKey": args.get("idempotencyKey")})
+        self._ensure_job_worker()
+        self._job_worker_wake.set()
+        # Never return workflow inputs or the key through the monitoring API.
+        record.pop("inputs", None)
+        record.pop("idempotencyKey", None)
+        record.pop("projectPath", None)
+        return record
+
+    def _job_cancel(self, job_id: str) -> dict[str, Any]:
+        with self._job_cancel_lock:
+            event = self._job_cancellations.get(job_id)
+            if event is not None:
+                event.set()
+        queue = self._get_job_queue()
+        record = queue.cancel(str(self.root), job_id)
+        if record is None:
+            raise ValueError("No job with that identifier exists in the active project")
+        if record["status"] == "running":
+            self._get_history().audit("job.cancel_requested", {"jobId": job_id})
+        else:
+            self._get_history().audit("job.cancelled", {"jobId": job_id})
+        record.pop("inputs", None)
+        record.pop("idempotencyKey", None)
+        record.pop("projectPath", None)
+        return record
+
+    @staticmethod
+    def _job_record(record: dict[str, Any] | None) -> dict[str, Any]:
+        if record is None:
+            raise ValueError("No job with that identifier exists in the active project")
+        record.pop("inputs", None)
+        record.pop("idempotencyKey", None)
+        return record
 
     def _call_tool(self, name: str, args: dict[str, Any], cancel_event: threading.Event | None = None) -> Any:
         if name == "openrpa_project_info":
@@ -880,6 +1094,24 @@ class ProjectMCPServer:
             return {"runs": [{key: row.get(key) for key in columns} for row in history.list_runs(limit)]}
         if name == "openrpa_run_workflow":
             return self._run_workflow(args, cancel_event)
+        if name == "openrpa_submit_job":
+            return self._submit_job(args)
+        if name == "openrpa_list_jobs":
+            limit = args.get("limit", 50)
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
+                raise ValueError("limit must be an integer between 1 and 200")
+            records = self._get_job_queue().list(str(self.root), limit)
+            return {"jobs": [self._job_record(item) for item in records], "automaticRetries": False, "interruptedJobsAreReplayed": False}
+        if name == "openrpa_get_job":
+            job_id = args.get("jobId")
+            if not isinstance(job_id, str) or len(job_id) != 36:
+                raise ValueError("jobId must be a UUID")
+            return self._job_record(self._get_job_queue().get(str(self.root), job_id))
+        if name == "openrpa_cancel_job":
+            job_id = args.get("jobId")
+            if not isinstance(job_id, str) or len(job_id) != 36:
+                raise ValueError("jobId must be a UUID")
+            return self._job_cancel(job_id)
         raise LookupError(f"Unknown tool: {name}")
 
     def handle(self, request: Any, cancel_event: threading.Event | None = None) -> dict[str, Any] | None:
@@ -940,6 +1172,8 @@ class ProjectMCPServer:
     def serve(self, stdin=None, stdout=None) -> int:
         stdin = stdin or sys.stdin.buffer
         stdout = stdout or sys.stdout
+        if self.allow_run:
+            self._ensure_job_worker()
         output_lock = threading.Lock()
         active: dict[Any, threading.Event] = {}
         active_lock = threading.Lock()
@@ -960,6 +1194,8 @@ class ProjectMCPServer:
         while True:
             raw = stdin.readline(MAX_FRAME_BYTES + 1)
             if not raw:
+                self._job_worker_stop.set()
+                self._job_worker_wake.set()
                 return 0
             if len(raw) > MAX_FRAME_BYTES:
                 while raw and not raw.endswith(b"\n"):

@@ -58,6 +58,9 @@ export async function startDesktopRecording(windowTitle:string,processId:number,
 export async function stopDesktopRecording():Promise<{recording:boolean;windowTitle:string;processId:number;events:DesktopRecordedEvent[];truncated:boolean;ignoredClicks:number;ignoredKeys:number}>{return rpc('desktop.inspect.record.stop');}
 export type RunHistorySummary={runId:string;projectPath:string;projectName:string;workflow:string;workflowSha256:string;status:string;startedAt:string;endedAt:string|null;error:Record<string,unknown>|null;recoveryNote:string|null;source?:'Studio'|'MCP'};
 export type RunHistoryDetail=RunHistorySummary&{result:{status?:string;activities?:Record<string,{status:string;type:string;durationMs?:number;error?:string}>;error?:Record<string,unknown>}|null;events:Record<string,unknown>[]};
+export type QueuedJob={jobId:string;workflow:string;status:string;availableAt:string;submittedAt:string;startedAt:string|null;endedAt:string|null;runId:string|null;error:Record<string,unknown>|null;cancelRequested:boolean};
+export async function getJobQueue(limit=100):Promise<QueuedJob[]>{return (await rpc('jobs.history',{limit})).jobs??[];}
+export async function cancelQueuedJob(jobId:string):Promise<QueuedJob>{return (await rpc('jobs.cancel',{jobId})).job;}
 export async function getRunHistory(limit=50):Promise<RunHistorySummary[]>{const value=await rpc('run.history',{limit});return value.runs??[];}
 export async function getRunDetails(runId:string):Promise<RunHistoryDetail|null>{const value=await rpc('run.get',{runId});return value.run??null;}
 export async function exportRunEvidence(runId:string,destination:string):Promise<{sha256:string;bytes:number}>{return rpc('run.export',{runId,destination});}
