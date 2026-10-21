@@ -12,6 +12,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *State-machine overview nodes are generated from the executable state and transition definitions. Select a node to edit that state's activities and guards.*
 
+![Open RPA Studio state-machine editor with a conditional debug breakpoint configured on state entry](docs/assets/conditional-debug-breakpoints.png)
+
+*Conditional breakpoints on flowchart nodes and state-machine entries use the safe expression language; invalid conditions pause for review.*
+
 ![Open RPA Studio sequence editor with its navigable nested workflow outline open beside an If branch and a selected branch activity](docs/assets/workflow-outline.png)
 
 *The workflow outline includes branch context for nested activities and stays pinned while the canvas scrolls. Select an entry to focus that activity and open its properties.*
@@ -112,7 +116,7 @@ Core activities include variable assignment and logging; credential lookup by va
 ### Debugging and run history
 
 - Boundary-based breakpoints and debugger start-paused mode.
-- Conditional activity breakpoints use the safe expression language. False conditions continue; true conditions pause, and invalid conditions pause for review rather than being silently ignored.
+- Conditional breakpoints on activities, flowchart nodes and state-machine entries use the safe expression language. False conditions continue; true conditions pause, and invalid conditions pause for review rather than being silently ignored.
 - Pause, continue, step-over, step-into, step-out, and cancellation at activity boundaries.
 - Inspect variables and edit supported JSON-compatible values while paused, subject to type and credential protections.
 - Add watch expressions using the safe workflow expression language. Watches evaluate against the live engine scope only while paused, with registered secrets redacted and large results truncated.

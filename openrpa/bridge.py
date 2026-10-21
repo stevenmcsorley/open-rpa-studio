@@ -71,14 +71,18 @@ def _workflow_breakpoints(workflow: dict[str, Any]) -> set[str]:
     if isinstance(activities,list): walk(activities)
     if workflow.get("executionModel")=="flowchart":
         for node in workflow.get("flowchart",{}).get("nodes",[]):
-            if node.get("breakpoint") is True:
+            condition = node.get("breakpointCondition")
+            conditional = isinstance(condition, str) and bool(condition.strip())
+            if node.get("breakpoint") is True and not conditional:
                 action=node.get("activity")
                 target=action.get("id") if node.get("kind")=="action" and isinstance(action,dict) else node.get("id")
                 if isinstance(target,str): found.add(target)
             if node.get("kind")=="action" and isinstance(node.get("activity"),dict): walk([node["activity"]])
     if workflow.get("executionModel")=="state_machine":
         for state in workflow.get("stateMachine",{}).get("states",[]):
-            if state.get("breakpoint") is True and isinstance(state.get("id"),str):found.add(state["id"])
+            condition = state.get("breakpointCondition")
+            conditional = isinstance(condition, str) and bool(condition.strip())
+            if state.get("breakpoint") is True and not conditional and isinstance(state.get("id"),str):found.add(state["id"])
             activities=state.get("activities",[])
             if isinstance(activities,list):walk(activities)
     return found
@@ -105,9 +109,20 @@ def _workflow_breakpoint_conditions(workflow: dict[str, Any]) -> dict[str, str]:
     if isinstance(activities, list): walk(activities)
     if workflow.get("executionModel") == "flowchart":
         for node in workflow.get("flowchart", {}).get("nodes", []):
+            node_id = node.get("id")
+            condition = node.get("breakpointCondition")
+            target = node_id
+            if node.get("kind") == "action" and isinstance(node.get("activity"), dict):
+                target = node["activity"].get("id")
+            if node.get("breakpoint") is True and isinstance(target, str) and isinstance(condition, str) and condition.strip():
+                found[target] = condition
             if node.get("kind") == "action" and isinstance(node.get("activity"), dict): walk([node["activity"]])
     if workflow.get("executionModel") == "state_machine":
         for state in workflow.get("stateMachine", {}).get("states", []):
+            state_id = state.get("id")
+            condition = state.get("breakpointCondition")
+            if state.get("breakpoint") is True and isinstance(state_id, str) and isinstance(condition, str) and condition.strip():
+                found[state_id] = condition
             if isinstance(state.get("activities"), list): walk(state["activities"])
     return found
 

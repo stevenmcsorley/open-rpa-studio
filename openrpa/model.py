@@ -341,6 +341,12 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 problems.append({"code":"flowchart-node-kind","message":f"Flowchart node {node_id} has an unsupported kind"})
             if "breakpoint" in node and not isinstance(node["breakpoint"],bool):
                 problems.append({"code":"flowchart-breakpoint","message":f"Flowchart node {node_id} breakpoint must be a boolean"})
+            if node.get("breakpointCondition") is not None:
+                condition=node.get("breakpointCondition")
+                if node.get("breakpoint") is not True:
+                    problems.append({"code":"breakpoint-condition-disabled","message":f"Conditional breakpoint on flowchart node {node_id} requires the breakpoint to be enabled"})
+                elif not isinstance(condition,str) or len(condition)>2048:
+                    problems.append({"code":"breakpoint-condition","message":f"Breakpoint condition on flowchart node {node_id} must be text no longer than 2,048 characters"})
             for coordinate in ("x","y"):
                 if coordinate in node and (not isinstance(node[coordinate],(int,float)) or isinstance(node[coordinate],bool) or not math.isfinite(node[coordinate]) or not 0<=node[coordinate]<=10_000):
                     problems.append({"code":"flowchart-position","message":f"Flowchart node {node_id} {coordinate} must be between 0 and 10,000"})
@@ -413,6 +419,12 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
             seen.add(state_id)
             state_map[state_id]=state
             if "breakpoint" in state and not isinstance(state["breakpoint"],bool):problems.append({"code":"state-machine-breakpoint","message":f"State {state_id} breakpoint must be a boolean"})
+            if state.get("breakpointCondition") is not None:
+                condition=state.get("breakpointCondition")
+                if state.get("breakpoint") is not True:
+                    problems.append({"code":"breakpoint-condition-disabled","message":f"Conditional breakpoint on state {state_id} requires the breakpoint to be enabled"})
+                elif not isinstance(condition,str) or len(condition)>2048:
+                    problems.append({"code":"breakpoint-condition","message":f"Breakpoint condition on state {state_id} must be text no longer than 2,048 characters"})
             if "final" in state and not isinstance(state["final"],bool):problems.append({"code":"state-machine-final","message":f"State {state_id} final must be a boolean"})
             if not isinstance(state.get("label",state_id),str):problems.append({"code":"state-machine-label","message":f"State {state_id} label must be text"})
             state_activities=state.get("activities",[])

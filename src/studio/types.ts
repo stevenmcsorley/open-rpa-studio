@@ -1,8 +1,8 @@
 export type Activity = { id: string; type: string; breakpoint?:boolean; breakpointCondition?:string; [key: string]: unknown };
-export type FlowNode = {id:string;kind:'start'|'action'|'decision'|'end';label?:string;condition?:string;breakpoint?:boolean;x?:number;y?:number;activity?:Activity};
+export type FlowNode = {id:string;kind:'start'|'action'|'decision'|'end';label?:string;condition?:string;breakpoint?:boolean;breakpointCondition?:string;x?:number;y?:number;activity?:Activity};
 export type FlowTransition = {from:string;to:string;when?:'always'|'true'|'false'};
 export type Flowchart = {start:string;nodes:FlowNode[];transitions:FlowTransition[]};
-export type MachineState = {id:string;label:string;final?:boolean;breakpoint?:boolean;activities:Activity[]};
+export type MachineState = {id:string;label:string;final?:boolean;breakpoint?:boolean;breakpointCondition?:string;activities:Activity[]};
 export type MachineTransition = {from:string;to:string;condition?:string};
 export type StateMachine = {initial:string;states:MachineState[];transitions:MachineTransition[]};
 export type Workflow = { format: 'openrpa.workflow'; formatVersion: 1; name: string; variables: Variable[]; arguments: Argument[]; activities: Activity[]; executionModel?:'sequence'|'flowchart'|'state_machine'; flowchart?:Flowchart;stateMachine?:StateMachine };

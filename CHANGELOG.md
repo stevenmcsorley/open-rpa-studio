@@ -1,8 +1,10 @@
 # Changelog
 ## Unreleased
 
+- Extended conditional breakpoints to flowchart control nodes and state-machine entries. The native debugger evaluates each expression at the boundary before execution, continues only when the condition is false, and fails closed by pausing on invalid expressions. Added a public screenshot of the state-entry inspector.
+- Verification: all 181 Python tests pass, including schema validation and real debugger runs paused at conditional graph and state boundaries; all 72 frontend tests and the production build pass. Playwright captured the state-machine breakpoint editor.
 - Improved OpenAI-compatible draft parsing across LM Studio, OpenRouter and compatible endpoints: accepts text content blocks and a complete `json` fence, and reports refusal, truncation, tool-only and malformed output explicitly.
-- Verification: 25 provider tests and the full 178-test Python suite pass, including response-shape cases for LM Studio, OpenRouter and local/remote compatible endpoints. CI verification pending.
+- Verification: 25 provider tests and the full 181-test Python suite pass, including response-shape cases for LM Studio, OpenRouter and local/remote compatible endpoints. CI verification pending.
 - Made the Output pane collapsible and resizable by pointer or keyboard. Its size is bounded by the available viewport so the minimum designer height remains visible; Home/End set bounds and Escape restores the default. Updated public screenshots.
 - Verification: all 72 frontend tests pass; TypeScript and production Vite build pass. Playwright verified drag resizing, ArrowUp, Home, End, Escape reset, and automatic clamping on a 650 px viewport; browser console reports zero errors.
 - Added a scoped, navigable activity outline for the selected flowchart action. It exposes nested branch paths, selects nested activities in the existing inspector, and keeps the containing graph action highlighted. Added a public browser-preview screenshot.

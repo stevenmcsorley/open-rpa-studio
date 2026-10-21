@@ -93,6 +93,25 @@ def test_conditional_breakpoint_schema_requires_enabled_breakpoint_and_bounded_t
     oversized={**base,"activities":[{**base["activities"][0],"breakpointCondition":"x"*2049}]}
     assert any(problem["code"]=="breakpoint-condition" for problem in validate_workflow(oversized))
 
+def test_conditional_breakpoints_are_validated_on_flowchart_nodes_and_states():
+    flowchart={"format":"openrpa.workflow","formatVersion":1,"name":"Graph debug","variables":[],"arguments":[],"activities":[],
+        "executionModel":"flowchart","flowchart":{"start":"start","nodes":[
+            {"id":"start","kind":"start"},{"id":"step","kind":"action","activity":{"id":"log","type":"log","message":"ok"},"breakpoint":True,"breakpointCondition":"amount > 10"},
+            {"id":"end","kind":"end"}],"transitions":[{"from":"start","to":"step"},{"from":"step","to":"end"}]}}
+    assert validate_workflow(flowchart)==[]
+    disabled={**flowchart,"flowchart":{**flowchart["flowchart"],"nodes":[{**flowchart["flowchart"]["nodes"][1],"breakpoint":False}]}}
+    assert any(problem["code"]=="breakpoint-condition-disabled" for problem in validate_workflow(disabled))
+    oversized={**flowchart,"flowchart":{**flowchart["flowchart"],"nodes":[{**flowchart["flowchart"]["nodes"][1],"breakpointCondition":"x"*2049}]}}
+    assert any(problem["code"]=="breakpoint-condition" for problem in validate_workflow(oversized))
+
+    machine={"format":"openrpa.workflow","formatVersion":1,"name":"State debug","variables":[],"arguments":[],"activities":[],
+        "executionModel":"state_machine","stateMachine":{"initial":"review","states":[
+            {"id":"review","label":"Review","breakpoint":True,"breakpointCondition":"amount > 10","activities":[]},
+            {"id":"done","label":"Done","final":True,"activities":[]}],"transitions":[{"from":"review","to":"done"}]}}
+    assert validate_workflow(machine)==[]
+    invalid={**machine,"stateMachine":{**machine["stateMachine"],"states":[{**machine["stateMachine"]["states"][0],"breakpoint":False}]}}
+    assert any(problem["code"]=="breakpoint-condition-disabled" for problem in validate_workflow(invalid))
+
 def test_openpyxl_uses_defused_xml_parser_for_workbook_content():
     with pytest.raises(EntitiesForbidden):
         fromstring(b'<!DOCTYPE x [<!ENTITY secret SYSTEM "file:///private-data">]><x>&secret;</x>')

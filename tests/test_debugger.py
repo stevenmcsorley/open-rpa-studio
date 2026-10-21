@@ -160,6 +160,48 @@ def test_conditional_breakpoint_conditions_are_collected_from_nested_activities(
     assert _workflow_breakpoint_conditions(workflow)=={"inner":"total > 5","graph-action":"enabled"}
     assert _workflow_breakpoints(workflow)==set()
 
+def test_conditional_breakpoints_are_collected_for_flowchart_nodes_and_states():
+    from openrpa.bridge import _workflow_breakpoint_conditions, _workflow_breakpoints
+    workflow={"executionModel":"flowchart","flowchart":{"nodes":[
+        {"id":"decision","kind":"decision","breakpoint":True,"breakpointCondition":"total > 50"},
+        {"id":"action-node","kind":"action","breakpoint":True,"activity":{"id":"action","type":"log","message":"ok"}},
+        {"id":"conditional-action-node","kind":"action","breakpoint":True,"breakpointCondition":"ready is True","activity":{"id":"conditional-action","type":"log","message":"ok"}},
+    ]},"stateMachine":{"states":[
+        {"id":"review","breakpoint":True,"breakpointCondition":"approved is True","activities":[]},
+    ]}}
+    assert _workflow_breakpoint_conditions(workflow)=={"decision":"total > 50","conditional-action":"ready is True"}
+    assert _workflow_breakpoints(workflow)=={"action"}
+    workflow["executionModel"]="state_machine"
+    assert _workflow_breakpoint_conditions(workflow)=={"review":"approved is True"}
+    assert _workflow_breakpoints(workflow)==set()
+
+def test_graph_and_state_conditional_breakpoints_pause_only_when_true(tmp_path):
+    from openrpa.bridge import _workflow_breakpoint_conditions, _workflow_breakpoints
+    examples=[
+        ({"executionModel":"flowchart","flowchart":{"start":"start","nodes":[
+            {"id":"start","kind":"start"},{"id":"gate","kind":"decision","condition":"True","breakpoint":True,"breakpointCondition":"amount > 10"},
+            {"id":"end","kind":"end"}],"transitions":[{"from":"start","to":"gate"},{"from":"gate","to":"end","when":"true"},{"from":"gate","to":"end","when":"false"}]}},"gate"),
+        ({"executionModel":"state_machine","stateMachine":{"initial":"review","states":[
+            {"id":"review","label":"Review","breakpoint":True,"breakpointCondition":"amount > 10","activities":[]},
+            {"id":"done","label":"Done","final":True,"activities":[]}],"transitions":[{"from":"review","to":"done"}]}},"review"),
+    ]
+    for index,(model,break_id) in enumerate(examples):
+        workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Conditional graph breakpoint","variables":[{"name":"amount","type":"integer","value":15}],"arguments":[],"activities":[],**model}
+        project={"format":"openrpa.project","formatVersion":1,"name":"Debug test","main":"Main","workflows":{"Main":"main.json"}}
+        root=tmp_path/str(index);root.mkdir()
+        (root/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+        conditions=_workflow_breakpoint_conditions(workflow)
+        debugger=DebugController(_workflow_breakpoints(workflow),start_paused=False,conditional_breakpoints=conditions)
+        events=[];condition=threading.Condition();output=[]
+        def on_event(event):
+            with condition:
+                events.append(event);condition.notify_all()
+        thread=threading.Thread(target=lambda:output.append(run_project(project,root,options=RunOptions(debugger=debugger,event=on_event))))
+        thread.start();_wait_for(events,condition,"debug.paused",break_id)
+        debugger.resume();thread.join(3)
+        assert not thread.is_alive()
+        assert output[0].status=="succeeded"
+
 def test_flowchart_node_and_action_breakpoints_are_collected():
     from openrpa.bridge import _workflow_breakpoints
     workflow={"executionModel":"flowchart","activities":[],"flowchart":{"nodes":[
