@@ -24,6 +24,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *Select a flowchart action to open its scoped outline. Branch paths remain visible while selecting nested activities, and the corresponding graph action stays highlighted.*
 
+![Open RPA Studio flowchart with the output pane resized to show a larger editable activity area](docs/assets/resizable-output-pane.png)
+
+*Drag the divider above Output or focus it and use the arrow keys. Home and End move to the available bounds, and Escape restores the default height.*
+
 ![Open RPA Studio state-machine graph with a selected transition and inline guard and destination editor](docs/assets/state-machine-editor.png)
 
 *Select a transition edge to edit its destination or guard, reorder guarded routes, remove it, or add a new safe False-guarded route. Blank guards represent the fallback and remain last.*
