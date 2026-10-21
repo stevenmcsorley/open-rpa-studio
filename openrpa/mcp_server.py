@@ -64,6 +64,12 @@ def _walk_activities(workflow: dict[str, Any]):
                 yield from walk(state.get("activities"))
 
 
+def _workflow_name_problem(name: Any) -> str | None:
+    if not isinstance(name,str) or not name or len(name)>100 or name.strip()!=name or any(ord(char)<32 for char in name) or "/" in name or "\\" in name:
+        return "Workflow name must be 1–100 characters, trimmed, and contain no control characters or path separators."
+    return None
+
+
 class ProjectMCPServer:
     def __init__(self, project_path: str, *, allow_run: bool = False,
                  allow_edit: bool = False,
@@ -128,6 +134,7 @@ class ProjectMCPServer:
             {"name": "openrpa_list_workflows", "description": "List workflow names and execution models in the fixed project.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_activity_catalog", "description": "List native activity types, descriptions, configuration defaults, and required permission grants available to build workflows. Metadata only; it never executes activities.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_read_workflow", "description": "Read one workflow definition. Workflow literals may contain private user data; the MCP client will receive them.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
+            {"name": "openrpa_validate_workflow_drafts", "description": "Validate one or more unsaved workflow drafts against the project activity schema and each other, including reusable workflow bindings. Never writes project files.", "inputSchema": {"type": "object", "properties": {"workflows": {"type": "object", "minProperties": 1, "maxProperties": 50, "additionalProperties": {"type": "object"}}}, "required": ["workflows"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_validate_project", "description": "Validate all saved workflows and cross-workflow bindings without executing them.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_plan_workflow", "description": "Summarize activity types and required network, desktop, credential, or destructive permissions without executing the workflow.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
             {"name": "openrpa_list_run_history", "description": "List recent MCP workflow run statuses and identifiers from the durable local MCP run ledger; runtime variable values are excluded.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
@@ -139,6 +146,46 @@ class ProjectMCPServer:
             tools.append({"name": "openrpa_run_workflow", "description": "Execute a saved workflow in the fixed project. Network, desktop, credentials and destructive activities require separate startup opt-ins.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "inputs": {"type": "object", "additionalProperties": True}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True}})
         return tools
 
+    def _validate_workflow_drafts(self, args: dict[str, Any]) -> dict[str, Any]:
+        drafts=args.get("workflows")
+        if not isinstance(drafts,dict) or not drafts or len(drafts)>50:
+            raise ValueError("workflows must be an object containing 1–50 named draft workflows.")
+        try:
+            encoded=json.dumps(drafts,ensure_ascii=False,allow_nan=False,separators=(",",":"))
+        except (TypeError,ValueError,RecursionError) as exc:
+            raise ValueError("Draft workflows must contain finite JSON data.") from exc
+        if len(encoded.encode("utf-8"))>10_000_000:
+            raise ValueError("Workflow drafts exceed the 10 MB validation limit.")
+        for name,workflow in drafts.items():
+            name_problem=_workflow_name_problem(name)
+            if name_problem: raise ValueError(f"{name_problem} Draft key: {name!r}.")
+            if not isinstance(workflow,dict):
+                raise ValueError(f"Draft workflow {name!r} must be an object.")
+
+        current_project,current_root=load_project(self.project_path)
+        if current_root!=self.root:
+            raise ValueError("Project root changed; restart the MCP server for the current project.")
+        existing_names=list(current_project["workflows"])
+        existing_casefold={name.casefold():name for name in existing_names}
+        for name in drafts:
+            existing=existing_casefold.get(name.casefold())
+            if existing is not None and existing!=name:
+                raise ValueError(f"Draft name {name!r} differs only by case from existing workflow {existing!r}.")
+        known_names=set(existing_names)|set(drafts)
+        combined={}
+        for existing_name,relative in current_project["workflows"].items():
+            path=(self.root/relative).resolve()
+            path.relative_to(self.root)
+            combined[existing_name]=json.loads(path.read_text(encoding="utf-8"))
+        problems=[]
+        for name,workflow in drafts.items():
+            proposed=dict(workflow)
+            proposed["name"]=name
+            problems.extend({"workflow":name,**problem} for problem in validate_workflow(proposed,known_names))
+            combined[name]=proposed
+        problems.extend(validate_workflow_bindings(combined))
+        return {"valid":not problems,"workflowNames":list(drafts),"replacesExisting":sorted(set(drafts)&set(existing_names)),"problems":problems}
+
     def _create_workflow(self, args: dict[str, Any]) -> dict[str, Any]:
         if not self.allow_edit:
             raise PermissionError("Workflow editing is disabled. Restart the MCP server with --allow-edit after reviewing the project and client.")
@@ -149,8 +196,8 @@ class ProjectMCPServer:
             name=args.get("name")
             proposed=args.get("workflow")
             expected=args.get("expectedProjectSha256")
-            if not isinstance(name,str) or not name or len(name)>100 or name.strip()!=name or any(ord(char)<32 for char in name) or "/" in name or "\\" in name:
-                raise ValueError("Workflow name must be 1–100 characters, trimmed, and contain no control characters or path separators.")
+            name_problem=_workflow_name_problem(name)
+            if name_problem: raise ValueError(name_problem)
             if not isinstance(proposed,dict):
                 raise ValueError("workflow must be an object")
             encoded_input=json.dumps(proposed,ensure_ascii=False,allow_nan=False)
@@ -342,9 +389,8 @@ class ProjectMCPServer:
             current_project,current_root=load_project(self.project_path)
             if current_root!=self.root:
                 raise ValueError("Project root changed; restart the MCP server for the current project.")
-            self.project=current_project
             project_digest=hashlib.sha256(Path(self.project_path).read_bytes()).hexdigest()
-            return {"projectName": self.project.get("name", ""), "workflowNames": list(self.project["workflows"]), "projectSha256": project_digest, "permissions": {"edit": self.allow_edit, "run": self.allow_run, "network": self.allow_network, "desktop": self.allow_desktop, "credentials": self.allow_credentials, "destructive": self.allow_destructive}, "transport": "stdio", "projectRootExposed": False}
+            return {"projectName": current_project.get("name", ""), "workflowNames": list(current_project["workflows"]), "projectSha256": project_digest, "permissions": {"edit": self.allow_edit, "run": self.allow_run, "network": self.allow_network, "desktop": self.allow_desktop, "credentials": self.allow_credentials, "destructive": self.allow_destructive}, "transport": "stdio", "projectRootExposed": False}
         if name == "openrpa_list_workflows":
             rows = []
             for workflow_name in self.project["workflows"]:
@@ -368,6 +414,8 @@ class ProjectMCPServer:
             if len(raw) > 10_000_000:
                 raise ValueError("Workflow exceeds 10 MB")
             return {"workflow": json.loads(raw.decode("utf-8")), "sha256": hashlib.sha256(raw).hexdigest()}
+        if name == "openrpa_validate_workflow_drafts":
+            return self._validate_workflow_drafts(args)
         if name == "openrpa_update_workflow":
             return self._update_workflow(args)
         if name == "openrpa_create_workflow":

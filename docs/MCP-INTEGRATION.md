@@ -12,6 +12,7 @@ The implementation supports MCP protocol versions `2025-11-25`, `2025-06-18`, `2
 | `openrpa_list_workflows` | Names, execution models and activity counts | No |
 | `openrpa_activity_catalog` | Native activity descriptions, configuration defaults and per-activity permission requirements | No |
 | `openrpa_read_workflow` | Read one workflow definition | No |
+| `openrpa_validate_workflow_drafts` | Validate one or more unsaved workflows and their cross-workflow references without writing | No |
 | `openrpa_create_workflow` | Add a reusable workflow after schema and cross-workflow binding validation, if explicitly enabled | Yes |
 | `openrpa_update_workflow` | Replace a declared workflow after schema and binding validation, if explicitly enabled | Yes |
 | `openrpa_validate_project` | Validate saved workflows and bindings | No |

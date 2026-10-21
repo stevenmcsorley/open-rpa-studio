@@ -162,6 +162,35 @@ def test_create_workflow_rejects_path_separators(tmp_path, monkeypatch):
     assert call(server, "openrpa_validate_project")["structuredContent"]["workflowCount"] == 1
 
 
+def test_validate_workflow_draft_bundle_checks_cross_references_without_writing(tmp_path):
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path))
+    manifest = (tmp_path / "project.json").read_bytes()
+    drafts = {
+        "Wrapper": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [
+            {"id": "call-helper", "type": "invoke_workflow", "workflow": "Helper", "inputs": {}}
+        ]},
+        "Helper": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [
+            {"id": "helper-log", "type": "log", "level": "info", "message": "draft only"}
+        ]},
+    }
+    result = call(server, "openrpa_validate_workflow_drafts", {"workflows": drafts})["structuredContent"]
+    assert result["valid"] is True
+    assert result["workflowNames"] == ["Wrapper", "Helper"]
+    assert result["problems"] == []
+    assert (tmp_path / "project.json").read_bytes() == manifest
+    assert not (tmp_path / "workflows/wrapper.workflow.json").exists()
+    assert not (tmp_path / "workflows/helper.workflow.json").exists()
+
+    invalid = {"Broken": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [
+        {"id": "call-missing", "type": "invoke_workflow", "workflow": "Unknown", "inputs": {}}
+    ]}}
+    failed = call(server, "openrpa_validate_workflow_drafts", {"workflows": invalid})["structuredContent"]
+    assert failed["valid"] is False
+    assert any(item.get("workflow") == "Broken" and item.get("code") == "workflow-ref" for item in failed["problems"])
+    assert (tmp_path / "project.json").read_bytes() == manifest
+
+
 def test_nested_destructive_permissions_are_detected(tmp_path):
     make_project(tmp_path, [{"id": "invoke", "type": "invoke_workflow", "workflow": "Cleanup"}])
     (tmp_path / "workflows/cleanup.workflow.json").write_text(json.dumps({
@@ -202,8 +231,9 @@ def test_stdio_protocol_end_to_end(tmp_path):
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "openrpa_list_workflows", "arguments": {}}},
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "openrpa_activity_catalog", "arguments": {}}},
-        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "openrpa_create_workflow", "arguments": {"name": "Shared Helper", "expectedProjectSha256": manifest_hash, "workflow": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [{"id": "helper-log", "type": "log", "level": "info", "message": "created over MCP"}]}}}},
-        {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "openrpa_validate_project", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "openrpa_validate_workflow_drafts", "arguments": {"workflows": {"Shared Helper": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [{"id": "helper-log", "type": "log", "level": "info", "message": "validated draft"}]}}}}},
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "openrpa_create_workflow", "arguments": {"name": "Shared Helper", "expectedProjectSha256": manifest_hash, "workflow": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [{"id": "helper-log", "type": "log", "level": "info", "message": "created over MCP"}]}}}},
+        {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "openrpa_validate_project", "arguments": {}}},
     ]
     payload = "".join(json.dumps(line) + "\n" for line in request_lines)
     process = subprocess.run([sys.executable, "-m", "openrpa", "mcp", str(tmp_path), "--allow-edit"], cwd=repository,
@@ -211,13 +241,14 @@ def test_stdio_protocol_end_to_end(tmp_path):
     assert process.returncode == 0, process.stderr
     assert process.stderr == ""
     responses = [json.loads(line) for line in process.stdout.splitlines()]
-    assert [response["id"] for response in responses] == [1, 2, 3, 4, 5, 6]
+    assert [response["id"] for response in responses] == [1, 2, 3, 4, 5, 6, 7]
     assert responses[0]["result"]["serverInfo"]["name"] == "open-rpa-studio"
     assert responses[2]["result"]["structuredContent"]["workflows"][0]["name"] == "Main"
     activities = responses[3]["result"]["structuredContent"]["activities"]
     assert any(item["type"] == "browser_navigate" and item["requiredPermissions"] == ["network"] for item in activities)
-    assert responses[4]["result"]["structuredContent"]["created"] is True
-    assert responses[5]["result"]["structuredContent"]["workflowCount"] == 2
+    assert responses[4]["result"]["structuredContent"]["valid"] is True
+    assert responses[5]["result"]["structuredContent"]["created"] is True
+    assert responses[6]["result"]["structuredContent"]["workflowCount"] == 2
 
 
 def test_run_opt_in_executes_a_real_workflow_and_records_durable_history(tmp_path, monkeypatch):

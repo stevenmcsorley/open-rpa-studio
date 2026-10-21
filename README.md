@@ -118,7 +118,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Choose whether AI drafts an activity sequence, connected flowchart, or state machine. Model-specific schemas and the same local workflow validator are applied before a draft can replace the current workflow.
 - Stop an in-flight AI draft from the native Studio panel; cancellation travels through the bridge to the provider socket, while warning that a provider may continue processing after it receives a request.
 - Test configured AI endpoints from the model picker. Studio reports reachability, model count and request time, and distinguishes an empty model catalogue from a connection failure without sending a prompt.
-- Connect a compatible AI agent to one project over the local stdio Model Context Protocol server. It supports project/workflow discovery, the canonical native activity catalog, workflow reading, validation, opt-in creation and updates with optimistic concurrency, permission planning and opt-in execution. Permission planning flags browser navigation as network access. The Windows installer bundles this command in `engine/openrpa-bridge.exe`; see [MCP client integration](docs/MCP-INTEGRATION.md).
+- Connect a compatible AI agent to one project over the local stdio Model Context Protocol server. It supports project/workflow discovery, the canonical native activity catalog, workflow reading, draft-bundle validation without writes, opt-in creation and updates with optimistic concurrency, permission planning and opt-in execution. Permission planning flags browser navigation as network access. The Windows installer bundles this command in `engine/openrpa-bridge.exe`; see [MCP client integration](docs/MCP-INTEGRATION.md).
 
 ### Workflow execution
 
