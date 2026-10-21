@@ -47,6 +47,17 @@ describe('API Request response mapping editor',()=>{
     expect(html).toContain('/customer/name');
     expect(html).toContain('raw HTTP response remains in its own variable');
   });
+  it('renders safe per-record mapping expressions alongside JSON Pointers',()=>{
+    const html=renderToStaticMarkup(createElement(ApiRequestEditor,{
+      activity:{id:'fetch',type:'api_request',connectionId:'profile',responseMapping:{responseCode:'200',itemsPointer:'/items',fields:[{name:'normalizedStatus',expression:'lower(item["status"])'}],result:'orders',maxItems:500}},
+      connections:[],onChange:()=>{},onImportOperation:()=>{}
+    }));
+    expect(html).toContain('Output field mapping mode 1');
+    expect(html).toContain('<option value="pointer">JSON Pointer</option>');
+    expect(html).toContain('<option value="expression" selected="">Expression</option>');
+    expect(html).toContain('Output field expression 1');
+    expect(html).toContain('lower(item[&quot;status&quot;])');
+  });
   it('renders cursor and next-link pagination controls with explicit bounds',()=>{
     const html=renderToStaticMarkup(createElement(ApiRequestEditor,{
       activity:{id:'fetch',type:'api_request',connectionId:'profile',method:'GET',pagination:{strategy:'cursor',itemsPointer:'/data/items',cursorPointer:'/meta/next',cursorParam:'after',maxPages:8,maxItems:3000,maxTotalBytes:2000000,result:'orders',metadataResult:'pageInfo'}},

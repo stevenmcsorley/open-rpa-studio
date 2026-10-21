@@ -140,22 +140,23 @@ def test_api_response_mapping_uses_json_pointers_and_enforces_limits(tmp_path,mo
     from openrpa.model import validate_workflow
     monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
     profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Example","baseUrl":"https://api.example.test/v1"})
-    response={"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps({"data":{"items":[{"id":7,"display/name":"Order A"}]}})}
+    response={"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps({"data":{"items":[{"id":7,"display/name":"Order A","status":" OPEN "}]}})}
     monkeypatch.setattr(engine,"restricted_http_request",lambda *args:response)
-    mapping={"responseCode":"200","itemsPointer":"/data/items","fields":[{"name":"id","path":"/id"},{"name":"displayName","path":"/display~1name"}],"result":"orders","maxItems":1}
+    mapping={"responseCode":"200","itemsPointer":"/data/items","fields":[{"name":"id","path":"/id"},{"name":"displayName","path":"/display~1name"},{"name":"normalizedStatus","expression":"lower(item[\"status\"])"}],"result":"orders","maxItems":1}
     activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"path":"/orders","result":"response","responseMapping":mapping}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]}
     assert validate_workflow(workflow)==[]
     root,project=_project(tmp_path,workflow)
     result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
     assert result.status=="succeeded"
-    assert result.variables["orders"]==[{"id":7,"displayName":"Order A"}]
+    assert result.variables["orders"]==[{"id":7,"displayName":"Order A","normalizedStatus":" open "}]
     assert result.variables["response"]["status"]==200
     assert result.variables["response"]["body"]==response["body"]
 
     failures=[
         ({**response,"body":"{"},mapping,"api-response-json"),
         (response,{**mapping,"itemsPointer":"/data/missing"},"api-response-pointer"),
+        (response,{**mapping,"fields":[{"name":"broken","expression":"1 / 0"}]},"api-response-field-expression"),
         ({**response,"body":json.dumps({"data":{"items":[{"id":1,"display/name":"A"},{"id":2,"display/name":"B"}]}})},{**mapping,"maxItems":1},"api-response-limit"),
         ({**response,"status":503},mapping,"api-response-status"),
     ]
@@ -233,6 +234,12 @@ def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configura
     assert "api-response-pointer" in {problem["code"] for problem in validate_workflow(bad)}
     bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["result"]="response"
     assert "api-response-result-conflict" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["fields"]=[{"name":"status","expression":"lower(item[\"status\"])","path":"/status"}]
+    assert "api-response-field-source" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["fields"]=[{"name":"status","expression":"__import__(\"os\")"}]
+    assert "api-response-field-expression" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["fields"]=[{"name":"status","expression":"secretValue"}]
+    assert "api-response-field-expression" in {problem["code"] for problem in validate_workflow(bad)}
     bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["responseCode"]="500"
     assert "api-response-code" in {problem["code"] for problem in validate_workflow(bad)}
     bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["maxOutputBytes"]=20_000_001

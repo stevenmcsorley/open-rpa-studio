@@ -9,6 +9,66 @@ class ExpressionError(ValueError):
     pass
 
 
+def validate_expression(expression: str, allowed_names: set[str] | None = None) -> None:
+    """Validate syntax and the evaluator's safe AST subset without evaluating it."""
+    if not isinstance(expression, str) or not expression.strip() or len(expression) > 4096:
+        raise ExpressionError("Expression must contain 1–4,096 characters")
+    text = expression.strip()
+    if text.startswith("="):
+        text = text[1:].strip()
+    try:
+        root = ast.parse(text, mode="eval").body
+    except SyntaxError as exc:
+        raise ExpressionError(f"Invalid expression: {exc.msg}") from exc
+
+    functions = {"len", "str", "int", "float", "bool", "lower", "upper", "contains", "starts_with"}
+    binary = {ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod}
+    unary = {ast.Not, ast.USub, ast.UAdd}
+    comparisons = {ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn}
+
+    def visit(node: ast.AST) -> None:
+        if isinstance(node, ast.Constant):
+            if not isinstance(node.value, (str, int, float, bool, type(None))):
+                raise ExpressionError("Expression constant type is not supported")
+        elif isinstance(node, ast.Name):
+            if allowed_names is not None and node.id not in allowed_names:
+                raise ExpressionError(f"Variable '{node.id}' is not available in this expression")
+        elif isinstance(node, (ast.List, ast.Tuple)):
+            for item in node.elts:
+                visit(item)
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if key is None:
+                    raise ExpressionError("Dictionary unpacking is not supported")
+                visit(key); visit(value)
+        elif isinstance(node, ast.Subscript):
+            visit(node.value); visit(node.slice)
+        elif isinstance(node, ast.Slice):
+            for item in (node.lower, node.upper, node.step):
+                if item is not None: visit(item)
+        elif isinstance(node, ast.Attribute):
+            if node.attr.startswith("_"):
+                raise ExpressionError("Private properties are not supported")
+            visit(node.value)
+        elif isinstance(node, ast.UnaryOp) and type(node.op) in unary:
+            visit(node.operand)
+        elif isinstance(node, ast.BoolOp) and type(node.op) in {ast.And, ast.Or}:
+            for item in node.values: visit(item)
+        elif isinstance(node, ast.Compare):
+            if any(type(op) not in comparisons for op in node.ops):
+                raise ExpressionError("Comparison operator is not supported")
+            visit(node.left)
+            for item in node.comparators: visit(item)
+        elif isinstance(node, ast.BinOp) and type(node.op) in binary:
+            visit(node.left); visit(node.right)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions and not node.keywords:
+            for item in node.args: visit(item)
+        else:
+            raise ExpressionError(f"Expression element is not allowed: {type(node).__name__}")
+
+    visit(root)
+
+
 def evaluate(expression: str, variables: dict[str, Any]) -> Any:
     text = expression.strip()
     if text.startswith("="):

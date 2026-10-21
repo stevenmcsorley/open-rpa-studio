@@ -1784,9 +1784,15 @@ class WorkflowEngine:
                 raise WorkflowError("API response array items must be JSON objects",activity["id"],"api-response-record")
             row={}
             for field_mapping in mapping.get("fields",[]):
-                try:value=_json_pointer_get(record,field_mapping["path"])
-                except (KeyError,IndexError,ValueError,TypeError) as exc:
-                    raise WorkflowError("An API response field pointer did not resolve",activity["id"],"api-response-field-pointer") from exc
+                try:
+                    if isinstance(field_mapping.get("expression"),str):
+                        value=evaluate(field_mapping["expression"],{"item":record})
+                    else:
+                        value=_json_pointer_get(record,field_mapping["path"])
+                except Exception as exc:
+                    code="api-response-field-expression" if isinstance(field_mapping.get("expression"),str) else "api-response-field-pointer"
+                    message="An API response field expression failed for a record" if code.endswith("expression") else "An API response field pointer did not resolve"
+                    raise WorkflowError(message,activity["id"],code) from exc
                 row[field_mapping["name"]]=value
             try:row_bytes=len(json.dumps(row,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode("utf-8"))
             except (TypeError,ValueError,OverflowError) as exc:

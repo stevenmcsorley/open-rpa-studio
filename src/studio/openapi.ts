@@ -3,7 +3,7 @@ import type { ApiConnectionProfile } from './bridge';
 import type { Workflow } from './types';
 
 export type OpenApiParameter={name:string;in:'path'|'query'|'header';required:boolean;variable:string;description?:string};
-export type ApiResponseField={name:string;path:string};
+export type ApiResponseField={name:string;path?:string;expression?:string};
 export type OpenApiResponseMapping={responseCode:string;itemsPointer:string;fields:ApiResponseField[]};
 export type ApiResponseMapping=OpenApiResponseMapping&{result:string;maxItems:number;maxOutputBytes:number};
 export type OpenApiAuthHint={name:string;kind:'bearer'|'api_key_header'|'oauth_client_credentials'|'oauth_authorization_code'|'unsupported';detail:string;headerName?:string;tokenUrl?:string;authorizationUrl?:string;scopes?:string[]};

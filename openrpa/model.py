@@ -8,6 +8,7 @@ import re
 from pathlib import PureWindowsPath
 from decimal import Decimal
 from .desktop_keys import SUPPORTED_DESKTOP_KEYS
+from .expressions import ExpressionError, validate_expression
 
 FORMAT = "openrpa.workflow"
 VERSION = 1
@@ -262,14 +263,21 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                             for field in fields:
                                 if not isinstance(field,dict):
                                     problems.append({"code":"api-response-field","message":"Each API response field must be an object","activityId":str(aid or "")});continue
-                                name=field.get("name");pointer=field.get("path")
+                                name=field.get("name");pointer=field.get("path");expression=field.get("expression")
                                 if not isinstance(name,str) or not name.isidentifier() or len(name)>100:
                                     problems.append({"code":"api-response-field-name","message":"API response field name must be a variable-style identifier up to 100 characters","activityId":str(aid or "")})
                                 elif name.casefold() in field_names:
                                     problems.append({"code":"api-response-field-duplicate","message":"API response field names must be unique ignoring case","activityId":str(aid or "")})
                                 else:field_names.add(name.casefold())
-                                if not _valid_json_pointer(pointer):
+                                has_pointer=isinstance(pointer,str)
+                                has_expression=isinstance(expression,str)
+                                if has_pointer==has_expression:
+                                    problems.append({"code":"api-response-field-source","message":"Each API response field must define exactly one JSON Pointer path or safe expression","activityId":str(aid or "")})
+                                elif has_pointer and not _valid_json_pointer(pointer):
                                     problems.append({"code":"api-response-field-pointer","message":"API response field path must be an RFC 6901 JSON Pointer","activityId":str(aid or "")})
+                                elif has_expression:
+                                    try: validate_expression(expression, {"item"})
+                                    except ExpressionError as exc: problems.append({"code":"api-response-field-expression","message":f"API response field expression is invalid: {exc}","activityId":str(aid or "")})
             if typ == "if":
                 if not isinstance(item.get("condition"), str):
                     problems.append({"code": "if-condition", "message": "If activity needs a condition expression", "activityId": str(aid or "")})
