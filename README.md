@@ -16,6 +16,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *The workflow outline includes branch context for nested activities and stays pinned while the canvas scrolls. Select an entry to focus that activity and open its properties.*
 
+![Open RPA Studio flowchart editor with a nested If branch and its editable Then activity shown in the action properties inspector](docs/assets/flowchart-nested-branches.png)
+
+*Flowchart action nodes can contain nested control flow. Add and edit branch activities from the action inspector; these activities remain part of that executable graph node.*
+
 ![Open RPA Studio state-machine graph with a selected transition and inline guard and destination editor](docs/assets/state-machine-editor.png)
 
 *Select a transition edge to edit its destination or guard, reorder guarded routes, remove it, or add a new safe False-guarded route. Blank guards represent the fallback and remain last.*
@@ -68,7 +72,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Export and import deterministic `.orpa` project packages from the desktop toolbar. Exports validate workflows and exclude secret files; imports verify the manifest, file hashes and paths before extracting to an empty folder.
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
 - Search a categorized activity catalog, configure activity properties, reorder sequence actions, edit nested control-flow branches, and zoom sequence canvases from 50% to 150% with a reset control.
-- Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file.
+- Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file. Flowchart action nodes can contain editable nested If/Else, loop, Switch, and Try/Catch/Finally activities in the properties inspector.
 - Author a state machine with named states, per-state activity sequences, ordered boolean guards, an explicit initial state, and terminal states. State visits obey the workflow execution quota; interrupted workflows are not automatically replayed.
 - See the [workflow format and state-machine example](docs/WORKFLOW-FORMAT.md) and the [architecture notes](docs/ARCHITECTURE.md).
 - Convert a linear flowchart to a sequence when it contains no branches or loops.

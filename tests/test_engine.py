@@ -28,6 +28,21 @@ def test_real_csv_workflow_reads_transforms_and_writes(tmp_path: Path):
     assert "Grace" in (tmp_path/"out.csv").read_text()
     assert result.activities["write"]["status"] == "succeeded"
 
+def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{
+        "start":"start","nodes":[
+            {"id":"start","kind":"start"},
+            {"id":"action-if","kind":"action","activity":{"id":"if-check","type":"if","condition":"True","then":[{"id":"set-result","type":"assign","target":"result","value":"nested branch executed"}],"else":[{"id":"set-result-other","type":"assign","target":"result","value":"wrong branch"}]}},
+            {"id":"end","kind":"end"},
+        ],"transitions":[{"from":"start","to":"action-if"},{"from":"action-if","to":"end"}],
+    }}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded"
+    assert result.variables["result"]=="nested branch executed"
+    assert result.activities["set-result"]["status"]=="succeeded"
+
 def test_xlsx_activities_round_trip_with_literal_formula_text_and_audit(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Excel","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Excel","variables":[{"name":"records","type":"array","value":[{"name":"=2+2","count":4},{"name":"Ada","count":7}]}],"arguments":[],"activities":[
