@@ -1662,26 +1662,7 @@ class WorkflowEngine:
                     raise WorkflowError("API response items pointer did not resolve",a["id"],"api-response-pointer") from exc
                 if not isinstance(records,list):
                     raise WorkflowError("API response items pointer must select a JSON array",a["id"],"api-response-array")
-                max_items=int(mapping.get("maxItems",10_000))
-                if len(records)>max_items:
-                    raise WorkflowError("API response array exceeds the configured mapped-row limit",a["id"],"api-response-limit")
-                fields=mapping.get("fields",[]);mapped=[]
-                for record in records:
-                    self._check_cancel()
-                    if not isinstance(record,dict):
-                        raise WorkflowError("API response array items must be JSON objects",a["id"],"api-response-record")
-                    row={}
-                    for field_mapping in fields:
-                        try:value=_json_pointer_get(record,field_mapping["path"])
-                        except (KeyError,IndexError,ValueError,TypeError) as exc:
-                            raise WorkflowError("An API response field pointer did not resolve",a["id"],"api-response-field-pointer") from exc
-                        if value is not None and not isinstance(value,(str,bool,int,float)):
-                            raise WorkflowError("Mapped API response fields must contain scalar JSON values or null",a["id"],"api-response-field-type")
-                        if isinstance(value,float) and not math.isfinite(value):
-                            raise WorkflowError("Mapped API response number is not finite",a["id"],"api-response-field-type")
-                        row[field_mapping["name"]]=value
-                    mapped.append(row)
-                v[mapping["result"]]=mapped
+                v[mapping["result"]]=self._map_api_records(records,mapping,a)
         except WorkflowError:
             raise
         except EgressDenied as exc:
@@ -1714,7 +1695,7 @@ class WorkflowEngine:
         initial_cursor=page_query.get(cursor_param) if strategy=="cursor" else None
         if isinstance(initial_cursor,str):initial_cursor=interpolate(initial_cursor,v)
         seen_cursors={str(initial_cursor)} if isinstance(initial_cursor,(str,int)) and not isinstance(initial_cursor,bool) and str(initial_cursor) else set()
-        all_items=[];total_bytes=0;last_response=None;seen_links={current_url};more=False
+        all_items=[];mapped_items=[];mapping=a.get("responseMapping");total_bytes=0;last_response=None;seen_links={current_url};more=False
         page_result="__openrpa_internal_page_response__"
         for page_number in range(max_pages):
             self._check_cancel()
@@ -1737,6 +1718,11 @@ class WorkflowEngine:
             except (KeyError,IndexError,ValueError,TypeError) as exc:raise WorkflowError("API pagination itemsPointer did not resolve",a["id"],"api-pagination-items-pointer") from exc
             if not isinstance(items,list):raise WorkflowError("API pagination itemsPointer must select a JSON array",a["id"],"api-pagination-items-array")
             if len(all_items)+len(items)>max_items:raise WorkflowError("API pagination exceeded maxItems",a["id"],"api-pagination-item-limit")
+            if mapping is not None:
+                map_limit=int(mapping.get("maxItems",10_000))
+                if len(mapped_items)+len(items)>map_limit:
+                    raise WorkflowError("API pagination exceeded the configured mapped-row limit",a["id"],"api-response-limit")
+                mapped_items.extend(self._map_api_records(items,mapping,a))
             all_items.extend(items);last_response=response;more=False
             if strategy=="cursor":
                 try:next_cursor=_json_pointer_get(document,config.get("cursorPointer",""))
@@ -1774,8 +1760,34 @@ class WorkflowEngine:
         if last_response is not None:
             v[a.get("result","response")]=last_response
             v[config.get("result","items")]=all_items
+            if mapping is not None:v[mapping["result"]]=mapped_items
             metadata_name=config.get("metadataResult","pagination")
-            if metadata_name:v[metadata_name]={"strategy":strategy,"pages":page_number+1,"itemCount":len(all_items),"responseBytes":total_bytes}
+            if metadata_name:
+                metadata={"strategy":strategy,"pages":page_number+1,"itemCount":len(all_items),"responseBytes":total_bytes}
+                if mapping is not None:metadata["mappedItemCount"]=len(mapped_items)
+                v[metadata_name]=metadata
+
+    def _map_api_records(self, records: list[Any], mapping: dict[str, Any], activity: dict[str, Any]) -> list[dict[str, Any]]:
+        """Project scalar JSON properties from one bounded API record array."""
+        if len(records)>int(mapping.get("maxItems",10_000)):
+            raise WorkflowError("API response array exceeds the configured mapped-row limit",activity["id"],"api-response-limit")
+        mapped=[]
+        for record in records:
+            self._check_cancel()
+            if not isinstance(record,dict):
+                raise WorkflowError("API response array items must be JSON objects",activity["id"],"api-response-record")
+            row={}
+            for field_mapping in mapping.get("fields",[]):
+                try:value=_json_pointer_get(record,field_mapping["path"])
+                except (KeyError,IndexError,ValueError,TypeError) as exc:
+                    raise WorkflowError("An API response field pointer did not resolve",activity["id"],"api-response-field-pointer") from exc
+                if value is not None and not isinstance(value,(str,bool,int,float)):
+                    raise WorkflowError("Mapped API response fields must contain scalar JSON values or null",activity["id"],"api-response-field-type")
+                if isinstance(value,float) and not math.isfinite(value):
+                    raise WorkflowError("Mapped API response number is not finite",activity["id"],"api-response-field-type")
+                row[field_mapping["name"]]=value
+            mapped.append(row)
+        return mapped
 
     def _browser_activity(self, a: dict[str, Any], v: dict[str, Any], logs: list[dict[str, Any]] | None = None) -> None:
         kind = a["type"]

@@ -192,8 +192,6 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                             problems.append({"code":"api-pagination-strategy","message":"API Request pagination strategy must be cursor or next_link","activityId":str(aid or "")})
                         if not isinstance(method,str) or method.upper()!="GET" or item.get("body") is not None:
                             problems.append({"code":"api-pagination-method","message":"API Request pagination supports GET requests without a body","activityId":str(aid or "")})
-                        if mapping is not None:
-                            problems.append({"code":"api-pagination-mapping","message":"API Request pagination cannot be combined with responseMapping","activityId":str(aid or "")})
                         for field_name in ("itemsPointer", "cursorPointer", "nextLinkPointer"):
                             pointer=pagination.get(field_name)
                             required=field_name=="itemsPointer" or (strategy=="cursor" and field_name=="cursorPointer") or (strategy=="next_link" and field_name=="nextLinkPointer")
@@ -241,11 +239,15 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                         items_pointer=mapping.get("itemsPointer","")
                         if not _valid_json_pointer(items_pointer):
                             problems.append({"code":"api-response-pointer","message":"API response itemsPointer must be an RFC 6901 JSON Pointer (empty selects the root)","activityId":str(aid or "")})
+                        if isinstance(pagination,dict) and items_pointer!=pagination.get("itemsPointer"):
+                            problems.append({"code":"api-pagination-mapping-pointer","message":"When pagination and response mapping are combined, both itemsPointer values must select the same array","activityId":str(aid or "")})
                         output_name=mapping.get("result")
                         if not isinstance(output_name,str) or not output_name.isidentifier():
                             problems.append({"code":"api-response-result","message":"API response mapping result must be a variable name","activityId":str(aid or "")})
                         elif isinstance(result,str) and output_name==result:
                             problems.append({"code":"api-response-result-conflict","message":"API response mapping result must differ from the raw API response variable","activityId":str(aid or "")})
+                        elif isinstance(pagination,dict) and output_name in (pagination.get("result","items"),pagination.get("metadataResult","pagination")):
+                            problems.append({"code":"api-pagination-mapping-result-conflict","message":"Mapped API response result must differ from raw items and pagination metadata variables","activityId":str(aid or "")})
                         max_items=mapping.get("maxItems",10_000)
                         if not isinstance(max_items,int) or isinstance(max_items,bool) or not 1<=max_items<=10_000:
                             problems.append({"code":"api-response-limit","message":"API response mapping maxItems must be an integer from 1 to 10,000","activityId":str(aid or "")})

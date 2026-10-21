@@ -56,6 +56,16 @@ describe('API Request response mapping editor',()=>{
     expect(html).toContain('Total byte cap');
     expect(html).toContain('pageInfo');
   });
+  it('renders combined pagination and projection outputs without implying the two are exclusive',()=>{
+    const html=renderToStaticMarkup(createElement(ApiRequestEditor,{
+      activity:{id:'fetch',type:'api_request',connectionId:'profile',method:'GET',pagination:{strategy:'cursor',itemsPointer:'/data/items',cursorPointer:'/meta/next',cursorParam:'after',maxPages:8,maxItems:3000,maxTotalBytes:2000000,result:'rawOrders',metadataResult:'pageInfo'},responseMapping:{responseCode:'200',itemsPointer:'/data/items',fields:[{name:'orderId',path:'/id'}],result:'orders',maxItems:500}},
+      connections:[],onChange:()=>{},onImportOperation:()=>{}
+    }));
+    expect(html).toContain('Paginated record mapping');
+    expect(html).toContain('disabled="" value="/data/items"');
+    expect(html).toContain('Projected fields are gathered across every page');
+    expect(html).not.toContain('cannot be combined with JSON response mapping');
+  });
   it('offers URL based OpenAPI discovery only with desktop network permission',()=>{
     const disconnected=renderToStaticMarkup(createElement(ApiRequestEditor,{activity:{id:'fetch',type:'api_request'},connections:[],onChange:()=>{},onImportOperation:()=>{},desktop:true,allowNetwork:false}));
     const enabled=renderToStaticMarkup(createElement(ApiRequestEditor,{activity:{id:'fetch',type:'api_request'},connections:[],onChange:()=>{},onImportOperation:()=>{},desktop:true,allowNetwork:true}));

@@ -206,6 +206,61 @@ def test_api_request_cursor_pagination_reuses_connection_and_publishes_complete_
     assert seen==[("https://api.example.test/v1/orders","Bearer page-token"),("https://api.example.test/v1/orders?cursor=two","Bearer page-token")]
 
 
+def test_api_request_cursor_pagination_maps_fields_across_pages_and_keeps_raw_records(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Paged","baseUrl":"https://api.example.test/v1"})
+    seen=[]
+    def fake_request(url,*_args):
+        seen.append(url)
+        cursor=dict(__import__("urllib.parse",fromlist=["parse_qsl"]).parse_qsl(__import__("urllib.parse",fromlist=["urlsplit"]).urlsplit(url).query)).get("cursor")
+        payload={"items":[{"id":1,"customer":{"name":"Ada"}},{"id":2,"customer":{"name":"Grace"}}],"next":"two"} if cursor is None else {"items":[{"id":3,"customer":{"name":"Lin"}}],"next":None}
+        return {"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps(payload)}
+    monkeypatch.setattr(engine,"restricted_http_request",fake_request)
+    pagination={"strategy":"cursor","itemsPointer":"/items","cursorPointer":"/next","cursorParam":"cursor","maxPages":3,"maxItems":10,"maxTotalBytes":10000,"result":"rawOrders","metadataResult":"pageInfo"}
+    mapping={"responseCode":"200","itemsPointer":"/items","fields":[{"name":"orderId","path":"/id"},{"name":"customerName","path":"/customer/name"}],"result":"orders","maxItems":10}
+    activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","result":"response","pagination":pagination,"responseMapping":mapping}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    root,project=_project(tmp_path,workflow)
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="succeeded",result.error
+    assert result.variables["rawOrders"]==[{"id":1,"customer":{"name":"Ada"}},{"id":2,"customer":{"name":"Grace"}},{"id":3,"customer":{"name":"Lin"}}]
+    assert result.variables["orders"]==[{"orderId":1,"customerName":"Ada"},{"orderId":2,"customerName":"Grace"},{"orderId":3,"customerName":"Lin"}]
+    assert result.variables["pageInfo"]["strategy"]=="cursor"
+    assert result.variables["pageInfo"]["pages"]==2 and result.variables["pageInfo"]["itemCount"]==3
+    assert result.variables["pageInfo"]["mappedItemCount"]==3 and result.variables["pageInfo"]["responseBytes"]>0
+    assert seen==["https://api.example.test/v1/orders","https://api.example.test/v1/orders?cursor=two"]
+
+
+def test_api_request_paginated_mapping_fails_atomically_on_total_mapped_limit(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Paged","baseUrl":"https://api.example.test/v1"})
+    def fake_request(url,*_args):
+        cursor=dict(__import__("urllib.parse",fromlist=["parse_qsl"]).parse_qsl(__import__("urllib.parse",fromlist=["urlsplit"]).urlsplit(url).query)).get("cursor")
+        payload={"items":[{"id":1},{"id":2}],"next":"two"} if cursor is None else {"items":[{"id":3}],"next":None}
+        return {"status":200,"headers":{},"body":json.dumps(payload)}
+    monkeypatch.setattr(engine,"restricted_http_request",fake_request)
+    pagination={"strategy":"cursor","itemsPointer":"/items","cursorPointer":"/next","cursorParam":"cursor","maxPages":3,"maxItems":10,"maxTotalBytes":10000,"result":"rawOrders","metadataResult":"pageInfo"}
+    mapping={"responseCode":"","itemsPointer":"/items","fields":[{"name":"orderId","path":"/id"}],"result":"orders","maxItems":2}
+    activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","result":"response","pagination":pagination,"responseMapping":mapping}
+    root,project=_project(tmp_path,{"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]})
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="failed" and result.error["code"]=="api-response-limit"
+    assert "orders" not in result.variables and "rawOrders" not in result.variables
+
+
+def test_api_request_pagination_mapping_requires_shared_pointer_and_separate_results():
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":"profile","path":"/items","result":"response","pagination":{"strategy":"cursor","itemsPointer":"/data/items","cursorPointer":"/next","cursorParam":"cursor","result":"items","metadataResult":"pageInfo"},"responseMapping":{"responseCode":"","itemsPointer":"/items","fields":[{"name":"id","path":"/id"}],"result":"mapped","maxItems":10}}]}
+    codes={problem["code"] for problem in validate_workflow(base)}
+    assert "api-pagination-mapping-pointer" in codes
+    base["activities"][0]["responseMapping"]["itemsPointer"]="/data/items"
+    base["activities"][0]["responseMapping"]["result"]="pageInfo"
+    codes={problem["code"] for problem in validate_workflow(base)}
+    assert "api-pagination-mapping-result-conflict" in codes
+
+
 def test_api_request_next_link_pagination_is_confined_to_saved_connection_path(tmp_path,monkeypatch):
     from openrpa import engine
     monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
