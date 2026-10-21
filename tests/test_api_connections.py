@@ -196,17 +196,20 @@ def test_reusable_openapi_operation_workflow_invokes_with_typed_inputs_and_outpu
     profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Orders","baseUrl":"https://api.example.test/v1"})
     requests=[]
     payload={"items":[{"id":"o-17","customer":{"name":"Ada"}}]}
-    def fake_request(url,*_args):
-        requests.append(url)
+    def fake_request(url,*args):
+        requests.append((url,args[1]))
         return {"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps(payload)}
     monkeypatch.setattr(engine,"restricted_http_request",fake_request)
     operation={"format":"openrpa.workflow","formatVersion":1,"name":"Orders API - List Orders","executionModel":"sequence",
         "variables":[],"arguments":[
             {"name":"pathOrgId","type":"string","direction":"in","required":True},
             {"name":"queryState","type":"string","direction":"in","required":True},
+            {"name":"queryPageSize","type":"string","direction":"in","required":False,"default":""},
+            {"name":"headerXRegion","type":"string","direction":"in","required":False,"default":""},
             {"name":"apiResponse","type":"object","direction":"out","required":False,"target":"apiResponse"},
             {"name":"apiItems","type":"array","direction":"out","required":False,"target":"apiItems"}],
-        "activities":[{"id":"api-request","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orgs/{{ pathOrgId }}/orders","query":{"state":"{{ queryState }}"},"result":"apiResponse",
+        "activities":[{"id":"api-request","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orgs/{{ pathOrgId }}/orders","result":"apiResponse",
+            "query":{"state":"{{ queryState }}","pageSize":"{{ queryPageSize }}"},"headers":{"X-Region":"{{ headerXRegion }}"},"omitEmptyQuery":["pageSize"],"omitEmptyHeaders":["X-Region"],
             "responseMapping":{"responseCode":"200","itemsPointer":"/items","fields":[{"name":"orderId","path":"/id"},{"name":"customer","path":"/customer"}],"result":"apiItems","maxItems":10,"maxOutputBytes":5_000_000}}]}
     main={"format":"openrpa.workflow","formatVersion":1,"name":"Main","executionModel":"sequence","arguments":[],"variables":[{"name":"org","type":"string","value":"north"},{"name":"state","type":"string","value":"open"}],
         "activities":[{"id":"invoke-orders","type":"invoke_workflow","workflow":operation["name"],"inputs":{"pathOrgId":"{{ org }}","queryState":"{{ state }}"},"outputs":{"apiResponse":"rawResponse","apiItems":"orders"}}]}
@@ -221,9 +224,17 @@ def test_reusable_openapi_operation_workflow_invokes_with_typed_inputs_and_outpu
     project={"format":"openrpa.project","formatVersion":1,"name":"Reusable API test","main":"Main","workflows":{"Main":"workflows/main.workflow.json",operation["name"]:"workflows/orders-api.workflow.json"}}
     result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
     assert result.status=="succeeded",result.error
-    assert requests==["https://api.example.test/v1/orgs/north/orders?state=open"]
+    assert requests[0][0]=="https://api.example.test/v1/orgs/north/orders?state=open"
+    assert "X-Region" not in requests[0][1]
     assert result.variables["orders"]==[{"orderId":"o-17","customer":{"name":"Ada"}}]
     assert result.variables["rawResponse"]["status"]==200
+    main["variables"].extend([{"name":"pageSize","type":"string","value":"25"},{"name":"region","type":"string","value":"EU"}])
+    main["activities"][0]["inputs"].update({"queryPageSize":"{{ pageSize }}","headerXRegion":"{{ region }}"})
+    (root/"workflows/main.workflow.json").write_text(json.dumps(main),encoding="utf-8")
+    configured=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert configured.status=="succeeded",configured.error
+    assert requests[1][0]=="https://api.example.test/v1/orgs/north/orders?state=open&pageSize=25"
+    assert requests[1][1]["X-Region"]=="EU"
 
 
 def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configuration():
@@ -244,6 +255,18 @@ def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configura
     assert "api-response-code" in {problem["code"] for problem in validate_workflow(bad)}
     bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["maxOutputBytes"]=20_000_001
     assert "api-response-output-limit" in {problem["code"] for problem in validate_workflow(bad)}
+
+
+def test_api_optional_query_and_header_omission_lists_are_validated():
+    from openrpa.model import validate_workflow
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":"profile","query":{"limit":"{{ limit }}"},"headers":{"X-Region":"{{ region }}"},"omitEmptyQuery":["limit"],"omitEmptyHeaders":["X-Region"]}]}
+    assert validate_workflow(base)==[]
+    bad=json.loads(json.dumps(base));bad["activities"][0]["omitEmptyQuery"]=["missing"]
+    assert "api-optional-parameter" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["omitEmptyHeaders"]=["X-Region","X-Region"]
+    assert "api-optional-parameter" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["query"]=7
+    assert "api-optional-parameter" in {problem["code"] for problem in validate_workflow(bad)}
 
 
 def test_api_request_cursor_pagination_reuses_connection_and_publishes_complete_result(tmp_path,monkeypatch):

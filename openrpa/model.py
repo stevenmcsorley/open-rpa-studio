@@ -173,6 +173,10 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"api-request-headers","message":"API Request headers must use valid HTTP token names and at most 50 bounded single-line text values","activityId":str(aid or "")})
                 elif any(key.lower() in {"host","content-length","transfer-encoding","connection","authorization","cookie","set-cookie","proxy-authorization"} or any(term in key.lower() for term in ("token","secret","api-key","api_key","apikey","password","credential")) for key in headers):
                     problems.append({"code":"api-request-header-restricted","message":"API Request cannot contain authentication, credential, or transport headers; configure credentials on the saved connection","activityId":str(aid or "")})
+                for field_name,source,maximum in (("omitEmptyQuery",query,100),("omitEmptyHeaders",headers,50)):
+                    names=item.get(field_name,[])
+                    if not isinstance(names,list) or len(names)>maximum or not isinstance(source,dict) or any(not isinstance(name,str) or not name or name not in source for name in names) or len(set(names))!=len(names):
+                        problems.append({"code":"api-optional-parameter","message":f"API Request {field_name} must list unique names present in its configured parameters","activityId":str(aid or "")})
                 timeout=item.get("timeoutSeconds",20)
                 if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=60:
                     problems.append({"code":"api-request-timeout","message":"API Request timeoutSeconds must be between 1 and 60","activityId":str(aid or "")})

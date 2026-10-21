@@ -192,7 +192,12 @@ export function createReusableApiWorkflow(operation:OpenApiOperation,connectionI
   const restrictedHeader=/^(authorization|cookie|set-cookie|host|connection|content-length|transfer-encoding|proxy-authorization)$/i;
   if(configured.parameters.some(parameter=>parameter.in==='header'&&(restrictedHeader.test(parameter.name)||/(token|secret|api[-_]?key|password|credential)/i.test(parameter.name))))
     throw new Error('This operation declares a credential-like header parameter. Configure it as authentication on the saved API connection instead of exposing it as a workflow input.');
-  const inputArguments=configured.parameters.filter(parameter=>parameter.required).map(parameter=>({name:parameter.variable,type:'string' as const,direction:'in' as const,required:true}));
+  if(configured.parameters.some(parameter=>parameter.in==='path'&&!parameter.required))
+    throw new Error('OpenAPI path parameters must be required before a reusable workflow can be generated.');
+  const request=configureFromOpenApi({...operation,parameters:configured.parameters.map(parameter=>({...parameter,required:true}))});
+  const optionalQuery=configured.parameters.filter(parameter=>!parameter.required&&parameter.in==='query').map(parameter=>parameter.name);
+  const optionalHeaders=configured.parameters.filter(parameter=>!parameter.required&&parameter.in==='header'&&Object.hasOwn(request.headers,parameter.name)).map(parameter=>parameter.name);
+  const inputArguments=configured.parameters.map(parameter=>({name:parameter.variable,type:'string' as const,direction:'in' as const,required:parameter.required,...(!parameter.required?{default:''}:{})}));
   const used=new Set(inputArguments.map(argument=>argument.name.toLowerCase()));
   if(configured.patch.responseMapping)used.add(String(configured.patch.responseMapping.result).toLowerCase());
   const allocate=(base:string)=>{let candidate=base;let suffix=2;while(used.has(candidate.toLowerCase()))candidate=`${base}${suffix++}`;used.add(candidate.toLowerCase());return candidate};
@@ -202,7 +207,7 @@ export function createReusableApiWorkflow(operation:OpenApiOperation,connectionI
     const mappedName=String(configured.patch.responseMapping.result);
     outputs.push({name:mappedName,type:'array' as const,direction:'out' as const,required:false,target:mappedName});
   }
-  const activity:Workflow['activities'][number]={id:'api-request',type:'api_request',label:`Call ${operation.name}`,connectionId,...configured.patch,result:responseName};
+  const activity:Workflow['activities'][number]={id:'api-request',type:'api_request',label:`Call ${operation.name}`,connectionId,...configured.patch,...request,...(optionalQuery.length?{omitEmptyQuery:optionalQuery}:{}),...(optionalHeaders.length?{omitEmptyHeaders:optionalHeaders}:{}),result:responseName};
   return {format:'openrpa.workflow',formatVersion:1,name,executionModel:'sequence',variables:[],arguments:[...inputArguments,...outputs],activities:[activity]};
 }
 

@@ -186,6 +186,7 @@ paths:
         - {name: orgId, in: path, required: true, schema: {type: string}}
         - {name: state, in: query, required: true, schema: {type: string}}
         - {name: pageSize, in: query, required: false, schema: {type: integer}}
+        - {name: X-Region, in: header, required: false, schema: {type: string}}
       responses:
         '200':
           description: Orders
@@ -207,11 +208,12 @@ paths:
     expect(reusable.arguments).toEqual([
       {name:'pathOrgId',type:'string',direction:'in',required:true},
       {name:'queryState',type:'string',direction:'in',required:true},
+      {name:'queryPageSize',type:'string',direction:'in',required:false,default:''},
+      {name:'headerXRegion',type:'string',direction:'in',required:false,default:''},
       {name:'apiResponse',type:'object',direction:'out',required:false,target:'apiResponse'},
       {name:'apiItems',type:'array',direction:'out',required:false,target:'apiItems'}
     ]);
-    expect(reusable.activities[0]).toMatchObject({type:'api_request',connectionId:'saved-orders',method:'GET',path:'/orgs/{{ pathOrgId }}/orders',query:{state:'{{ queryState }}'},result:'apiResponse',responseMapping:{result:'apiItems',maxItems:10_000,maxOutputBytes:5_000_000}});
-    expect(reusable.activities[0].query).not.toHaveProperty('pageSize');
+    expect(reusable.activities[0]).toMatchObject({type:'api_request',connectionId:'saved-orders',method:'GET',path:'/orgs/{{ pathOrgId }}/orders',query:{state:'{{ queryState }}',pageSize:'{{ queryPageSize }}'},headers:{'X-Region':'{{ headerXRegion }}'},omitEmptyQuery:['pageSize'],omitEmptyHeaders:['X-Region'],result:'apiResponse',responseMapping:{result:'apiItems',maxItems:10_000,maxOutputBytes:5_000_000}});
     expect(()=>createReusableApiWorkflow(operation,'','Invalid')).toThrow('Choose a saved API connection');
   });
   it('leaves mapping unset for ambiguous arrays and never fetches external response schemas',()=>{

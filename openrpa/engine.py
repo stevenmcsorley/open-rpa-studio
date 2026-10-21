@@ -1537,6 +1537,7 @@ class WorkflowEngine:
         query=a.get("query",{})
         if not isinstance(query,dict) or len(query)>100:
             raise WorkflowError("API query parameters must be an object with at most 100 entries",a["id"],"api-query-invalid")
+        omit_empty_query=set(a.get("omitEmptyQuery",[]))
         query_items=parse_qsl(target_parts.query,keep_blank_values=True)
         for key,value in query.items():
             if not isinstance(key,str) or not key or len(key)>256:
@@ -1544,6 +1545,8 @@ class WorkflowEngine:
             resolved=interpolate(value,v) if isinstance(value,str) else value
             if isinstance(resolved,(dict,list,tuple)):
                 raise WorkflowError(f"API query parameter {key!r} must be scalar",a["id"],"api-query-invalid")
+            if key in omit_empty_query and resolved in (None,""):
+                continue
             query_items.append((key,"" if resolved is None else str(resolved)))
         url=urlunsplit((target_parts.scheme,target_parts.netloc,target_parts.path,urlencode(query_items,doseq=False),""))
         method=str(a.get("method","GET")).upper()
@@ -1555,12 +1558,16 @@ class WorkflowEngine:
         if not isinstance(raw_headers,dict) or len(raw_headers)>50:
             raise WorkflowError("API request headers must be an object with at most 50 entries",a["id"],"api-headers-invalid")
         headers=dict(profile["headers"])
+        omit_empty_headers=set(a.get("omitEmptyHeaders",[]))
         for name,value in raw_headers.items():
             if not isinstance(name,str) or not name or len(name)>128 or "\r" in name or "\n" in name:
                 raise WorkflowError("API request contains an invalid header name",a["id"],"api-headers-invalid")
             if not isinstance(value,str) or len(value)>8192 or "\r" in value or "\n" in value:
                 raise WorkflowError(f"API request header {name!r} must be single-line text no longer than 8,192 characters",a["id"],"api-headers-invalid")
-            headers[name]=str(interpolate(value,v))
+            resolved=interpolate(value,v)
+            if name in omit_empty_headers and resolved in (None,""):
+                continue
+            headers[name]="" if resolved is None else str(resolved)
         blocked_auth_headers={"authorization",profile["apiKeyHeader"].lower()}
         if any(name.lower() in blocked_auth_headers for name in raw_headers):
             raise WorkflowError("API Request authentication headers are managed by the saved connection",a["id"],"api-auth-header-managed")
@@ -1686,10 +1693,12 @@ class WorkflowEngine:
         base_path=base.path.rstrip("/")
         base_prefix=(base_path+"/") if base_path else "/"
         page_path=str(a.get("path","/"));page_query=dict(a.get("query",{}));cursor_param=str(config.get("cursorParam",""))
+        omit_empty_query=set(a.get("omitEmptyQuery",[]))
         current_url=urljoin(profile["baseUrl"].rstrip("/")+"/",page_path.lstrip("/"))
         current_parts=urlsplit(current_url);initial_query=parse_qsl(current_parts.query,keep_blank_values=True)
         for key,value in page_query.items():
             resolved=interpolate(value,v) if isinstance(value,str) else value
+            if key in omit_empty_query and resolved in (None,""):continue
             if not isinstance(resolved,(dict,list,tuple)):initial_query.append((key,"" if resolved is None else str(resolved)))
         current_url=urlunsplit((current_parts.scheme,current_parts.netloc,current_parts.path,urlencode(initial_query,doseq=False),""))
         initial_cursor=page_query.get(cursor_param) if strategy=="cursor" else None
