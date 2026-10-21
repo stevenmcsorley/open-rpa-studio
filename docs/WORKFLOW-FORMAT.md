@@ -85,3 +85,23 @@ State-machine workflows store ordered activity lists per state. After the activi
 ```
 
 State machine transitions are not resumable checkpoints. The engine only resumes a workflow by starting a new run, so external effects that happened before a failure may happen again if the user explicitly reruns it. Use idempotent operations or external deduplication for consequential actions.
+
+## Sort Rows
+
+`sort_rows` writes an ordered shallow copy of a list of JSON records to the configured result variable. It accepts 1–50 unique keys, each with a field name, `ascending` or `descending` direction, and `first` or `last` null placement. Missing fields are treated as null. Null placement is independent of sort direction. Equal keys retain input order.
+
+Within each key field, non-null values must be consistently numbers, strings, or Booleans. Numbers are compared numerically; text uses Unicode code-point ordering; Booleans use `false < true`. Mixed non-null types and non-finite numbers fail with an activity-level diagnostic. Inputs are limited to 100,000 records and each record to 2,000 fields; `maxRows` can lower the input limit. Sorting does not mutate the input list.
+
+```json
+{
+  "id": "sort-orders",
+  "type": "sort_rows",
+  "rows": "orders",
+  "keys": [
+    {"field": "department", "direction": "ascending", "nulls": "last"},
+    {"field": "priority", "direction": "descending", "nulls": "first"}
+  ],
+  "maxRows": 25000,
+  "result": "sortedOrders"
+}
+```

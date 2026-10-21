@@ -5,6 +5,7 @@
 - Added `Filter Rows` with a visual typed-condition editor and bounded AND/OR evaluation.
 - Added `Join Rows` with typed keys, inner/left modes, duplicate-key expansion, right-field prefixes, cancellation and an explicit output row ceiling.
 - Added `Group Rows` with first-seen grouping, null-aware counts, exact decimal-backed sums/averages in the native engine, min/max and bounded group/aggregation counts.
+- Added `Sort Rows` with stable multi-key ordering, typed scalar fields, independent null placement, malformed/mixed type rejection, a 100,000-row ceiling, native execution and browser-preview parity.
 
 - Versioned local project format and Python execution engine.
 - Safe expression evaluation, argument/variable scoping, sequence/if/for-each/while/retry/switch/try-call control flow with shared execution quotas. Retry Scope supports filtered errors, bounded backoff, variable rollback and explicit repeat-safety acknowledgement.

@@ -838,6 +838,54 @@ class WorkflowEngine:
                 result=[{aggregation["as"]:(0 if aggregation["operation"] in {"count_rows","count_values"} else None) for aggregation in aggregations}]
             v[a.get("result","groupedRows")]=result
             self._emit({"event":"data-grouped","activityId":a["id"],"inputRows":len(rows),"outputGroups":len(result),"groupByCount":len(group_by),"aggregationCount":len(aggregations)},logs)
+        elif kind == "sort_rows":
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str):rows=evaluate(rows,v)
+            keys=a.get("keys",[]);limit=a.get("maxRows",100_000)
+            if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:
+                raise WorkflowError("Sort Rows maxRows must be an integer from 1 to 100,000",a["id"],"sort-limit")
+            if not isinstance(rows,list) or len(rows)>100_000 or len(rows)>limit:
+                raise WorkflowError("Sort Rows input must be a list within its configured 100,000 row limit",a["id"],"sort-input")
+            if not isinstance(keys,list) or not 1<=len(keys)<=50:
+                raise WorkflowError("Sort Rows needs 1–50 sort keys",a["id"],"sort-keys")
+            for index,key in enumerate(keys):
+                if not isinstance(key,dict) or not isinstance(key.get("field"),str) or not key["field"].strip() or not isinstance(key.get("direction","ascending"),str) or key.get("direction","ascending") not in ("ascending","descending") or not isinstance(key.get("nulls","last"),str) or key.get("nulls","last") not in ("first","last"):
+                    raise WorkflowError(f"Sort Rows key {index+1} is invalid",a["id"],"sort-key")
+            if len({key["field"] for key in keys})!=len(keys):raise WorkflowError("Sort Rows key fields must be unique",a["id"],"sort-key-duplicate")
+            for index,row in enumerate(rows):
+                if index%256==0:self._check_cancel()
+                if not isinstance(row,dict) or len(row)>2_000:raise WorkflowError(f"Sort Rows record {index+1} must be an object with at most 2,000 fields",a["id"],"sort-row-type")
+            from functools import cmp_to_key
+            field_types:dict[str,str]={}
+            def type_of(value:Any)->str:
+                if isinstance(value,bool):return "boolean"
+                if isinstance(value,str):return "string"
+                if isinstance(value,int):return "number"
+                if isinstance(value,float) and math.isfinite(value):return "number"
+                raise WorkflowError("Sort Rows supports only finite numbers, text, booleans and null values",a["id"],"sort-value-type")
+            for key in keys:
+                field=key["field"];types=set()
+                for index,row in enumerate(rows):
+                    if index%256==0:self._check_cancel()
+                    value=row.get(field)
+                    if value is not None:types.add(type_of(value))
+                if len(types)>1:raise WorkflowError(f"Sort Rows field '{field}' mixes incompatible value types",a["id"],"sort-mixed-types")
+                field_types[field]=next(iter(types),"null")
+            def compare(left:dict[str,Any],right:dict[str,Any])->int:
+                for key in keys:
+                    field=key["field"];a_value=left.get(field);b_value=right.get(field)
+                    if a_value is None or b_value is None:
+                        result=0 if a_value is None and b_value is None else (-1 if a_value is None else 1)
+                        if key.get("nulls","last")=="last":result=-result
+                    elif field_types[field]=="number":
+                        a_num=Decimal(a_value) if isinstance(a_value,int) else Decimal(str(a_value));b_num=Decimal(b_value) if isinstance(b_value,int) else Decimal(str(b_value))
+                        result=(a_num>b_num)-(a_num<b_num)
+                    else:result=(a_value>b_value)-(a_value<b_value)
+                    if result:return -result if key.get("direction","ascending")=="descending" and a_value is not None and b_value is not None else result
+                return 0
+            result=sorted(rows,key=cmp_to_key(compare))
+            v[a.get("result","sortedRows")]=result
+            self._emit({"event":"data-sorted","activityId":a["id"],"inputRows":len(rows),"outputRows":len(result),"keyCount":len(keys)},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes

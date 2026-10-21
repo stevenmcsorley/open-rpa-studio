@@ -112,6 +112,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
 - Use Excel workbook activities to read .xlsx sheets into records and write records to new workbooks. See [Excel workbook activities](docs/EXCEL-ACTIVITIES.md) for limits, formula handling, archive protections and unsupported features.
 - Query approved local SQLite files using parameter-bound read-only SQL, row/result-size quotas, VM timeouts, cancellation and audit events. Writes, `PRAGMA`, attachment, and multi-statement SQL are denied. See [SQLite Query activity](docs/SQLITE-ACTIVITY.md).
+- Sort bounded record lists by up to 50 unique fields, with ascending/descending order, explicit null-first/null-last behavior independent of direction, stable ties, homogeneous typed scalar comparisons and native/browser-preview parity.
 - Extract selectable text from local PDFs with page separators, configurable page limits, page-count output and run cancellation checks. Scanned/image-only PDFs need an external OCR process; encrypted files are rejected. See [PDF activity limits](docs/PDF-ACTIVITIES.md).
 - Query approved local SQLite files with parameter-bound, read-only SQL, result/time limits, cancellation and durable audit events. See [SQLite Query activity](docs/SQLITE-ACTIVITY.md).
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
@@ -132,7 +133,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed row filtering, bounded typed-key joins and grouped aggregates; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed row filtering, bounded typed-key joins, grouped aggregates and stable multi-key sorting; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
 
 ![Open RPA Studio workflow designer with a Filter Rows activity selected and typed status and value conditions configured in its properties panel](docs/assets/filter-rows-activity.png)
 
@@ -145,6 +146,10 @@ Core activities include variable assignment and logging; credential lookup by va
 ![Open RPA Studio with Group Rows configured by department and showing sum, average and count aggregations](docs/assets/group-rows-activity.png)
 
 *Group Rows builds repeatable summaries from tabular workflow data, with typed group fields, null-aware aggregates and a configurable group ceiling. The screenshot shows an illustrative unsaved preview workflow.*
+
+![Open RPA Studio with the Sort Rows activity configured for stable multi-key sorting and explicit null ordering](docs/assets/sort-rows-activity.png)
+
+*Sort Rows supports ordered field priorities, ascending or descending order, explicit null placement, stable ties, mixed-type rejection and a configurable input limit. This is an illustrative unsaved browser-preview workflow.*
 
 ### Debugging and run history
 

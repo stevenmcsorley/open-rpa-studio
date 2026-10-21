@@ -43,6 +43,11 @@ describe('run impact plan', () => {
     expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
   });
 
+  it('treats row sorting as local data logic without requesting permissions',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'sort',type:'sort_rows',rows:'orders',keys:[{field:'date',direction:'ascending'}]}]});
+    expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
+  });
+
   it('reports copy and screenshot output paths as writes while keeping desktop permission visible', () => {
     const plan = buildExecutionPlan({ ...base, activities: [
       { id: 'copy', type: 'file_copy', source: 'in.csv', destination: 'out.csv' },

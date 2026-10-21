@@ -258,6 +258,21 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(max_groups,int) or isinstance(max_groups,bool) or not 1<=max_groups<=100_000:problems.append({"code":"group-limit","message":"Group Rows maxGroups must be an integer from 1 to 100,000","activityId":str(aid or "")})
                 result=item.get("result","groupedRows")
                 if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"group-result","message":"Group Rows result must be a variable name","activityId":str(aid or "")})
+            elif typ == "sort_rows":
+                if not isinstance(item.get("rows","rows"),(str,list)):problems.append({"code":"sort-input","message":"Sort Rows rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                keys=item.get("keys",[])
+                if not isinstance(keys,list) or not 1<=len(keys)<=50:problems.append({"code":"sort-keys","message":"Sort Rows needs 1–50 sort keys","activityId":str(aid or "")})
+                else:
+                    fields=[]
+                    for key_index,key in enumerate(keys):
+                        if not isinstance(key,dict) or not isinstance(key.get("field"),str) or not key["field"].strip() or len(key["field"])>256 or not isinstance(key.get("direction","ascending"),str) or key.get("direction","ascending") not in ("ascending","descending") or not isinstance(key.get("nulls","last"),str) or key.get("nulls","last") not in ("first","last"):
+                            problems.append({"code":"sort-key","message":f"Sort Rows key {key_index+1} needs a field, direction and null placement","activityId":str(aid or "")})
+                        elif key["field"] in fields:problems.append({"code":"sort-key-duplicate","message":f"Sort Rows field '{key['field']}' is duplicated","activityId":str(aid or "")})
+                        else:fields.append(key["field"])
+                limit=item.get("maxRows",100_000)
+                if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"sort-limit","message":"Sort Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
+                result=item.get("result","sortedRows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"sort-result","message":"Sort Rows result must be a variable name","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -622,7 +637,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",

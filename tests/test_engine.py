@@ -121,6 +121,27 @@ def test_group_rows_supports_empty_global_aggregate_and_rejects_bad_values(tmp_p
     failed=run_project(project,tmp_path)
     assert failed.status=="failed" and failed.error["code"]=="group-number-type"
 
+def test_sort_rows_is_stable_multi_key_and_keeps_null_placement_independent_of_direction(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Sort","main":"Main","workflows":{"Main":"main.json"}}
+    rows=[{"team":"B","score":2,"id":"first"},{"team":"A","score":1,"id":"second"},{"team":"A","score":1,"id":"third"},{"team":"A","score":None,"id":"null"}]
+    activity={"id":"sort","type":"sort_rows","rows":"rows","keys":[{"field":"team","direction":"ascending","nulls":"last"},{"field":"score","direction":"descending","nulls":"first"}],"result":"sorted"}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Sort","variables":[{"name":"rows","type":"array","value":rows}],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[];result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded"
+    assert [row["id"] for row in result.variables["sorted"]]==["null","second","third","first"]
+    assert next(event for event in events if event.get("event")=="data-sorted")=={"event":"data-sorted","activityId":"sort","inputRows":4,"outputRows":4,"keyCount":2}
+    bad={**workflow,"variables":[{"name":"rows","type":"array","value":[{"score":1},{"score":"2"}]}],"activities":[{**activity,"keys":[{"field":"score"}]}]}
+    (tmp_path/"main.json").write_text(json.dumps(bad),encoding="utf-8")
+    failed=run_project(project,tmp_path)
+    assert failed.status=="failed" and failed.error["code"]=="sort-mixed-types"
+    empty={**workflow,"variables":[{"name":"rows","type":"array","value":[]}],"activities":[{**activity,"maxRows":100000}]}
+    (tmp_path/"main.json").write_text(json.dumps(empty),encoding="utf-8")
+    assert run_project(project,tmp_path).variables["sorted"]==[]
+    malformed={**workflow,"activities":[{**activity,"keys":[{"field":"score","direction":[]}]}]}
+    assert "sort-key" in {problem["code"] for problem in validate_workflow(malformed)}
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{
