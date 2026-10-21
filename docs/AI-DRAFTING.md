@@ -32,6 +32,10 @@ The v0.1.4 development build was exercised against the installed local Ollama mo
 
 These are smoke tests, not a quality evaluation across tasks or models. A larger local model (`qwen3.5:9b-q4_K_M`) produced a valid sequence but hit the bridge's 180-second provider timeout for graph-shaped requests in this environment. The smaller 4B model completed the tested graph drafts in a few seconds. Model, hardware, prompt complexity, and schema support affect latency and correctness. Invalid output is rejected by the editor; timeouts surface as provider errors.
 
+## Current live Ollama acceptance
+
+On 21 October 2026, the reproducible acceptance command `uv run --locked python scripts/acceptance_ollama.py` ran against the locally installed Ollama 0.40.6 model `qwen35-4b:latest`. It exercised the native Ollama adapter, local workflow validator, and execution engine. The sequence, flowchart, and state-machine drafts each passed validation and executed as exactly one `hello` log event. Timings were 1.233 s, 3.787 s, and 2.413 s respectively. The server accepted JSON Schema mode, so no compatibility retry was used. The command creates and removes temporary projects, requires no credential or external network, and can be pointed at another installed model using `--model` or `OPENRPA_OLLAMA_TEST_MODEL`. This is a local smoke acceptance, not a model-quality benchmark or evidence for remote provider behavior.
+
 ## Provider credentials
 
 Remote provider keys can be stored from the desktop AI drafting panel. The app sends the value to its local Python bridge over the Tauri command channel, which accepts only an approved OS credential vault backend. The secret is not returned in the RPC response, audit entry, project, or workflow. It is held in the UI only while the form is open and cleared after a successful store or when the panel closes. If the OS vault is unavailable or uses an unsupported plaintext backend, storage fails closed. Local providers such as Ollama and LM Studio do not require credentials by default.
