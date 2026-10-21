@@ -172,7 +172,7 @@ components:
     const operation=imported.operations[0];
     expect(operation.responseMapping).toEqual({responseCode:'200',itemsPointer:'/data/items',fields:[{name:'id',path:'/id'},{name:'customerName',path:'/customer/name'},{name:'active',path:'/active'}]});
     const configured=configureOpenApiOperation(operation,[{name:'apiItems'}]);
-    expect(configured.patch.responseMapping).toEqual({...operation.responseMapping,result:'apiItems2',maxItems:10000});
+    expect(configured.patch.responseMapping).toEqual({...operation.responseMapping,result:'apiItems2',maxItems:10000,maxOutputBytes:5_000_000});
   });
   it('leaves mapping unset for ambiguous arrays and never fetches external response schemas',()=>{
     const ambiguous=parseOpenApi(`openapi: 3.0.3

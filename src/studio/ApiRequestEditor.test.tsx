@@ -40,6 +40,9 @@ describe('API Request response mapping editor',()=>{
     expect(html).toContain('/data/items');
     expect(html).toContain('Mapped rows result variable');
     expect(html).toContain('Maximum mapped response rows');
+    expect(html).toContain('Maximum mapped output bytes');
+    expect(html).toContain('value="5000000"');
+    expect(html).toContain('nested objects and arrays');
     expect(html).toContain('customerName');
     expect(html).toContain('/customer/name');
     expect(html).toContain('raw HTTP response remains in its own variable');

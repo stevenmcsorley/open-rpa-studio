@@ -251,6 +251,9 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                         max_items=mapping.get("maxItems",10_000)
                         if not isinstance(max_items,int) or isinstance(max_items,bool) or not 1<=max_items<=10_000:
                             problems.append({"code":"api-response-limit","message":"API response mapping maxItems must be an integer from 1 to 10,000","activityId":str(aid or "")})
+                        max_output_bytes=mapping.get("maxOutputBytes",5_000_000)
+                        if not isinstance(max_output_bytes,int) or isinstance(max_output_bytes,bool) or not 1_024<=max_output_bytes<=20_000_000:
+                            problems.append({"code":"api-response-output-limit","message":"API response mapping maxOutputBytes must be an integer from 1,024 to 20,000,000","activityId":str(aid or "")})
                         fields=mapping.get("fields")
                         if not isinstance(fields,list) or not 1<=len(fields)<=50:
                             problems.append({"code":"api-response-fields","message":"API response mapping needs 1 to 50 field mappings","activityId":str(aid or "")})

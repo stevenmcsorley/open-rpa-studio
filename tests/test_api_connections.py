@@ -157,7 +157,6 @@ def test_api_response_mapping_uses_json_pointers_and_enforces_limits(tmp_path,mo
         ({**response,"body":"{"},mapping,"api-response-json"),
         (response,{**mapping,"itemsPointer":"/data/missing"},"api-response-pointer"),
         ({**response,"body":json.dumps({"data":{"items":[{"id":1,"display/name":"A"},{"id":2,"display/name":"B"}]}})},{**mapping,"maxItems":1},"api-response-limit"),
-        ({**response,"body":json.dumps({"data":{"items":[{"id":{"nested":1},"display/name":"Order A"}]}})},mapping,"api-response-field-type"),
         ({**response,"status":503},mapping,"api-response-status"),
     ]
     for next_response,next_mapping,code in failures:
@@ -166,6 +165,28 @@ def test_api_response_mapping_uses_json_pointers_and_enforces_limits(tmp_path,mo
         root,project=_project(tmp_path,workflow)
         failed=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
         assert failed.status=="failed" and failed.error["activityId"]=="fetch" and failed.error["code"]==code
+
+
+def test_api_response_mapping_preserves_nested_json_and_enforces_projected_byte_quota(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Nested","baseUrl":"https://api.example.test/v1"})
+    payload={"data":{"items":[{"id":7,"customer":{"name":"Ada","addresses":[{"city":"London"}],"notes":"x"*1_500},"flags":["priority",{"code":"A"}]}]}}
+    response={"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps(payload)}
+    monkeypatch.setattr(engine,"restricted_http_request",lambda *args:response)
+    mapping={"responseCode":"200","itemsPointer":"/data/items","fields":[{"name":"customer","path":"/customer"},{"name":"flags","path":"/flags"}],"result":"orders","maxItems":10,"maxOutputBytes":2_048}
+    activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"path":"/orders","result":"response","responseMapping":mapping}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    root,project=_project(tmp_path,workflow)
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="succeeded",result.error
+    assert result.variables["orders"]==[{"customer":{"name":"Ada","addresses":[{"city":"London"}],"notes":"x"*1_500},"flags":["priority",{"code":"A"}]}]
+
+    activity["responseMapping"]={**mapping,"maxOutputBytes":1_024}
+    root,project=_project(tmp_path,workflow)
+    failed=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert failed.status=="failed" and failed.error["activityId"]=="fetch" and failed.error["code"]=="api-response-output-limit"
 
 
 def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configuration():
@@ -178,6 +199,8 @@ def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configura
     assert "api-response-result-conflict" in {problem["code"] for problem in validate_workflow(bad)}
     bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["responseCode"]="500"
     assert "api-response-code" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["maxOutputBytes"]=20_000_001
+    assert "api-response-output-limit" in {problem["code"] for problem in validate_workflow(bad)}
 
 
 def test_api_request_cursor_pagination_reuses_connection_and_publishes_complete_result(tmp_path,monkeypatch):
@@ -218,7 +241,7 @@ def test_api_request_cursor_pagination_maps_fields_across_pages_and_keeps_raw_re
         return {"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps(payload)}
     monkeypatch.setattr(engine,"restricted_http_request",fake_request)
     pagination={"strategy":"cursor","itemsPointer":"/items","cursorPointer":"/next","cursorParam":"cursor","maxPages":3,"maxItems":10,"maxTotalBytes":10000,"result":"rawOrders","metadataResult":"pageInfo"}
-    mapping={"responseCode":"200","itemsPointer":"/items","fields":[{"name":"orderId","path":"/id"},{"name":"customerName","path":"/customer/name"}],"result":"orders","maxItems":10}
+    mapping={"responseCode":"200","itemsPointer":"/items","fields":[{"name":"orderId","path":"/id"},{"name":"customer","path":"/customer"}],"result":"orders","maxItems":10}
     activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","result":"response","pagination":pagination,"responseMapping":mapping}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]}
     assert validate_workflow(workflow)==[]
@@ -226,10 +249,11 @@ def test_api_request_cursor_pagination_maps_fields_across_pages_and_keeps_raw_re
     result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
     assert result.status=="succeeded",result.error
     assert result.variables["rawOrders"]==[{"id":1,"customer":{"name":"Ada"}},{"id":2,"customer":{"name":"Grace"}},{"id":3,"customer":{"name":"Lin"}}]
-    assert result.variables["orders"]==[{"orderId":1,"customerName":"Ada"},{"orderId":2,"customerName":"Grace"},{"orderId":3,"customerName":"Lin"}]
+    assert result.variables["orders"]==[{"orderId":1,"customer":{"name":"Ada"}},{"orderId":2,"customer":{"name":"Grace"}},{"orderId":3,"customer":{"name":"Lin"}}]
     assert result.variables["pageInfo"]["strategy"]=="cursor"
     assert result.variables["pageInfo"]["pages"]==2 and result.variables["pageInfo"]["itemCount"]==3
     assert result.variables["pageInfo"]["mappedItemCount"]==3 and result.variables["pageInfo"]["responseBytes"]>0
+    assert result.variables["pageInfo"]["mappedOutputBytes"]>0
     assert seen==["https://api.example.test/v1/orders","https://api.example.test/v1/orders?cursor=two"]
 
 
@@ -248,6 +272,24 @@ def test_api_request_paginated_mapping_fails_atomically_on_total_mapped_limit(tm
     root,project=_project(tmp_path,{"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]})
     result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
     assert result.status=="failed" and result.error["code"]=="api-response-limit"
+    assert "orders" not in result.variables and "rawOrders" not in result.variables
+
+
+def test_api_request_paginated_nested_projection_enforces_combined_output_byte_quota(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Paged","baseUrl":"https://api.example.test/v1"})
+    def fake_request(url,*_args):
+        cursor=dict(__import__("urllib.parse",fromlist=["parse_qsl"]).parse_qsl(__import__("urllib.parse",fromlist=["urlsplit"]).urlsplit(url).query)).get("cursor")
+        payload={"items":[{"data":{"text":"x"*600}}],"next":"two"} if cursor is None else {"items":[{"data":{"text":"y"*600}}],"next":None}
+        return {"status":200,"headers":{},"body":json.dumps(payload)}
+    monkeypatch.setattr(engine,"restricted_http_request",fake_request)
+    pagination={"strategy":"cursor","itemsPointer":"/items","cursorPointer":"/next","cursorParam":"cursor","maxPages":3,"maxItems":10,"maxTotalBytes":5000,"result":"rawOrders","metadataResult":"pageInfo"}
+    mapping={"responseCode":"","itemsPointer":"/items","fields":[{"name":"data","path":"/data"}],"result":"orders","maxItems":10,"maxOutputBytes":1024}
+    activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","result":"response","pagination":pagination,"responseMapping":mapping}
+    root,project=_project(tmp_path,{"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]})
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="failed" and result.error["code"]=="api-response-output-limit"
     assert "orders" not in result.variables and "rawOrders" not in result.variables
 
 

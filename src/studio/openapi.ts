@@ -4,7 +4,7 @@ import type { ApiConnectionProfile } from './bridge';
 export type OpenApiParameter={name:string;in:'path'|'query'|'header';required:boolean;variable:string;description?:string};
 export type ApiResponseField={name:string;path:string};
 export type OpenApiResponseMapping={responseCode:string;itemsPointer:string;fields:ApiResponseField[]};
-export type ApiResponseMapping=OpenApiResponseMapping&{result:string;maxItems:number};
+export type ApiResponseMapping=OpenApiResponseMapping&{result:string;maxItems:number;maxOutputBytes:number};
 export type OpenApiAuthHint={name:string;kind:'bearer'|'api_key_header'|'oauth_client_credentials'|'oauth_authorization_code'|'unsupported';detail:string;headerName?:string;tokenUrl?:string;authorizationUrl?:string;scopes?:string[]};
 export type OpenApiSecurityAlternative={schemes:OpenApiAuthHint[]};
 export type OpenApiOperation={key:string;name:string;method:'GET'|'POST'|'PUT'|'PATCH'|'DELETE';path:string;server:string;parameters:OpenApiParameter[];headers:Record<string,string>;query:Record<string,string>;securityAlternatives?:OpenApiSecurityAlternative[];body?:string;contentType?:string;responseMapping?:OpenApiResponseMapping};
@@ -179,7 +179,7 @@ export function configureOpenApiOperation(operation:OpenApiOperation,existingVar
   const parameters=operation.parameters.map(parameter=>{let name=parameter.variable;let suffix=2;while(used.has(name.toLowerCase()))name=`${parameter.variable}${suffix++}`;used.add(name.toLowerCase());return {...parameter,variable:name};});
   const required=parameters.filter(parameter=>parameter.required);
   let response:ApiResponseMapping|undefined;
-  if(operation.responseMapping){let result='apiItems';let suffix=2;while(used.has(result.toLowerCase()))result=`apiItems${suffix++}`;used.add(result.toLowerCase());response={...operation.responseMapping,result,maxItems:10_000};}
+  if(operation.responseMapping){let result='apiItems';let suffix=2;while(used.has(result.toLowerCase()))result=`apiItems${suffix++}`;used.add(result.toLowerCase());response={...operation.responseMapping,result,maxItems:10_000,maxOutputBytes:5_000_000};}
   const patch={...configureFromOpenApi({...operation,parameters:required}),responseMapping:response,pagination:undefined,...(operation.method!=='GET'||operation.body!==undefined?{retryPolicy:undefined}:{})};
   return {patch,parameters,variables:required.map(parameter=>({name:parameter.variable,type:'string' as const,value:''}))};
 }

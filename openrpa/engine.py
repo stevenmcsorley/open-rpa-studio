@@ -1695,7 +1695,7 @@ class WorkflowEngine:
         initial_cursor=page_query.get(cursor_param) if strategy=="cursor" else None
         if isinstance(initial_cursor,str):initial_cursor=interpolate(initial_cursor,v)
         seen_cursors={str(initial_cursor)} if isinstance(initial_cursor,(str,int)) and not isinstance(initial_cursor,bool) and str(initial_cursor) else set()
-        all_items=[];mapped_items=[];mapping=a.get("responseMapping");total_bytes=0;last_response=None;seen_links={current_url};more=False
+        all_items=[];mapped_items=[];mapped_output_bytes=0;mapping=a.get("responseMapping");total_bytes=0;last_response=None;seen_links={current_url};more=False
         page_result="__openrpa_internal_page_response__"
         for page_number in range(max_pages):
             self._check_cancel()
@@ -1722,7 +1722,11 @@ class WorkflowEngine:
                 map_limit=int(mapping.get("maxItems",10_000))
                 if len(mapped_items)+len(items)>map_limit:
                     raise WorkflowError("API pagination exceeded the configured mapped-row limit",a["id"],"api-response-limit")
-                mapped_items.extend(self._map_api_records(items,mapping,a))
+                page_mapped=self._map_api_records(items,mapping,a)
+                mapped_output_bytes+=sum(len(json.dumps(row,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode("utf-8")) for row in page_mapped)
+                if mapped_output_bytes>int(mapping.get("maxOutputBytes",5_000_000)):
+                    raise WorkflowError("API pagination exceeded the configured mapped-output byte limit",a["id"],"api-response-output-limit")
+                mapped_items.extend(page_mapped)
             all_items.extend(items);last_response=response;more=False
             if strategy=="cursor":
                 try:next_cursor=_json_pointer_get(document,config.get("cursorPointer",""))
@@ -1764,14 +1768,16 @@ class WorkflowEngine:
             metadata_name=config.get("metadataResult","pagination")
             if metadata_name:
                 metadata={"strategy":strategy,"pages":page_number+1,"itemCount":len(all_items),"responseBytes":total_bytes}
-                if mapping is not None:metadata["mappedItemCount"]=len(mapped_items)
+                if mapping is not None:
+                    metadata["mappedItemCount"]=len(mapped_items)
+                    metadata["mappedOutputBytes"]=mapped_output_bytes
                 v[metadata_name]=metadata
 
     def _map_api_records(self, records: list[Any], mapping: dict[str, Any], activity: dict[str, Any]) -> list[dict[str, Any]]:
-        """Project scalar JSON properties from one bounded API record array."""
+        """Project JSON values from one bounded API record array."""
         if len(records)>int(mapping.get("maxItems",10_000)):
             raise WorkflowError("API response array exceeds the configured mapped-row limit",activity["id"],"api-response-limit")
-        mapped=[]
+        mapped=[];output_bytes=0;max_output_bytes=int(mapping.get("maxOutputBytes",5_000_000))
         for record in records:
             self._check_cancel()
             if not isinstance(record,dict):
@@ -1781,11 +1787,13 @@ class WorkflowEngine:
                 try:value=_json_pointer_get(record,field_mapping["path"])
                 except (KeyError,IndexError,ValueError,TypeError) as exc:
                     raise WorkflowError("An API response field pointer did not resolve",activity["id"],"api-response-field-pointer") from exc
-                if value is not None and not isinstance(value,(str,bool,int,float)):
-                    raise WorkflowError("Mapped API response fields must contain scalar JSON values or null",activity["id"],"api-response-field-type")
-                if isinstance(value,float) and not math.isfinite(value):
-                    raise WorkflowError("Mapped API response number is not finite",activity["id"],"api-response-field-type")
                 row[field_mapping["name"]]=value
+            try:row_bytes=len(json.dumps(row,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode("utf-8"))
+            except (TypeError,ValueError,OverflowError) as exc:
+                raise WorkflowError("Mapped API response record is not valid JSON",activity["id"],"api-response-field-type") from exc
+            output_bytes+=row_bytes
+            if output_bytes>max_output_bytes:
+                raise WorkflowError("API response mapping exceeded the configured mapped-output byte limit",activity["id"],"api-response-output-limit")
             mapped.append(row)
         return mapped
 
