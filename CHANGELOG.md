@@ -1,6 +1,8 @@
 # Changelog
 ## Unreleased
 
+- Added a navigable workflow outline for sequence workflows. It lists nested activities with their If/Else, loop, Try/Catch/Finally, and Switch branch context; selecting an entry selects the activity, scrolls it into view, and opens its properties. Added nested branch and Switch outline tests plus a public screenshot.
+- Verification: 64 frontend tests pass; TypeScript and the production Vite build pass. Playwright preview confirmed outline expansion, live nested-branch updates, selection, and property inspection without console errors.
 - State-machine graph edges are now directly editable: select an edge to change its destination or guard, reorder guarded routes, remove it, or add a new safe `False`-guarded route. Blank guards remain the final fallback, and duplicate fallbacks are rejected. Added regression tests and a public README screenshot of the actual editor.
 - Verification: all 62 frontend tests pass; TypeScript and the production Vite build pass; `git diff --check` passes. Screenshot captured from the live browser preview.
 

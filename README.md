@@ -12,6 +12,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *State-machine overview nodes are generated from the executable state and transition definitions. Select a node to edit that state's activities and guards.*
 
+![Open RPA Studio sequence editor with its navigable nested workflow outline open beside an If branch and a selected branch activity](docs/assets/workflow-outline.png)
+
+*The workflow outline includes branch context for nested activities. Select an entry to focus that activity in the sequence canvas and open its properties.*
+
 ![Open RPA Studio state-machine graph with a selected transition and inline guard and destination editor](docs/assets/state-machine-editor.png)
 
 *Select a transition edge to edit its destination or guard, reorder guarded routes, remove it, or add a new safe False-guarded route. Blank guards represent the fallback and remain last.*
