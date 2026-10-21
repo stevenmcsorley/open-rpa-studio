@@ -256,6 +256,21 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"browser-timeout","message":"Browser timeoutSeconds must be between 1 and 120","activityId":str(aid or "")})
                 if "exact" in item and not isinstance(item["exact"],bool):
                     problems.append({"code":"browser-exact","message":"Browser exact must be a boolean","activityId":str(aid or "")})
+                fallbacks=item.get("selectorFallbacks",[])
+                if not isinstance(fallbacks,list) or len(fallbacks)>10:
+                    problems.append({"code":"browser-selector-fallbacks","message":"selectorFallbacks must be a list of at most 10 explicit selectors","activityId":str(aid or "")})
+                else:
+                    selector_seen={(selector_kind if isinstance(selector_kind,str) else "",selector.strip() if isinstance(selector,str) else "",bool(item.get("exact",True)))}
+                    for fallback in fallbacks:
+                        if not isinstance(fallback,dict) or set(fallback)-{"selectorKind","selector","exact"}:
+                            problems.append({"code":"browser-selector-fallback","message":"Each fallback must contain only selectorKind, selector, and optional exact","activityId":str(aid or "")});continue
+                        fk=fallback.get("selectorKind");fs=fallback.get("selector");fe=fallback.get("exact",True)
+                        if not isinstance(fk,str) or fk not in {"role","label","text","placeholder","test_id","css"} or not isinstance(fs,str) or not fs.strip() or len(fs)>2048 or not isinstance(fe,bool):
+                            problems.append({"code":"browser-selector-fallback","message":"Fallback selector kind, selector, or exact flag is invalid","activityId":str(aid or "")});continue
+                        candidate=(fk,fs.strip(),fe)
+                        if candidate in selector_seen:
+                            problems.append({"code":"browser-selector-fallback-duplicate","message":"Fallback selectors must be distinct from the primary selector and each other","activityId":str(aid or "")})
+                        selector_seen.add(candidate)
                 if typ in {"browser_fill","browser_select"} and not isinstance(item.get("value",""),str):
                     problems.append({"code":"browser-value","message":"Browser Fill/Select value must be a string or expression","activityId":str(aid or "")})
                 elif typ=="browser_select" and not item.get("value","").strip():

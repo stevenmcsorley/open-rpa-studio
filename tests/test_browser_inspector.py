@@ -65,7 +65,7 @@ def test_real_chromium_snapshot_selectors_drive_engine_browser_activities():
         inspector=BrowserInspector();inspector.page=page
         snapshot=inspector.controls()
         by_name={control["name"]:control for control in snapshot["controls"]}
-        engine=object.__new__(WorkflowEngine);engine._browser_page=page
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine._secret_values=set()
         click=by_name["Save changes"]
         engine._browser_activity({"id":"click","type":"browser_click","selectorKind":click["selectorKind"],"selector":click["selector"]},{})
         email=by_name["Work email"]
@@ -136,6 +136,56 @@ def test_browser_workflow_validation_rejects_bad_or_ambiguous_configuration():
     assert {"browser-selector-kind","browser-timeout"}<=codes
     workflow["activities"]=[{"id":"select","type":"browser_select","selectorKind":"role","selector":"combobox:Country","value":""}]
     assert any(problem["code"]=="browser-option-value" for problem in validate_workflow(workflow))
+
+
+def test_browser_selector_fallback_validation_is_bounded_and_explicit():
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Fallback","variables":[],"arguments":[],"activities":[
+        {"id":"click","type":"browser_click","selectorKind":"role","selector":"button:Old label","selectorFallbacks":[{"selectorKind":"role","selector":"button:New label"}] }]}
+    assert validate_workflow(workflow)==[]
+    activity=workflow["activities"][0]
+    activity["selectorFallbacks"]=[{"selectorKind":"role","selector":"button:Old label"}]
+    assert "browser-selector-fallback-duplicate" in {problem["code"] for problem in validate_workflow(workflow)}
+    activity["selectorFallbacks"]=[{"selectorKind":"role","selector":"button:New label","unexpected":True}]
+    assert "browser-selector-fallback" in {problem["code"] for problem in validate_workflow(workflow)}
+    activity["selectorFallbacks"]=[{"selectorKind":"role","selector":f"button:{index}"} for index in range(11)]
+    assert "browser-selector-fallbacks" in {problem["code"] for problem in validate_workflow(workflow)}
+    activity["selectorKind"]={"malformed":True}
+    activity["selectorFallbacks"]=[]
+    assert "browser-selector-kind" in {problem["code"] for problem in validate_workflow(workflow)}
+
+
+def test_real_chromium_explicit_selector_fallback_succeeds_and_audits_without_selector_text():
+    playwright=pytest.importorskip("playwright.sync_api")
+    from openrpa.engine import WorkflowEngine, RunOptions
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        page=browser.new_page();page.set_content('<button onclick="document.body.dataset.clicked=\'yes\'">Updated Save</button>')
+        audits=[]
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine._secret_values=set();engine.options=RunOptions(audit=lambda action,details:audits.append((action,details)))
+        logs=[]
+        engine._browser_activity({"id":"save","type":"browser_click","selectorKind":"role","selector":"button:Old Save","selectorFallbacks":[{"selectorKind":"role","selector":"button:Updated Save"}]},{},logs)
+        assert page.locator("body").get_attribute("data-clicked")=="yes"
+        assert audits==[("browser.selector_fallback",{"activityId":"save","fallbackIndex":0})]
+        assert logs==[{"event":"browser-selector-fallback","activityId":"save","fallbackIndex":0}]
+        assert "Updated Save" not in str(audits+logs)
+        browser.close()
+
+
+def test_real_chromium_selector_fallback_fails_closed_on_ambiguous_alternative_and_preserves_hidden_assertions():
+    playwright=pytest.importorskip("playwright.sync_api")
+    from openrpa.engine import WorkflowEngine, RunOptions, WorkflowError
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        page=browser.new_page();page.set_content('<button>Save</button><button>Save</button>')
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine._secret_values=set();engine.options=RunOptions()
+        with pytest.raises(WorkflowError) as failure:
+            engine._browser_activity({"id":"save","type":"browser_click","selectorKind":"role","selector":"button:Old Save","selectorFallbacks":[{"selectorKind":"role","selector":"button:Save"}]},{})
+        assert failure.value.activity_id=="save" and failure.value.code=="selector-fallback-ambiguous"
+        engine._browser_activity({"id":"hidden","type":"browser_assert","selectorKind":"role","selector":"button:Not Present","selectorFallbacks":[{"selectorKind":"role","selector":"button:Save"}],"assertion":"hidden"},{})
+        engine._browser_activity({"id":"wait-hidden","type":"browser_wait","selectorKind":"role","selector":"button:Not Present","selectorFallbacks":[{"selectorKind":"role","selector":"button:Save"}],"state":"hidden"},{})
+        browser.close()
 
 
 def test_browser_wait_and_assert_activities_use_real_page_state_and_clear_errors():

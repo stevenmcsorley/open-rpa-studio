@@ -20,6 +20,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *Find configured content across project workflows, nested branches and graph models with Ctrl+Shift+F, then jump to the matching activity or state.*
 
+![Open RPA Studio configuring an explicit browser selector fallback chain](docs/assets/selector-fallbacks.png)
+
+*Browser workflows can use up to ten author-defined alternatives. The engine uses a fallback only when exactly one alternative resolves uniquely and records the choice without logging selector text.*
+
 ![Open RPA Studio sequence editor with its navigable nested workflow outline open beside an If branch and a selected branch activity](docs/assets/workflow-outline.png)
 
 *The workflow outline includes branch context for nested activities and stays pinned while the canvas scrolls. Select an entry to focus that activity and open its properties.*
@@ -226,7 +230,7 @@ Build and smoke-install the Windows release using `npm run build:windows-install
 
 ## Known gaps
 
-This project has not yet reached the stated beyond-UiPath parity goal. The editor supports sequences, flowcharts, and state machines, but major unfinished areas include editable selector healing, broader cross-toolkit accessibility acceptance, production-grade plug-in/package signing, upgrade/uninstall and clean-machine installer testing, workflow collaboration, unattended scheduling/orchestration, and adversarial security review. The included installer is a development artifact, unsigned, and not production-certified. The `examples/` workflows are fixtures and should be reviewed before execution.
+This project has not yet reached the stated beyond-UiPath parity goal. The editor supports sequences, flowcharts, and state machines, but major unfinished areas include automatic fuzzy selector healing (explicit fallback chains are supported), broader cross-toolkit accessibility acceptance, production-grade plug-in/package signing, upgrade/uninstall and clean-machine installer testing, workflow collaboration, unattended scheduling/orchestration, and adversarial security review. The included installer is a development artifact, unsigned, and not production-certified. The `examples/` workflows are fixtures and should be reviewed before execution.
 
 The current Windows installer bundles the engine bridge and its Python dependencies, but not a Playwright browser binary. Browser adapter readiness is detected at runtime; install a matching browser binary separately if browser automation is required. Windows Desktop automation via PyAutoGUI may require interactive session access and explicit user permissions.
 

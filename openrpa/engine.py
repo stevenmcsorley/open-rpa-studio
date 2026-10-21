@@ -879,7 +879,7 @@ class WorkflowEngine:
                 code="http-timeout" if isinstance(exc,TimeoutError) else "http-error"
                 raise WorkflowError(f"HTTP request failed: {exc}", a["id"], code) from exc
         elif kind.startswith("browser_"):
-            self._browser_activity(a, v)
+            self._browser_activity(a, v, logs)
         elif kind.startswith("desktop_"):
             self._desktop_activity(a, v)
         else:
@@ -902,7 +902,7 @@ class WorkflowEngine:
             target=self._path(a["path"],v)
             self.options.audit("file.delete",{"activityId":a["id"],"path":self._audit_path(target)})
 
-    def _browser_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
+    def _browser_activity(self, a: dict[str, Any], v: dict[str, Any], logs: list[dict[str, Any]] | None = None) -> None:
         kind = a["type"]
         if kind == "browser_launch":
             if self._browser_page is not None:
@@ -932,10 +932,12 @@ class WorkflowEngine:
             raise WorkflowError("Launch Browser must run before browser interaction", a["id"], "browser-state")
         timeout = min(max(float(a.get("timeoutSeconds", 15)),1),120) * 1000
         if kind == "browser_wait":
-            self._locator(a).wait_for(state=a.get("state","visible"),timeout=timeout)
+            state=a.get("state","visible")
+            self._locator(a,logs,allow_fallback=state not in {"hidden","detached"}).wait_for(state=state,timeout=timeout)
             return
         if kind == "browser_assert":
-            locator=self._locator(a);assertion=a.get("assertion","visible")
+            assertion=a.get("assertion","visible")
+            locator=self._locator(a,logs,allow_fallback=assertion!="hidden")
             if assertion in {"visible","hidden"}:
                 actual=locator.is_visible(timeout=timeout) if assertion=="visible" else locator.is_hidden(timeout=timeout)
                 passed=actual
@@ -959,12 +961,12 @@ class WorkflowEngine:
             try: assert_public_url(url)
             except EgressDenied as exc: raise WorkflowError(str(exc),a["id"],"http-egress-denied") from exc
             self._browser_page.goto(url, wait_until=a.get("waitUntil", "domcontentloaded"), timeout=timeout)
-        elif kind == "browser_click": self._locator(a).click(timeout=timeout)
-        elif kind == "browser_fill": self._locator(a).fill(str(interpolate(a.get("value", ""), v)), timeout=timeout)
-        elif kind == "browser_select": self._locator(a).select_option(value=str(interpolate(a.get("value", ""),v)),timeout=timeout)
-        elif kind == "browser_check": self._locator(a).check(timeout=timeout)
-        elif kind == "browser_uncheck": self._locator(a).uncheck(timeout=timeout)
-        elif kind == "browser_text": v[a.get("result", "text")] = self._locator(a).inner_text(timeout=timeout)
+        elif kind == "browser_click": self._locator(a,logs).click(timeout=timeout)
+        elif kind == "browser_fill": self._locator(a,logs).fill(str(interpolate(a.get("value", ""), v)), timeout=timeout)
+        elif kind == "browser_select": self._locator(a,logs).select_option(value=str(interpolate(a.get("value", ""),v)),timeout=timeout)
+        elif kind == "browser_check": self._locator(a,logs).check(timeout=timeout)
+        elif kind == "browser_uncheck": self._locator(a,logs).uncheck(timeout=timeout)
+        elif kind == "browser_text": v[a.get("result", "text")] = self._locator(a,logs).inner_text(timeout=timeout)
         elif kind == "browser_screenshot":
             path = self._path(a["path"], v, True)
             self._browser_page.screenshot(path=str(path), full_page=bool(a.get("fullPage", False)), timeout=timeout)
@@ -979,19 +981,45 @@ class WorkflowEngine:
             except Exception: pass
         self._browser_runtime = self._browser = self._browser_context = self._browser_page = None
 
-    def _locator(self, a: dict[str, Any]) -> Any:
+    def _locator(self, a: dict[str, Any], logs: list[dict[str, Any]] | None = None, allow_fallback: bool = True) -> Any:
+        def make_locator(kind: str, value: str, exact: bool = True) -> Any:
+            if kind == "role":
+                role, _, name = value.partition(":")
+                return self._browser_page.get_by_role(role, name=name or None, exact=exact)
+            if kind == "label": return self._browser_page.get_by_label(value, exact=exact)
+            if kind == "text": return self._browser_page.get_by_text(value, exact=exact)
+            if kind == "placeholder": return self._browser_page.get_by_placeholder(value, exact=exact)
+            if kind == "test_id": return self._browser_page.get_by_test_id(value)
+            if kind == "css": return self._browser_page.locator(value)
+            raise WorkflowError(f"Unknown selector kind: {kind}", a["id"], "selector-kind")
+
         kind, value = a.get("selectorKind", "role"), str(a.get("selector", ""))
         if not value: raise WorkflowError("Browser selector is required", a["id"], "selector-empty")
         exact = bool(a.get("exact", True))
-        if kind == "role":
-            role, _, name = value.partition(":")
-            return self._browser_page.get_by_role(role, name=name or None, exact=exact)
-        if kind == "label": return self._browser_page.get_by_label(value, exact=exact)
-        if kind == "text": return self._browser_page.get_by_text(value, exact=exact)
-        if kind == "placeholder": return self._browser_page.get_by_placeholder(value, exact=exact)
-        if kind == "test_id": return self._browser_page.get_by_test_id(value)
-        if kind == "css": return self._browser_page.locator(value)
-        raise WorkflowError(f"Unknown selector kind: {kind}", a["id"], "selector-kind")
+        primary=make_locator(kind,value,exact)
+        fallbacks=a.get("selectorFallbacks",[])
+        if not allow_fallback or not fallbacks:
+            return primary
+        primary_count=primary.count()
+        if primary_count==1:
+            return primary
+        matches=[]
+        ambiguous=[]
+        for index,fallback in enumerate(fallbacks):
+            locator=make_locator(str(fallback["selectorKind"]),str(fallback["selector"]),bool(fallback.get("exact",True)))
+            count=locator.count()
+            if count==1: matches.append((index,locator))
+            elif count>1: ambiguous.append(index)
+        if len(matches)!=1 or ambiguous:
+            reason="ambiguous" if ambiguous or len(matches)>1 or primary_count>1 else "not found"
+            code="selector-fallback-ambiguous" if reason=="ambiguous" else "selector-fallback-not-found"
+            raise WorkflowError(f"Browser selector {reason}: primary matched {primary_count}; {len(matches)} fallback(s) matched uniquely and {len(ambiguous)} fallback(s) were ambiguous. Make the explicit selector chain resolve to exactly one control.",a["id"],code)
+        fallback_index,locator=matches[0]
+        details={"activityId":a["id"],"fallbackIndex":fallback_index}
+        self.options.audit("browser.selector_fallback",details)
+        if logs is not None:
+            self._emit({"event":"browser-selector-fallback","activityId":a["id"],"fallbackIndex":fallback_index},logs)
+        return locator
 
     def _desktop_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
         if not self.options.allow_desktop:
