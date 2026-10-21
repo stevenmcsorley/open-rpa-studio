@@ -41,6 +41,11 @@ describe('run impact plan', () => {
     expect(plan.needsDesktop).toBe(true);
   });
 
+  it('shows PDF extraction as a file read in the pre-run impact plan', () => {
+    const plan = buildExecutionPlan({ ...base, activities: [{ id: 'pdf', type: 'pdf_read_text', path: 'invoices/current.pdf' }] });
+    expect(plan.actions).toEqual([expect.objectContaining({ id: 'pdf', label: 'Read PDF text', detail: 'invoices/current.pdf', risk: 'read' })]);
+  });
+
   it('covers flowchart nodes and state-machine activities', () => {
     const flowchart = buildExecutionPlan({ ...base, executionModel: 'flowchart', flowchart: {
       start: 's', nodes: [{ id: 's', kind: 'start' }, { id: 'a', kind: 'action', activity: { id: 'web', type: 'browser_navigate', url: 'https://example.org' } }, { id: 'e', kind: 'end' }],

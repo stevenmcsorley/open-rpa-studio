@@ -710,6 +710,29 @@ class WorkflowEngine:
                     rows.append(row)
                 v[a.get("result","rows")]=rows
             finally:workbook.close()
+        elif kind == "pdf_read_text":
+            path=self._path(a["path"],v)
+            if path.suffix.lower()!=".pdf":raise WorkflowError("PDF Read Text supports .pdf files only",a["id"],"pdf-format")
+            if path.stat().st_size>self._max_file_bytes:raise WorkflowError("PDF exceeds configured read limit",a["id"],"file-size-limit")
+            self._check_cancel()
+            try:
+                from pypdf import PdfReader
+                reader=PdfReader(path,strict=True)
+                if reader.is_encrypted:raise WorkflowError("Encrypted PDFs are not supported; provide an authorised unencrypted copy",a["id"],"pdf-encrypted")
+                page_count=len(reader.pages)
+                max_pages=int(a.get("maxPages",500))
+                if page_count>max_pages:raise WorkflowError(f"PDF has {page_count} pages, exceeding the configured {max_pages}-page limit",a["id"],"pdf-page-limit")
+                pages=[];total_bytes=0
+                for page in reader.pages:
+                    self._check_cancel()
+                    text=page.extract_text(extraction_mode="layout" if a.get("layoutMode",False) else "plain") or ""
+                    total_bytes+=len(text.encode("utf-8"))
+                    if total_bytes>self._max_file_bytes:raise WorkflowError("Extracted PDF text exceeds configured data limit",a["id"],"file-size-limit")
+                    pages.append(text)
+                v[a.get("result","text") ]="\n\f\n".join(pages)
+                v[a.get("pageCountResult","pageCount")]=page_count
+            except WorkflowError:raise
+            except Exception as exc:raise WorkflowError(f"Cannot extract text from PDF: {type(exc).__name__}: {exc}",a["id"],"pdf-read-error") from exc
         elif kind == "xlsx_write":
             if Path(str(interpolate(a["path"],v))).suffix.lower()!='.xlsx':raise WorkflowError("Spreadsheet Write supports .xlsx output only",a["id"],"spreadsheet-format")
             rows=interpolate(a.get("rows","rows"),v)
@@ -791,7 +814,7 @@ class WorkflowEngine:
         else:
             raise WorkflowError(f"Unsupported activity: {kind}", a.get("id"), "activity-unsupported")
 
-        if kind in {"file_read_text","csv_read","xlsx_read","file_list"}:
+        if kind in {"file_read_text","csv_read","xlsx_read","pdf_read_text","file_list"}:
             raw_path=a.get("path",a.get("directory",""))
             target=self._path(raw_path,v) if raw_path else self.root
             self.options.audit("file.read", {"activityId":a["id"],"path":str(target.relative_to(self.root))})

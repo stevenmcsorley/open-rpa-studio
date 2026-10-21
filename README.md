@@ -16,14 +16,14 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer is available from the [Open RPA Studio v0.1.25 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.25). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available from the [Open RPA Studio v0.1.26 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.26). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.25 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `1560e7deb150f7928101308e103797976ee06b8246335d7e0864e072bb764daa`. Verify the file before running it:
+The v0.1.26 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `2b3308bd4f8c06640109cea75f73c31973662d120b633c76fa089db969343cad`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.25-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.26-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -61,6 +61,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - See the [workflow format and state-machine example](docs/WORKFLOW-FORMAT.md) and the [architecture notes](docs/ARCHITECTURE.md).
 - Convert a linear flowchart to a sequence when it contains no branches or loops.
 - Use Excel workbook activities to read .xlsx sheets into records and write records to new workbooks. See [Excel workbook activities](docs/EXCEL-ACTIVITIES.md) for limits, formula handling, archive protections and unsupported features.
+- Extract selectable text from local PDFs with page separators, configurable page limits, page-count output and run cancellation checks. Scanned/image-only PDFs need an external OCR process; encrypted files are rejected. See [PDF activity limits](docs/PDF-ACTIVITIES.md).
 - Insert ordinary activities in the selected flowchart path while preserving downstream transitions.
 - Pan a large flowchart with Space+drag or middle-drag, center the selected node, and reconnect a transition by dragging its connector handle onto a destination node. The accessible destination selector remains available for keyboard editing.
 - Undo and redo workflow edits across sequence, flowchart, state-machine, activity properties, variables and arguments using the toolbar or Ctrl+Z/Ctrl+Y (Cmd+Z/Cmd+Y on macOS). Each workflow keeps a bounded 100-step edit history; loading another project clears the prior project's history.

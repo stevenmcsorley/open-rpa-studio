@@ -23,7 +23,7 @@ export function canStartWithPlan(plan: ExecutionPlan, networkGranted: boolean, d
 const LABELS: Record<string, string> = {
   file_read_text: 'Read text file', file_write_text: 'Write text file', file_copy: 'Copy file',
   file_move: 'Move file', file_delete: 'Delete file', file_list: 'List files',
-  csv_read: 'Read CSV', csv_write: 'Write CSV', xlsx_read: 'Read Excel workbook',
+  csv_read: 'Read CSV', csv_write: 'Write CSV', xlsx_read: 'Read Excel workbook', pdf_read_text: 'Read PDF text',
   xlsx_write: 'Write Excel workbook', json_parse: 'Parse JSON', json_write: 'Write JSON',
   http_request: 'Send HTTP request', browser_navigate: 'Open browser page', browser_goto: 'Open browser page',
   browser_click: 'Click browser control', browser_fill: 'Fill browser control', browser_select: 'Select browser option',
@@ -36,7 +36,7 @@ const LABELS: Record<string, string> = {
   credential_get: 'Read saved credential', invoke_workflow: 'Call reusable workflow',
 };
 
-const FILE_READ = new Set(['file_read_text', 'file_list', 'csv_read', 'xlsx_read']);
+const FILE_READ = new Set(['file_read_text', 'file_list', 'csv_read', 'xlsx_read', 'pdf_read_text']);
 const FILE_WRITE = new Set(['file_write_text', 'file_copy', 'csv_write', 'xlsx_write', 'json_write', 'desktop_screenshot', 'browser_screenshot']);
 const DESTRUCTIVE = new Set(['file_delete', 'file_move']);
 
