@@ -174,6 +174,164 @@ components:
     const configured=configureOpenApiOperation(operation,[{name:'apiItems'}]);
     expect(configured.patch.responseMapping).toEqual({...operation.responseMapping,result:'apiItems2',maxItems:10000,maxOutputBytes:5_000_000});
   });
+  it('merges compatible allOf item schemas for response mappings',()=>{
+    const operation=parseOpenApi(`openapi: 3.0.3
+info: {title: Composed orders, version: '1'}
+paths:
+  /orders:
+    get:
+      responses:
+        '200':
+          description: composed order list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - {$ref: '#/components/schemas/OrderIdentity'}
+                        - type: object
+                          properties:
+                            customer: {type: object, properties: {name: {type: string}}}
+                            amount: {type: number}
+components:
+  schemas:
+    OrderIdentity:
+      type: object
+      properties:
+        id: {type: integer}
+        amount: {type: integer}
+`).operations[0];
+    expect(operation.responseMapping).toEqual({responseCode:'200',itemsPointer:'/data',fields:[{name:'id',path:'/id'},{name:'amount',path:'/amount'},{name:'customerName',path:'/customer/name'}]});
+  });
+  it('merges compatible allOf request schemas into a complete safe example',()=>{
+    const operation=parseOpenApi(`openapi: 3.0.3
+info: {title: Create order, version: '1'}
+paths:
+  /orders:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {type: object, properties: {id: {type: integer}}}
+                - {type: object, properties: {label: {type: string}}}
+      responses: {'200': {description: OK}}
+`).operations[0];
+    expect(JSON.parse(operation.body??'null')).toEqual({id:0,label:''});
+  });
+  it('leaves conflicting allOf property types unmapped with an explanation',()=>{
+    const imported=parseOpenApi(`openapi: 3.0.3
+info: {title: Conflicting schemas, version: '1'}
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: inconsistent composition
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - {type: object, properties: {value: {type: string}}}
+                    - {type: object, properties: {value: {type: integer}}}
+`);
+    expect(imported.operations[0].responseMapping).toBeUndefined();
+    expect(imported.warnings.some(warning=>warning.includes('conflicting schema types'))).toBe(true);
+  });
+  it('fails closed when allOf overlaps a nested alternative schema',()=>{
+    const imported=parseOpenApi(`openapi: 3.0.3
+info: {title: Nested variants, version: '1'}
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: nested composition
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - {type: object, properties: {value: {type: string}}}
+                    - type: object
+                      properties:
+                        value:
+                          oneOf:
+                            - {type: string}
+                            - {type: integer}
+`);
+    expect(imported.operations[0].responseMapping).toBeUndefined();
+    expect(imported.warnings.some(warning=>warning.includes('nested reference or composition'))).toBe(true);
+  });
+  it('maps oneOf response variants only when their array and item shapes agree',()=>{
+    const equivalent=parseOpenApi(`openapi: 3.0.3
+info: {title: Variant API, version: '1'}
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: variant list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    oneOf:
+                      - {type: array, items: {type: object, properties: {id: {type: string}}}}
+                      - type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string}
+`);
+    expect(equivalent.operations[0].responseMapping).toEqual({responseCode:'200',itemsPointer:'/items',fields:[{name:'id',path:'/id'}]});
+    const divergent=parseOpenApi(`openapi: 3.0.3
+info: {title: Divergent API, version: '1'}
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: divergent variants
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {type: array, items: {type: object, properties: {id: {type: string}}}}
+                  - {type: array, items: {type: object, properties: {orderId: {type: string}}}}
+`);
+    expect(divergent.operations[0].responseMapping).toBeUndefined();
+    expect(divergent.warnings.some(warning=>warning.includes('oneOf/anyOf response variants have different arrays or item fields'))).toBe(true);
+  });
+  it('does not invent a request-body example from the first incompatible alternative',()=>{
+    const imported=parseOpenApi(`openapi: 3.0.3
+info: {title: Variant body, version: '1'}
+paths:
+  /items:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {type: object, properties: {name: {type: string}}}
+                - {type: object, properties: {id: {type: integer}}}
+      responses: {'200': {description: OK}}
+`);
+    const operation=imported.operations[0];
+    expect(operation.body).toBeUndefined();
+    expect(imported.warnings.some(warning=>warning.includes('request body variants have no single safe example'))).toBe(true);
+  });
   it('generates an editable reusable API workflow with typed inputs and outputs',()=>{
     const operation=parseOpenApi(`openapi: 3.1.0
 info: {title: Orders, version: '1'}

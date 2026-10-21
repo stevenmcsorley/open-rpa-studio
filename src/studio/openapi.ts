@@ -26,28 +26,75 @@ function resolveRef(root:Obj,value:unknown,stack:string[]=[]):unknown{
   for(const raw of ref.slice(2).split('/')){const key=raw.replace(/~1/g,'/').replace(/~0/g,'~');if(!obj(target)||!(key in target))throw new Error(`OpenAPI reference was not found: ${ref.slice(0,160)}`);target=target[key];}
   return resolveRef(root,target,[...stack,ref]);
 }
+function mergeSchema(left:Obj,right:Obj,depth:number):Obj{
+  if(depth>8)throw new Error('OpenAPI allOf schema nesting exceeds the supported limit.');
+  if(['$ref','allOf','oneOf','anyOf'].some(key=>key in left||key in right)){
+    if(sameJsonShape(left,right))return left;
+    throw new Error('OpenAPI allOf contains a nested reference or composition that cannot be merged unambiguously.');
+  }
+  const numericTypes=new Set([left.type,right.type]);
+  if(typeof left.type==='string'&&typeof right.type==='string'&&left.type!==right.type&&!(numericTypes.has('integer')&&numericTypes.has('number')))throw new Error(`OpenAPI allOf has conflicting schema types: ${left.type} and ${right.type}.`);
+  const merged:Obj={...left,...right};
+  if(numericTypes.has('integer')&&numericTypes.has('number'))merged.type='integer';
+  if(obj(left.properties)||obj(right.properties)){
+    const properties:Obj=Object.create(null);
+    for(const [key,value] of Object.entries(obj(left.properties)?left.properties:{}))properties[key]=value;
+    for(const [key,value] of Object.entries(obj(right.properties)?right.properties:{})){
+      if(key in properties){if(!obj(properties[key])||!obj(value))throw new Error(`OpenAPI allOf has an ambiguous property ${key}.`);properties[key]=mergeSchema(properties[key],value,depth+1)}
+      else properties[key]=value;
+    }
+    merged.properties=properties;
+  }
+  if(Array.isArray(left.required)||Array.isArray(right.required))merged.required=[...new Set([...(Array.isArray(left.required)?left.required:[]),...(Array.isArray(right.required)?right.required:[])])];
+  if(obj(left.items)&&obj(right.items))merged.items=mergeSchema(left.items,right.items,depth+1);
+  return merged;
+}
+function composedSchema(schema:unknown,root:Obj,depth=0):Obj|null{
+  if(depth>8)throw new Error('OpenAPI schema composition exceeds the supported nesting limit.');
+  if(!obj(schema))return null;
+  const resolved=resolveRef(root,schema);if(resolved!==schema)return composedSchema(resolved,root,depth+1);
+  if(!Array.isArray(schema.allOf))return schema;
+  if(schema.allOf.length===0||schema.allOf.length>20)throw new Error('OpenAPI allOf must contain between 1 and 20 schemas.');
+  const {allOf:_,...base}=schema;let merged:Obj=base;
+  for(const branch of schema.allOf){const part=composedSchema(branch,root,depth+1);if(!part)throw new Error('OpenAPI allOf contains an unsupported schema.');merged=mergeSchema(merged,part,depth+1)}
+  return merged;
+}
+function sameJsonShape(left:unknown,right:unknown):boolean{return JSON.stringify(left)===JSON.stringify(right)}
 function sample(schema:unknown,root:Obj,depth=0):unknown{
   if(depth>7||!obj(schema))return null;
-  const resolved=resolveRef(root,schema);if(resolved!==schema)return sample(resolved,root,depth+1);
-  if('example'in schema)return schema.example;if('default'in schema)return schema.default;
-  if(Array.isArray(schema.enum)&&schema.enum.length)return schema.enum[0];
-  if(Array.isArray(schema.oneOf)&&schema.oneOf.length)return sample(schema.oneOf[0],root,depth+1);
-  if(Array.isArray(schema.anyOf)&&schema.anyOf.length)return sample(schema.anyOf[0],root,depth+1);
-  if(schema.type==='object'||obj(schema.properties)){
-    const output:Obj=Object.create(null);for(const [key,value] of Object.entries(obj(schema.properties)?schema.properties:{}).slice(0,50)){const result=sample(value,root,depth+1);if(result!==null)output[key]=result;}return output;
+  const current=composedSchema(schema,root,depth);if(!obj(current))return null;
+  if('example'in current)return current.example;if('default'in current)return current.default;
+  if(Array.isArray(current.enum)&&current.enum.length)return current.enum[0];
+  if(Array.isArray(current.oneOf)||Array.isArray(current.anyOf)){
+    const alternatives:unknown[]=Array.isArray(current.oneOf)?current.oneOf:current.anyOf;
+    if(!alternatives.length||alternatives.length>20)throw new Error('OpenAPI oneOf/anyOf request body has no safely comparable alternatives.');
+    const samples=alternatives.map(branch=>sample(branch,root,depth+1));
+    if(!samples.every(item=>item!==null&&sameJsonShape(item,samples[0])))throw new Error('OpenAPI oneOf/anyOf request body variants have no single safe example.');
+    return samples[0];
   }
-  if(schema.type==='array')return [];
-  if(schema.type==='integer'||schema.type==='number')return 0;
-  if(schema.type==='boolean')return false;
-  if(schema.type==='string')return '';
+  if(current.type==='object'||obj(current.properties)){
+    const output:Obj=Object.create(null);for(const [key,value] of Object.entries(obj(current.properties)?current.properties:{}).slice(0,50)){const result=sample(value,root,depth+1);if(result!==null)output[key]=result;}return output;
+  }
+  if(current.type==='array')return [];
+  if(current.type==='integer'||current.type==='number')return 0;
+  if(current.type==='boolean')return false;
+  if(current.type==='string')return '';
   return null;
 }
 function serverFor(root:Obj,pathItem:Obj,operation:Obj):string{return [operation.servers?.[0]?.url,pathItem.servers?.[0]?.url,root.servers?.[0]?.url].find(value=>typeof value==='string')??''}
 function pointer(parts:string[]):string{return parts.map(part=>`/${part.replace(/~/g,'~0').replace(/\//g,'~1')}`).join('')}
 function schemaFields(schema:unknown,root:Obj,prefix:string,depth=0,used=new Set<string>()):ApiResponseField[]{
   if(depth>4||!obj(schema))return [];
-  let current:unknown;try{current=resolveRef(root,schema)}catch{return []}
+  let current:unknown;try{current=composedSchema(schema,root)}catch{return []}
   if(!obj(current))return [];
+  if(Array.isArray(current.oneOf)||Array.isArray(current.anyOf)){
+    const alternatives:unknown[]=Array.isArray(current.oneOf)?current.oneOf:current.anyOf;
+    if(!alternatives.length||alternatives.length>20)throw new Error('OpenAPI oneOf/anyOf has no safely comparable alternatives.');
+    const mapped:ApiResponseField[][]=alternatives.map((branch:unknown)=>schemaFields(branch,root,prefix,depth+1,new Set()));
+    const signature=(fields:ApiResponseField[])=>fields.map(field=>[field.name,field.path]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+    if(!mapped.length||mapped.some(fields=>!sameJsonShape(signature(fields),signature(mapped[0]))))throw new Error('OpenAPI oneOf/anyOf response item variants have different fields; automatic mapping was left unset.');
+    return mapped[0].map(field=>{let name=field.name;const base=name;let suffix=2;while(used.has(name.toLowerCase()))name=`${base}${suffix++}`;used.add(name.toLowerCase());return {...field,name}});
+  }
   const primitive=['string','integer','number','boolean'].includes(current.type)||Array.isArray(current.enum)&&current.enum.length>0;
   if(primitive&&prefix){let name=variableName(prefix.split('/').filter(Boolean).map(part=>part.replace(/~1/g,'/').replace(/~0/g,'~')).join('_'));const base=name;let suffix=2;while(used.has(name.toLowerCase()))name=`${base}${suffix++}`;used.add(name.toLowerCase());return [{name,path:prefix}]}
   if(current.type==='object'||obj(current.properties)){
@@ -61,10 +108,18 @@ function schemaFields(schema:unknown,root:Obj,prefix:string,depth=0,used=new Set
 }
 function arraySchemas(schema:unknown,root:Obj,prefix:string,depth=0):{itemsPointer:string;itemSchema:unknown}[]{
   if(depth>8||!obj(schema))return [];
-  let current:unknown;try{current=resolveRef(root,schema)}catch{return []}
+  let current:unknown;try{current=composedSchema(schema,root)}catch(error){throw error}
   if(!obj(current))return [];
+  if(Array.isArray(current.oneOf)||Array.isArray(current.anyOf)){
+    const alternatives:unknown[]=Array.isArray(current.oneOf)?current.oneOf:current.anyOf;
+    if(!alternatives.length||alternatives.length>20)throw new Error('OpenAPI oneOf/anyOf has no safely comparable response alternatives.');
+    const arrays:{itemsPointer:string;itemSchema:unknown}[][]=alternatives.map((branch:unknown)=>arraySchemas(branch,root,prefix,depth+1));
+    const signature=(items:{itemsPointer:string;itemSchema:unknown}[])=>items.map(item=>({itemsPointer:item.itemsPointer,fields:schemaFields(item.itemSchema,root,'').map(field=>[field.name,field.path]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])))}));
+    if(!arrays.length||arrays.some(items=>!sameJsonShape(signature(items),signature(arrays[0]))))throw new Error('OpenAPI oneOf/anyOf response variants have different arrays or item fields; automatic mapping was left unset.');
+    return arrays[0];
+  }
   if(current.type==='array'){
-    let item:unknown;try{item=resolveRef(root,current.items)}catch{return []}
+    let item:unknown;try{item=composedSchema(current.items,root,depth+1)}catch(error){throw error}
     if(obj(item)&&(item.type==='object'||obj(item.properties)))return [{itemsPointer:prefix,itemSchema:item}];
     return [];
   }
