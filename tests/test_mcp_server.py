@@ -1,0 +1,170 @@
+import json
+import os
+import copy
+import subprocess
+import sys
+import threading
+import time
+from queue import Queue
+from pathlib import Path
+
+from openrpa.mcp_server import ProjectMCPServer
+
+
+def make_project(root: Path, activities=None):
+    (root / "workflows").mkdir(parents=True)
+    (root / "project.json").write_text(json.dumps({
+        "format": "openrpa.project", "formatVersion": 1, "name": "MCP fixture",
+        "main": "Main", "workflows": {"Main": "workflows/main.workflow.json"},
+    }), encoding="utf-8")
+    (root / "workflows/main.workflow.json").write_text(json.dumps({
+        "format": "openrpa.workflow", "formatVersion": 1, "name": "Main",
+        "variables": [], "arguments": [], "activities": activities or [
+            {"id": "hello", "type": "log", "level": "info", "message": "hello"}
+        ],
+    }), encoding="utf-8")
+
+
+def call(server, name, arguments=None):
+    response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": name, "arguments": arguments or {}}})
+    return response["result"]
+
+
+def test_tools_are_project_scoped_and_execution_is_opt_in(tmp_path):
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path))
+    info = call(server, "openrpa_project_info")["structuredContent"]
+    assert info["projectName"] == "MCP fixture"
+    assert not info["projectRootExposed"]
+    assert "openrpa_run_workflow" not in {item["name"] for item in server._tools()}
+    assert "openrpa_update_workflow" not in {item["name"] for item in server._tools()}
+    assert call(server, "openrpa_validate_project")["structuredContent"]["valid"]
+    assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["workflow"]["name"] == "Main"
+    denied = call(server, "openrpa_update_workflow", {"name": "Main"})
+    assert denied["isError"] is True
+    assert "--allow-edit" in denied["content"][0]["text"]
+
+
+def test_opt_in_edit_requires_current_digest_and_validation(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path), allow_edit=True)
+    initial = call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]
+    proposed = copy.deepcopy(initial["workflow"])
+    proposed["activities"][0]["message"] = "edited by a reviewed agent"
+    update = call(server, "openrpa_update_workflow", {"name": "Main", "expectedSha256": initial["sha256"], "workflow": proposed})
+    assert update["structuredContent"]["updated"] is True
+    saved = call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]
+    assert saved["workflow"]["activities"][0]["message"] == "edited by a reviewed agent"
+    assert saved["sha256"] == update["structuredContent"]["sha256"]
+    stale = call(server, "openrpa_update_workflow", {"name": "Main", "expectedSha256": initial["sha256"], "workflow": initial["workflow"]})
+    assert stale["isError"] is True
+    invalid = copy.deepcopy(saved["workflow"])
+    invalid["activities"][0].pop("type")
+    rejected = call(server, "openrpa_update_workflow", {"name": "Main", "expectedSha256": saved["sha256"], "workflow": invalid})
+    assert rejected["structuredContent"]["updated"] is False
+    assert "type" in json.dumps(rejected["structuredContent"]["problems"])
+    assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["sha256"] == saved["sha256"]
+
+
+def test_nested_destructive_permissions_are_detected(tmp_path):
+    make_project(tmp_path, [{"id": "invoke", "type": "invoke_workflow", "workflow": "Cleanup"}])
+    (tmp_path / "workflows/cleanup.workflow.json").write_text(json.dumps({
+        "format": "openrpa.workflow", "formatVersion": 1, "name": "Cleanup",
+        "variables": [], "arguments": [],
+        "activities": [{"id": "delete", "type": "file_delete", "path": "output.txt"}],
+    }), encoding="utf-8")
+    project = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    project["workflows"]["Cleanup"] = "workflows/cleanup.workflow.json"
+    (tmp_path / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    server = ProjectMCPServer(str(tmp_path), allow_run=True)
+    plan = call(server, "openrpa_plan_workflow", {"name": "Main"})["structuredContent"]
+    assert plan["requires"]["destructive"] is True
+    result = call(server, "openrpa_run_workflow", {"name": "Main"})
+    assert result["isError"] is True
+    assert "--allow-destructive" in result["content"][0]["text"]
+
+
+def test_vault_credential_use_has_separate_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path, [{"id": "read-secret", "type": "credential_get", "service": "test", "username": "test", "result": "secret"}])
+    server = ProjectMCPServer(str(tmp_path), allow_run=True)
+    plan = call(server, "openrpa_plan_workflow", {"name": "Main"})["structuredContent"]
+    assert plan["requires"]["credentials"] is True
+    result = call(server, "openrpa_run_workflow", {"name": "Main"})
+    assert result["isError"] is True
+    assert "--allow-credentials" in result["content"][0]["text"]
+
+
+def test_stdio_protocol_end_to_end(tmp_path):
+    make_project(tmp_path)
+    repository = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, PYTHONPATH=str(repository))
+    request_lines = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "openrpa_list_workflows", "arguments": {}}},
+    ]
+    payload = "".join(json.dumps(line) + "\n" for line in request_lines)
+    process = subprocess.run([sys.executable, "-m", "openrpa", "mcp", str(tmp_path)], cwd=repository,
+                             env=env, input=payload, text=True, capture_output=True, timeout=15)
+    assert process.returncode == 0, process.stderr
+    assert process.stderr == ""
+    responses = [json.loads(line) for line in process.stdout.splitlines()]
+    assert [response["id"] for response in responses] == [1, 2, 3]
+    assert responses[0]["result"]["serverInfo"]["name"] == "open-rpa-studio"
+    assert responses[2]["result"]["structuredContent"]["workflows"][0]["name"] == "Main"
+
+
+def test_run_opt_in_executes_a_real_workflow_and_records_durable_history(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path), allow_run=True)
+    result = call(server, "openrpa_run_workflow", {"name": "Main"})
+    assert result["isError"] is False
+    assert result["structuredContent"]["status"] == "succeeded"
+    assert result["structuredContent"]["runId"]
+    runs = call(server, "openrpa_list_run_history")["structuredContent"]["runs"]
+    assert runs[0]["status"] == "succeeded"
+    assert "projectPath" not in runs[0]
+
+
+def test_stdio_cancellation_notification_stops_active_run(tmp_path):
+    make_project(tmp_path, [{"id": "loop", "type": "while", "condition": "True", "body": [
+        {"id": "wait", "type": "wait", "seconds": 30}
+    ]}])
+    repository = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, PYTHONPATH=str(repository), OPENRPA_DATA_DIR=str(tmp_path / "data"))
+    process = subprocess.Popen([sys.executable, "-m", "openrpa", "mcp", str(tmp_path), "--allow-run"],
+                               cwd=repository, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, bufsize=1)
+    responses = Queue()
+    def read_stdout():
+        for line in process.stdout:
+            responses.put(json.loads(line))
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+    try:
+        process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}}) + "\n")
+        process.stdin.flush()
+        assert responses.get(timeout=5)["id"] == 1
+        process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "openrpa_run_workflow", "arguments": {"name": "Main"}}}) + "\n")
+        process.stdin.flush()
+        time.sleep(0.15)
+        process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 7, "reason": "acceptance test"}}) + "\n")
+        process.stdin.flush()
+        response = responses.get(timeout=5)
+        assert response["id"] == 7
+        run_result = response["result"]["structuredContent"]
+        assert response["result"]["isError"] is False
+        assert run_result["status"] == "cancelled"
+        assert run_result["runId"]
+    finally:
+        process.stdin.close()
+        process.wait(timeout=5)
+        stderr = process.stderr.read()
+        process.stdout.close()
+        process.stderr.close()
+        assert process.returncode == 0, stderr
+        assert stderr == ""

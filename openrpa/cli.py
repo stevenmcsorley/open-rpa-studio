@@ -16,6 +16,14 @@ def main() -> int:
             cmd.add_argument("--workflow")
             cmd.add_argument("--allow-network", action="store_true")
             cmd.add_argument("--allow-desktop", action="store_true")
+    mcp = sub.add_parser("mcp", help="Expose one local project to an AI client over stdio MCP")
+    mcp.add_argument("project", help="Project directory or project.json; fixed for this server process")
+    mcp.add_argument("--allow-edit", action="store_true", help="Expose validated workflow replacement with an expected SHA-256")
+    mcp.add_argument("--allow-run", action="store_true", help="Expose workflow execution to the MCP client")
+    mcp.add_argument("--allow-network", action="store_true", help="Permit HTTP activities if execution is enabled")
+    mcp.add_argument("--allow-desktop", action="store_true", help="Permit desktop activities if execution is enabled")
+    mcp.add_argument("--allow-credentials", action="store_true", help="Permit reading OS-vault credentials if execution is enabled")
+    mcp.add_argument("--allow-destructive", action="store_true", help="Permit file delete/move activities if execution is enabled")
     pack = sub.add_parser("pack", help="Create a deterministic .orpa project package")
     pack.add_argument("project")
     pack.add_argument("output")
@@ -27,6 +35,14 @@ def main() -> int:
     credential.add_argument("username")
     args = parser.parse_args()
     try:
+        if args.command == "mcp":
+            from .mcp_server import ProjectMCPServer
+            server = ProjectMCPServer(args.project, allow_run=args.allow_run,
+                                      allow_edit=args.allow_edit,
+                                      allow_network=args.allow_network, allow_desktop=args.allow_desktop,
+                                      allow_credentials=args.allow_credentials,
+                                      allow_destructive=args.allow_destructive)
+            return server.serve()
         if args.command == "credential":
             from getpass import getpass
             from .credentials import get_safe_keyring
@@ -64,6 +80,10 @@ def main() -> int:
         print(json.dumps(result.__dict__, indent=2, ensure_ascii=False, default=str))
         return 0 if result.status == "succeeded" else 1
     except WorkflowError as exc:
+        if args.command == "mcp":
+            import sys
+            print(f"Open RPA MCP startup failed: {exc}", file=sys.stderr)
+            return 2
         print(json.dumps({"valid": False, "error": {"code": exc.code, "message": str(exc), "activityId": exc.activity_id}}, indent=2))
         return 2
 

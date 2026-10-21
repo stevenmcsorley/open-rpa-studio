@@ -24,6 +24,10 @@ if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed to create the bundled workf
 $bridgePath = Join-Path $resourceDir 'openrpa-bridge.exe'
 if (-not (Test-Path $bridgePath)) { throw 'The frozen workflow engine executable is missing.' }
 
+Write-Host 'Checking the frozen engine also exposes the CLI/MCP command...'
+& $bridgePath --help | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'The frozen engine CLI failed its startup check.' }
+
 Write-Host 'Building the Windows NSIS installer...'
 $tauri = Join-Path $appRoot 'node_modules\.bin\tauri.cmd'
 if (-not (Test-Path $tauri)) { throw 'Run npm ci before building the Windows installer.' }

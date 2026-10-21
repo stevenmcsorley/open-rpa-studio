@@ -1,4 +1,13 @@
 # Changelog
+## 0.1.28 — Local MCP server for AI clients
+
+- Added a provider-neutral Model Context Protocol stdio server for one explicitly selected local project. Tools list workflows, read and validate workflows, inspect permission plans, update a workflow with an expected SHA-256 and opt-in validation, and (only when enabled at startup) run workflows through the existing engine.
+- The server has no network listener, accepts no client-selected filesystem paths, bounds protocol frames and results, keeps protocol output on stdout, and sends diagnostics to stderr. Execution, network, desktop, OS-vault credentials and file move/delete permissions are separate startup opt-ins; permission discovery follows statically invoked workflows.
+- Added cooperative MCP cancellation notifications and durable, per-project MCP run records with status, activity events, hashes and recovery warnings. MCP run history is separate from Studio's interactive run-history database.
+- Extended the frozen Windows engine executable to expose the same CLI/MCP server when launched with command-line arguments, so installed users can configure a local MCP client without installing Python or adding another large bundled runtime.
+- Added tests for the stdio handshake, notifications, tools, project confinement, nested destructive-permission detection, disabled execution and real engine execution.
+- Verification: 166 Python tests, 50 frontend tests, production Vite build, zero npm audit findings, offline Cargo check and `git diff --check` passed. The 61.52 MiB unsigned Windows installer installed into a clean isolated folder; the installed executable passed MCP handshake, default permission denials, validated workflow edit, separate credential permission guard and real opt-in workflow execution. CycloneDX SBOM lists 479 locked components. Installer SHA-256: `cfdf6a57612fccb8a6491b28a52c1e400ed904a91b028fa9801c1d6c14c927f6`.
+
 ## 0.1.27 — Bounded read-only SQLite integration
 
 - Added the native **Query SQLite Database** activity for approved local database files. Query parameters are bound through SQLite rather than inserted into SQL text.

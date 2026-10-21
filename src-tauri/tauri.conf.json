@@ -1,6 +1,6 @@
 {
   "$schema":"https://schema.tauri.app/config/2",
-  "productName":"Open RPA Studio","version":"0.1.27","identifier":"org.openrpa.studio",
+  "productName":"Open RPA Studio","version":"0.1.28","identifier":"org.openrpa.studio",
   "build":{"beforeDevCommand":"npm run dev","devUrl":"http://127.0.0.1:1421","beforeBuildCommand":"npm run build","frontendDist":"../dist"},
   "app":{"windows":[{"label":"main","title":"Open RPA Studio","width":1480,"height":940,"minWidth":1060,"minHeight":680}],"security":{"csp":"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"}},
   "bundle":{"active":true,"targets":["deb","appimage","nsis"],"icon":["icons/icon.ico","icons/128x128.png"],"resources":{"../openrpa/":"engine/openrpa/","resources/openrpa-bridge.exe":"engine/openrpa-bridge.exe"}}

@@ -4,7 +4,7 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-![Open RPA Studio browser preview with the new SQLite database activity selected in the workflow and properties panel](docs/assets/studio-overview.png)
+![Open RPA Studio browser preview with a CSV workflow selected in the visual sequence editor and properties panel](docs/assets/studio-overview.png)
 
 *The screenshot shows the isolated browser preview. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
@@ -16,14 +16,14 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer is available from the [Open RPA Studio v0.1.27 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.27). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available from the [Open RPA Studio v0.1.28 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.28). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.27 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `e909efa5221ea41515a101598062abfaacc82cb6673cac1c2f356e37d62552e9`. Verify the file before running it:
+The v0.1.28 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.27-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.28-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -75,6 +75,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Invoke reusable project workflows through a dedicated argument-mapping editor. Map typed inputs and per-call output variables; project validation catches missing required arguments, unknown names and incompatible directions before execution.
 - Choose whether AI drafts an activity sequence, connected flowchart, or state machine. Model-specific schemas and the same local workflow validator are applied before a draft can replace the current workflow.
 - Test configured AI endpoints from the model picker. Studio reports reachability, model count and request time, and distinguishes an empty model catalogue from a connection failure without sending a prompt.
+- Connect a compatible AI agent to one project over the local stdio Model Context Protocol server. It supports project/workflow discovery, workflow reading, validation, permission planning and opt-in execution. The Windows installer bundles this command in `engine/openrpa-bridge.exe`; see [MCP client integration](docs/MCP-INTEGRATION.md).
 
 ### Workflow execution
 
