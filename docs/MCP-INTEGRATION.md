@@ -8,17 +8,18 @@ The implementation supports MCP protocol versions `2025-11-25`, `2025-06-18`, `2
 
 | Tool | Purpose | Changes project? |
 |---|---|---:|
-| `openrpa_project_info` | Project name, workflow names and server permission flags | No |
+| `openrpa_project_info` | Project name, workflow names, current manifest SHA-256 and server permission flags | No |
 | `openrpa_list_workflows` | Names, execution models and activity counts | No |
 | `openrpa_activity_catalog` | Native activity descriptions, configuration defaults and per-activity permission requirements | No |
 | `openrpa_read_workflow` | Read one workflow definition | No |
+| `openrpa_create_workflow` | Add a reusable workflow after schema and cross-workflow binding validation, if explicitly enabled | Yes |
 | `openrpa_update_workflow` | Replace a declared workflow after schema and binding validation, if explicitly enabled | Yes |
 | `openrpa_validate_project` | Validate saved workflows and bindings | No |
 | `openrpa_plan_workflow` | Summarize activity types and statically required permissions | No |
 | `openrpa_list_run_history` | Read recent MCP run statuses from the local durable ledger | No |
 | `openrpa_run_workflow` | Execute one workflow using the local engine | Runs only; visibility and permission opt-ins required |
 
-The server binds to one project path supplied at process startup and never accepts an arbitrary path from a tool caller. Workflow replacement is off by default. When enabled, clients must send the SHA-256 returned by `openrpa_read_workflow`; the server checks it before and immediately before atomically replacing the declared workflow file. It validates the full workflow schema and cross-workflow bindings. Its static plan follows `invoke_workflow` references; runtime expressions may still change paths or destinations.
+The server binds to one project path supplied at process startup and never accepts an arbitrary path from a tool caller. Workflow creation and replacement are off by default. When enabled, creation requires the current `projectSha256` from `openrpa_project_info`; it writes a generated, project-relative workflow path and atomically updates the manifest only after validating the new workflow and project bindings. Replacement requires the SHA-256 returned by `openrpa_read_workflow`; the server checks it before and immediately before atomically replacing the declared workflow file. Both paths validate workflow schemas and cross-workflow bindings. Its static plan follows `invoke_workflow` references; runtime expressions may still change paths or destinations.
 
 ## Run from a Python development environment
 
@@ -35,7 +36,7 @@ By default, tools are read-only: the run tool is not advertised. Add `--allow-ru
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review" --allow-run --allow-network
 ```
 
-Add `--allow-edit` only when the AI client should be able to update saved workflows. Do not edit the same project simultaneously in Studio; an already-open editor can later save stale in-memory content over an MCP edit. Reopen the project in Studio after agent edits. Use one MCP server process per project.
+Add `--allow-edit` only when the AI client should be able to create or update saved workflows. Do not edit the same project simultaneously in Studio; an already-open editor can later save stale in-memory content over an MCP edit. Reopen the project in Studio after agent edits. Use one MCP server process per project.
 
 The MCP client launches the process. Do not launch it in a separate terminal when configuring a stdio client. Diagnostics go to stderr; stdout is reserved for JSON-RPC messages.
 
@@ -88,4 +89,4 @@ MCP `notifications/cancelled` requests are received while a workflow is running.
 uv run --locked pytest tests/test_mcp_server.py -q
 ```
 
-The acceptance tests exercise a real stdio subprocess handshake, cancellation notifications, tools listing/calls, project-scoped read access, disabled-by-default execution, nested destructive permission detection, durable run history and successful execution through the workflow engine. The Windows CI also runs the frozen console executable through initialization, default run denial and an opted-in engine run.
+The acceptance tests exercise a real stdio subprocess handshake, cancellation notifications, tools listing/calls, project-scoped read access, disabled-by-default execution, guarded reusable-workflow creation, stale-project rejection, binding validation, browser network permission detection, nested destructive permission detection, durable run history and successful execution through the workflow engine. The Windows CI also runs the frozen console executable through initialization, default run denial and an opted-in engine run.

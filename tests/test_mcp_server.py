@@ -1,6 +1,7 @@
 import json
 import os
 import copy
+import hashlib
 import subprocess
 import sys
 import threading
@@ -38,6 +39,7 @@ def test_tools_are_project_scoped_and_execution_is_opt_in(tmp_path):
     assert not info["projectRootExposed"]
     assert "openrpa_run_workflow" not in {item["name"] for item in server._tools()}
     assert "openrpa_update_workflow" not in {item["name"] for item in server._tools()}
+    assert "openrpa_create_workflow" not in {item["name"] for item in server._tools()}
     assert "openrpa_activity_catalog" in {item["name"] for item in server._tools()}
     assert call(server, "openrpa_validate_project")["structuredContent"]["valid"]
     assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["workflow"]["name"] == "Main"
@@ -93,6 +95,73 @@ def test_opt_in_edit_requires_current_digest_and_validation(tmp_path, monkeypatc
     assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["sha256"] == saved["sha256"]
 
 
+def test_create_workflow_is_project_hash_guarded_and_validates_bindings(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path), allow_edit=True)
+    initial = call(server, "openrpa_project_info")["structuredContent"]
+    workflow = {
+        "format": "openrpa.workflow", "formatVersion": 1, "name": "ignored supplied name",
+        "variables": [], "arguments": [], "activities": [
+            {"id": "helper-log", "type": "log", "level": "info", "message": "shared helper"}
+        ],
+    }
+    created = call(server, "openrpa_create_workflow", {
+        "name": "Shared Helper", "expectedProjectSha256": initial["projectSha256"], "workflow": workflow,
+    })["structuredContent"]
+    assert created["created"] is True
+    assert created["workflowPath"] == "workflows/shared-helper.workflow.json"
+    assert created["projectSha256"] == hashlib.sha256((tmp_path / "project.json").read_bytes()).hexdigest()
+    assert call(server, "openrpa_list_workflows")["structuredContent"]["workflows"][-1]["name"] == "Shared Helper"
+    saved = call(server, "openrpa_read_workflow", {"name": "Shared Helper"})["structuredContent"]
+    assert saved["workflow"]["name"] == "Shared Helper"
+    assert saved["sha256"] == created["workflowSha256"]
+    assert call(server, "openrpa_validate_project")["structuredContent"]["workflowCount"] == 2
+    reopened = ProjectMCPServer(str(tmp_path))
+    assert call(reopened, "openrpa_validate_project")["structuredContent"]["workflowCount"] == 2
+
+    stale = call(server, "openrpa_create_workflow", {
+        "name": "Second Helper", "expectedProjectSha256": initial["projectSha256"], "workflow": workflow,
+    })
+    assert stale["isError"] is True
+    assert "Project changed since it was read" in stale["content"][0]["text"]
+    assert call(server, "openrpa_list_workflows")["structuredContent"]["workflows"][-1]["name"] == "Shared Helper"
+
+
+def test_create_workflow_rejects_unresolved_invocations_without_writing(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path), allow_edit=True)
+    project_hash = call(server, "openrpa_project_info")["structuredContent"]["projectSha256"]
+    invalid = {
+        "format": "openrpa.workflow", "formatVersion": 1, "name": "Unresolved",
+        "variables": [], "arguments": [], "activities": [
+            {"id": "call-missing", "type": "invoke_workflow", "workflow": "Missing", "inputs": {}}
+        ],
+    }
+    result = call(server, "openrpa_create_workflow", {
+        "name": "Unresolved", "expectedProjectSha256": project_hash, "workflow": invalid,
+    })["structuredContent"]
+    assert result["created"] is False
+    assert any(problem.get("code") == "workflow-ref" for problem in result["problems"])
+    assert not (tmp_path / "workflows/unresolved.workflow.json").exists()
+    assert call(server, "openrpa_validate_project")["structuredContent"]["workflowCount"] == 1
+
+
+def test_create_workflow_rejects_path_separators(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path)
+    server = ProjectMCPServer(str(tmp_path), allow_edit=True)
+    project_hash = call(server, "openrpa_project_info")["structuredContent"]["projectSha256"]
+    workflow = {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": []}
+    result = call(server, "openrpa_create_workflow", {
+        "name": "../escaped", "expectedProjectSha256": project_hash, "workflow": workflow,
+    })
+    assert result["isError"] is True
+    assert "path separators" in result["content"][0]["text"]
+    assert call(server, "openrpa_validate_project")["structuredContent"]["workflowCount"] == 1
+
+
 def test_nested_destructive_permissions_are_detected(tmp_path):
     make_project(tmp_path, [{"id": "invoke", "type": "invoke_workflow", "workflow": "Cleanup"}])
     (tmp_path / "workflows/cleanup.workflow.json").write_text(json.dumps({
@@ -125,25 +194,30 @@ def test_vault_credential_use_has_separate_opt_in(tmp_path, monkeypatch):
 def test_stdio_protocol_end_to_end(tmp_path):
     make_project(tmp_path)
     repository = Path(__file__).resolve().parents[1]
-    env = dict(os.environ, PYTHONPATH=str(repository))
+    manifest_hash=hashlib.sha256((tmp_path / "project.json").read_bytes()).hexdigest()
+    env = dict(os.environ, PYTHONPATH=str(repository), OPENRPA_DATA_DIR=str(tmp_path / "data"))
     request_lines = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "openrpa_list_workflows", "arguments": {}}},
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "openrpa_activity_catalog", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "openrpa_create_workflow", "arguments": {"name": "Shared Helper", "expectedProjectSha256": manifest_hash, "workflow": {"format": "openrpa.workflow", "formatVersion": 1, "variables": [], "arguments": [], "activities": [{"id": "helper-log", "type": "log", "level": "info", "message": "created over MCP"}]}}}},
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "openrpa_validate_project", "arguments": {}}},
     ]
     payload = "".join(json.dumps(line) + "\n" for line in request_lines)
-    process = subprocess.run([sys.executable, "-m", "openrpa", "mcp", str(tmp_path)], cwd=repository,
+    process = subprocess.run([sys.executable, "-m", "openrpa", "mcp", str(tmp_path), "--allow-edit"], cwd=repository,
                              env=env, input=payload, text=True, capture_output=True, timeout=15)
     assert process.returncode == 0, process.stderr
     assert process.stderr == ""
     responses = [json.loads(line) for line in process.stdout.splitlines()]
-    assert [response["id"] for response in responses] == [1, 2, 3, 4]
+    assert [response["id"] for response in responses] == [1, 2, 3, 4, 5, 6]
     assert responses[0]["result"]["serverInfo"]["name"] == "open-rpa-studio"
     assert responses[2]["result"]["structuredContent"]["workflows"][0]["name"] == "Main"
     activities = responses[3]["result"]["structuredContent"]["activities"]
     assert any(item["type"] == "browser_navigate" and item["requiredPermissions"] == ["network"] for item in activities)
+    assert responses[4]["result"]["structuredContent"]["created"] is True
+    assert responses[5]["result"]["structuredContent"]["workflowCount"] == 2
 
 
 def test_run_opt_in_executes_a_real_workflow_and_records_durable_history(tmp_path, monkeypatch):
