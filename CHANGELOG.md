@@ -1,4 +1,12 @@
 # Changelog
+## 0.1.18 — Per-run impact review
+
+- Added a pre-run impact review for normal and debug execution. It inventories file reads/writes, HTTP destinations, browser and desktop actions, credential reads, destructive file operations, and saved child-workflow actions across sequences, nested branches, flowcharts and state machines.
+- Network and desktop access are granted for the specific run from the review dialog; saved toolbar toggles no longer silently grant those permissions to unrelated workflows. Missing child workflow definitions trigger fail-safe network and desktop approval prompts.
+- Screenshot and file-copy output paths are shown as writes; move/delete operations are highlighted as destructive. The review warns that expressions may change actual runtime targets.
+- Added planning tests for nested/reusable workflows, flowchart and state-machine coverage, destructive actions, output paths and fail-safe handling of unavailable children. Refreshed the README screenshot with the live run-impact review.
+- Verification: 37 frontend tests, 130 Python tests, production frontend build, offline Cargo check and real Playwright preview interaction/screenshot. The 60.77 MiB installer silently installed in a fresh temporary directory; the installed app launched with its bundled bridge and no terminal process, and the bridge passed its XLSX round-trip/entity rejection acceptance fixture. Installer SHA-256: `a4f13147608917e4f32d8f57f953301d8d30ae76b03946b986c19cefd9d80bef`. CycloneDX SBOM contains 478 dependency components. GitHub CI follows this commit.
+
 ## 0.1.17 — Local Excel workbook activities
 
 - Added executable XLSX Read and Write activities for local desktop workflows, including worksheet selection, header rows, data-only formula values, audit records, atomic writes, and formula-like text safety.
