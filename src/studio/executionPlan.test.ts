@@ -28,6 +28,11 @@ describe('run impact plan', () => {
     expect(plan.hasDestructiveActions).toBe(true);
   });
 
+  it('treats typed row filtering as local data logic without requesting permissions', () => {
+    const plan=buildExecutionPlan({...base,activities:[{id:'filter',type:'filter_rows',rows:'orders',conditions:[{field:'status',operator:'equals',value:'open'}]}]});
+    expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
+  });
+
   it('reports copy and screenshot output paths as writes while keeping desktop permission visible', () => {
     const plan = buildExecutionPlan({ ...base, activities: [
       { id: 'copy', type: 'file_copy', source: 'in.csv', destination: 'out.csv' },

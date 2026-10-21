@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import datetime
+import math
 import shutil
 import time
 import tempfile
@@ -650,6 +651,55 @@ class WorkflowEngine:
                     copy[field] = value
                 result.append(copy)
             v[a.get("result", "rows")] = result
+        elif kind == "filter_rows":
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str): rows=evaluate(rows,v)
+            conditions=a.get("conditions")
+            match_mode=a.get("match","all")
+            allowed={"equals","not_equals","contains","not_contains","starts_with","ends_with","greater_than","greater_or_equal","less_than","less_or_equal","is_empty","is_not_empty"}
+            if not isinstance(rows,list) or len(rows)>100_000:
+                raise WorkflowError("Filter Rows input must be a list of at most 100,000 records",a["id"],"filter-input")
+            if not isinstance(conditions,list) or not 1<=len(conditions)<=100:
+                raise WorkflowError("Filter Rows needs 1–100 conditions",a["id"],"filter-conditions")
+            if match_mode not in {"all","any"}:
+                raise WorkflowError("Filter Rows match must be 'all' or 'any'",a["id"],"filter-match")
+            for index,condition in enumerate(conditions):
+                if not isinstance(condition,dict) or not isinstance(condition.get("field"),str) or not condition["field"].strip() or len(condition["field"])>256 or condition.get("operator") not in allowed:
+                    raise WorkflowError(f"Filter Rows condition {index+1} needs a field and supported operator",a["id"],"filter-condition")
+            def condition_matches(row:dict[str,Any],condition:dict[str,Any])->bool:
+                operator=condition["operator"]
+                actual=row.get(condition["field"])
+                expected=interpolate(condition.get("value"),v)
+                if operator=="is_empty": return actual is None or actual=="" or actual==[] or actual=={}
+                if operator=="is_not_empty": return not (actual is None or actual=="" or actual==[] or actual=={})
+                if actual is None: return operator=="not_equals" and expected is not None
+                if operator in {"equals","not_equals"}:
+                    if isinstance(actual,(int,float)) and not isinstance(actual,bool) and isinstance(expected,(int,float)) and not isinstance(expected,bool): equal=actual==expected
+                    elif type(actual) is type(expected): equal=actual==expected
+                    else: equal=False
+                    if condition.get("ignoreCase") and isinstance(actual,str) and isinstance(expected,str): equal=actual.casefold()==expected.casefold()
+                    return equal if operator=="equals" else not equal
+                if operator in {"contains","not_contains","starts_with","ends_with"}:
+                    if condition.get("ignoreCase") and isinstance(actual,str) and isinstance(expected,str): actual,expected=actual.casefold(),expected.casefold()
+                    if isinstance(actual,str) and isinstance(expected,str): found=expected in actual
+                    elif isinstance(actual,list): found=any(type(item) is type(expected) and item==expected for item in actual)
+                    else: found=False
+                    if operator=="starts_with": return isinstance(actual,str) and isinstance(expected,str) and actual.startswith(expected)
+                    if operator=="ends_with": return isinstance(actual,str) and isinstance(expected,str) and actual.endswith(expected)
+                    return found if operator=="contains" else not found
+                numeric=lambda value:isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value)
+                if numeric(actual) and numeric(expected): left,right=actual,expected
+                elif isinstance(actual,str) and isinstance(expected,str): left,right=actual,expected
+                else: return False
+                return {"greater_than":left>right,"greater_or_equal":left>=right,"less_than":left<right,"less_or_equal":left<=right}[operator]
+            result=[]
+            for index,row in enumerate(rows):
+                if index%256==0: self._check_cancel()
+                if not isinstance(row,dict): raise WorkflowError(f"Filter Rows input record {index+1} is not an object",a["id"],"filter-row-type")
+                matched=all(condition_matches(row,item) for item in conditions) if match_mode=="all" else any(condition_matches(row,item) for item in conditions)
+                if matched: result.append(row)
+            v[a.get("result","filteredRows")]=result
+            self._emit({"event":"data-filtered","activityId":a["id"],"inputRows":len(rows),"outputRows":len(result),"conditionCount":len(conditions)},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes

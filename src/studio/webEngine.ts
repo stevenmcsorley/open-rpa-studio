@@ -8,6 +8,32 @@ function expr(s:string,v:Record<string,any>):any{
 }
 function val(x:any,v:Record<string,any>):any{if(typeof x==='string'){const m=x.match(/^\{\{([^{}]*)\}\}$/);return m?expr(m[1],v):x.replace(/\{\{(.*?)\}\}/g,(_,e)=>String(expr(e,v)));}return x;}
 function matchesArgumentType(value:any,type:string):boolean{return type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isSafeInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value)}
+const FILTER_OPERATORS=['equals','not_equals','contains','not_contains','starts_with','ends_with','greater_than','greater_or_equal','less_than','less_or_equal','is_empty','is_not_empty'];
+function filterConditionMatches(row:any,condition:any,variables:Record<string,any>):boolean{
+  const operator=condition.operator;let actual=Object.hasOwn(row,condition.field)?row[condition.field]:undefined;let expected=val(condition.value,variables);
+  if(operator==='is_empty')return actual==null||actual===''||Array.isArray(actual)&&actual.length===0||actual&&typeof actual==='object'&&!Array.isArray(actual)&&Object.keys(actual).length===0;
+  if(operator==='is_not_empty')return !(actual==null||actual===''||Array.isArray(actual)&&actual.length===0||actual&&typeof actual==='object'&&!Array.isArray(actual)&&Object.keys(actual).length===0);
+  if(actual==null)return expected==null?operator==='equals':operator==='not_equals';
+  if(operator==='equals'||operator==='not_equals'){
+    let equal=typeof actual===typeof expected&&actual===expected;
+    if(typeof actual==='number'&&typeof expected==='number')equal=actual===expected;
+    if(condition.ignoreCase&&typeof actual==='string'&&typeof expected==='string')equal=actual.toLocaleLowerCase()===expected.toLocaleLowerCase();
+    return operator==='equals'?equal:!equal;
+  }
+  if(['contains','not_contains','starts_with','ends_with'].includes(operator)){
+    if(condition.ignoreCase&&typeof actual==='string'&&typeof expected==='string'){actual=actual.toLocaleLowerCase();expected=expected.toLocaleLowerCase()}
+    const found=typeof actual==='string'&&typeof expected==='string'?actual.includes(expected):Array.isArray(actual)&&actual.some(item=>typeof item===typeof expected&&item===expected);
+    if(operator==='starts_with')return typeof actual==='string'&&typeof expected==='string'&&actual.startsWith(expected);
+    if(operator==='ends_with')return typeof actual==='string'&&typeof expected==='string'&&actual.endsWith(expected);
+    return operator==='contains'?found:!found;
+  }
+  let left=actual,right=expected;
+  if(typeof left==='number'&&typeof right==='number'&&(!Number.isFinite(left)||!Number.isFinite(right)))return false;
+  if(typeof left!==typeof right||!['number','string'].includes(typeof left))return false;
+  if(condition.ignoreCase&&typeof left==='string'){left=left.toLocaleLowerCase();right=(right as string).toLocaleLowerCase()}
+  if(operator==='greater_than')return left>right;if(operator==='greater_or_equal')return left>=right;if(operator==='less_than')return left<right;if(operator==='less_or_equal')return left<=right;
+  return false;
+}
 export function validate(w:Workflow):any[]{
   if(!w||w.format!=='openrpa.workflow')return[{code:'format',message:'Unsupported workflow format'}];
   const ids=new Set<string>();const problems:any[]=[];
@@ -33,6 +59,14 @@ export function validate(w:Workflow):any[]{
     else if(ids.has(item.id))problems.push({code:'duplicate',message:`Duplicate activity id ${item.id}`,activityId:item.id});
     else ids.add(item.id);
     if(!item.type)problems.push({code:'type',message:'Activity type is required',activityId:item.id});
+    if(item.type==='filter_rows'){
+      const conditions=item.conditions;const ops=new Set(FILTER_OPERATORS);
+      if(typeof item.rows!=='string'&&!Array.isArray(item.rows))problems.push({code:'filter-input',message:'Filter Rows rows must be a variable name, expression, or array',activityId:item.id});
+      if(!Array.isArray(conditions)||conditions.length<1||conditions.length>100)problems.push({code:'filter-conditions',message:'Filter Rows needs 1–100 conditions',activityId:item.id});
+      else conditions.forEach((condition:any,index:number)=>{if(!condition||typeof condition.field!=='string'||!condition.field.trim()||condition.field.length>256||!ops.has(condition.operator))problems.push({code:'filter-condition',message:`Filter Rows condition ${index+1} needs a field and supported operator`,activityId:item.id});else if(!['is_empty','is_not_empty'].includes(condition.operator)&&!Object.hasOwn(condition,'value'))problems.push({code:'filter-value',message:`Filter Rows condition ${index+1} needs a comparison value`,activityId:item.id});if(condition&&condition.ignoreCase!==undefined&&typeof condition.ignoreCase!=='boolean')problems.push({code:'filter-ignore-case',message:`Filter Rows condition ${index+1} ignoreCase must be boolean`,activityId:item.id});});
+      if(!['all','any'].includes(item.match??'all'))problems.push({code:'filter-match',message:"Filter Rows match must be 'all' or 'any'",activityId:item.id});
+      if(typeof (item.result??'filteredRows')!=='string'||!/^[$A-Z_a-z][$\w]*$/.test(item.result??'filteredRows'))problems.push({code:'filter-result',message:'Filter Rows result must be a variable name',activityId:item.id});
+    }
     if(item.type==='browser_wait'&&(!['attached','detached','visible','hidden'].includes(item.state??'visible')||typeof item.selector!=='string'||!item.selector.trim()||!['role','label','text','placeholder','test_id','css'].includes(item.selectorKind??'role')||typeof item.timeoutSeconds!=='number'||item.timeoutSeconds<1||item.timeoutSeconds>120))problems.push({code:'browser-wait',message:'Browser Wait needs a valid selector, state and timeout from 1 to 120 seconds',activityId:item.id});
     if(item.type==='browser_assert'&&(!['visible','hidden','enabled','disabled','checked','text'].includes(item.assertion??'visible')||typeof item.selector!=='string'||!item.selector.trim()||!['role','label','text','placeholder','test_id','css'].includes(item.selectorKind??'role')||typeof item.timeoutSeconds!=='number'||item.timeoutSeconds<1||item.timeoutSeconds>120||(item.assertion==='text'&&(!item.expectedText||!['exact','contains'].includes(item.textMatch??'exact')))))problems.push({code:'browser-assert',message:'Browser Assert needs a valid selector, assertion and timeout; text assertions also need expected text',activityId:item.id});
     if(item.type==='pdf_read_text'&&(typeof item.path!=='string'||!item.path.trim()||typeof (item.result??'text')!=='string'||!/^[$A-Z_a-z][$\w]*$/.test(item.result??'text')||typeof (item.pageCountResult??'pageCount')!=='string'||!/^[$A-Z_a-z][$\w]*$/.test(item.pageCountResult??'pageCount')||(item.result??'text')===(item.pageCountResult??'pageCount')||typeof (item.maxPages??500)!=='number'||!Number.isInteger(item.maxPages??500)||(item.maxPages??500)<1||(item.maxPages??500)>5000||typeof (item.layoutMode??false)!=='boolean'))problems.push({code:'pdf-read-text',message:'PDF Read Text needs a path, distinct result variables, a page limit from 1 to 5,000 and a layout mode',activityId:item.id});
@@ -148,6 +182,7 @@ export async function run(w:Workflow,allowNetwork:boolean,emitExternal:(e:any)=>
       case'for_each':{const values=expr(a.items,variables);if(!Array.isArray(values))throw Error('For Each expects a list');if(values.length>100000)throw Error('For Each exceeded the 100,000 item preview limit');const had=Object.hasOwn(variables,a.itemName),old=variables[a.itemName];for(const item of values){variables[a.itemName]=item;await seq(a.body||[]);if(error)break}if(had)variables[a.itemName]=old;else delete variables[a.itemName];break}
       case'while':{let count=0;while(true){const condition=expr(a.condition,variables);if(typeof condition!=='boolean')throw Error('While condition must evaluate to true or false');if(!condition)break;if(++count>100000)throw Error('While exceeded the 100,000 iteration preview limit');await seq(a.body||[]);if(error)break}break}
       case'retry':{for(let attempt=1;attempt<=a.maxAttempts;attempt++){error=undefined;await seq(a.body);if(!error)break;const current=error;const willRetry=attempt<a.maxAttempts&&(a.retryOn||[]).includes(current.code);emit({event:'retry-attempt-failed',activityId:a.id,attempt,maxAttempts:a.maxAttempts,errorCode:current.code,willRetry});if(!willRetry)break;error=undefined;if(a.delaySeconds)await new Promise(r=>setTimeout(r,Math.min(60000,a.delaySeconds*1000*Math.pow(a.backoffFactor,attempt-1))))}if(error)throw Object.assign(new Error(error.message),{code:error.code});break}
+      case'filter_rows':{const rows=typeof a.rows==='string'&&a.rows in variables?variables[a.rows]:val(a.rows,variables);if(!Array.isArray(rows)||rows.length>100000)throw Error('Filter Rows expects a list of at most 100,000 records');const conditions=a.conditions||[];if(!Array.isArray(conditions)||conditions.length<1||conditions.length>100)throw Error('Filter Rows needs 1–100 conditions');const resultName=a.result||'filteredRows';const filtered=rows.filter((row:any,index:number)=>{if(!row||typeof row!=='object'||Array.isArray(row))throw Error(`Filter Rows record ${index+1} is not an object`);return a.match==='any'?conditions.some((condition:any)=>filterConditionMatches(row,condition,variables)):conditions.every((condition:any)=>filterConditionMatches(row,condition,variables))});Object.defineProperty(variables,resultName,{value:filtered,enumerable:true,configurable:true,writable:true});emit({event:'data-filtered',activityId:a.id,inputRows:rows.length,outputRows:filtered.length,conditionCount:conditions.length});break}
       case'transform_field':{const rows=typeof a.rows==='string'&&a.rows in variables?variables[a.rows]:val(a.rows,variables);const op=a.operation;variables[a.result||'rows']=rows.map((row:any)=>{const copy={...row};if(copy[a.field]!=null){let text=String(copy[a.field]);if(op==='trim')text=text.trim();else if(op==='upper')text=text.toUpperCase();else if(op==='lower')text=text.toLowerCase();else if(op==='regex_replace')text=text.replace(new RegExp(a.pattern,'g'),String(a.replacement??''));else throw Error(`Unsupported field transform ${op}`);copy[a.field]=text}return copy});break}
       case'wait':await new Promise(r=>setTimeout(r,Math.min(300000,Number(val(a.seconds,variables))*1000)));break;
       case'http_request':if(!allowNetwork)throw Error('Network access requires run permission');throw Error('HTTP in browser preview is disabled; use the desktop engine');

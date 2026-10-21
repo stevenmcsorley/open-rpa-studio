@@ -28,6 +28,43 @@ def test_real_csv_workflow_reads_transforms_and_writes(tmp_path: Path):
     assert "Grace" in (tmp_path/"out.csv").read_text()
     assert result.activities["write"]["status"] == "succeeded"
 
+def test_filter_rows_executes_typed_all_and_any_conditions_with_metrics(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Filter","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Filter","variables":[{"name":"threshold","type":"integer","value":10},{"name":"rows","type":"array","value":[
+        {"name":"Ada","status":"ACTIVE","amount":12,"tags":["urgent"]},
+        {"name":"Grace","status":"inactive","amount":5,"tags":[]},
+        {"name":"Linus","status":"active","amount":30,"tags":["review"]},
+    ]}],"arguments":[],"activities":[
+        {"id":"filter-all","type":"filter_rows","rows":"rows","conditions":[
+            {"field":"status","operator":"equals","value":"active","ignoreCase":True},
+                {"field":"amount","operator":"greater_or_equal","value":"{{ threshold }}"}],"match":"all","result":"activeRows"},
+        {"id":"filter-any","type":"filter_rows","rows":"rows","conditions":[
+            {"field":"name","operator":"starts_with","value":"Grace"},
+            {"field":"tags","operator":"contains","value":"urgent"}],"match":"any","result":"priorityRows"},
+        {"id":"filter-empty","type":"filter_rows","rows":"rows","conditions":[{"field":"tags","operator":"is_empty"}],"result":"emptyTags"},
+    ]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[]
+    result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded"
+    assert [row["name"] for row in result.variables["activeRows"]]==["Ada","Linus"]
+    assert [row["name"] for row in result.variables["priorityRows"]]==["Ada","Grace"]
+    assert [row["name"] for row in result.variables["emptyTags"]]==["Grace"]
+    assert [(event["inputRows"],event["outputRows"]) for event in events if event.get("event")=="data-filtered"]==[(3,2),(3,2),(3,1)]
+
+def test_filter_rows_rejects_bad_rules_and_non_object_records(tmp_path: Path):
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Filter","variables":[],"arguments":[],"activities":[]}
+    valid={**base,"activities":[{"id":"filter","type":"filter_rows","rows":"rows","conditions":[{"field":"amount","operator":"greater_than","value":1}],"result":"selected"}]}
+    assert validate_workflow(valid)==[]
+    invalid={**base,"activities":[{"id":"filter","type":"filter_rows","rows":"rows","conditions":[{"field":"amount","operator":"explode"}],"result":"bad-name"}]}
+    assert {item["code"] for item in validate_workflow(invalid)} >= {"filter-condition","filter-result"}
+    project={"format":"openrpa.project","formatVersion":1,"name":"Filter","main":"Main","workflows":{"Main":"main.json"}}
+    runtime={**base,"variables":[{"name":"rows","type":"array","value":["not a record"]}],"activities":[valid["activities"][0]]}
+    (tmp_path/"main.json").write_text(json.dumps(runtime),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="failed"
+    assert result.error["code"]=="filter-row-type"
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{

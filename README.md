@@ -132,7 +132,11 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed multi-condition row filtering; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+
+![Open RPA Studio workflow designer with a Filter Rows activity selected and typed status and value conditions configured in its properties panel](docs/assets/filter-rows-activity.png)
+
+*Filter Rows supports AND/OR combinations, typed JSON comparison values, case-insensitive text rules, and empty-field checks. The screenshot uses illustrative procurement-style field names.*
 
 ### Debugging and run history
 

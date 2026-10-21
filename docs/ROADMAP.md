@@ -26,6 +26,7 @@
 - Run and Debug collect typed main-workflow inputs with required/default handling, validation and end-to-end forwarding through desktop and browser-preview execution.
 - Bounded text extraction from selectable PDF pages, with a page-count output, page boundaries, explicit file-read auditing, and documented no-OCR/encryption limits.
 - Local SQLite data integration through parameterized read-only queries with an SQLite authorizer allowlist, approved-root confinement, row/byte/time caps, cancellation, and audited attempt/result metadata.
+- Data Filter activity for typed, AND/OR record conditions, safe expression values, stable-order filtering, cancellation checks, aggregate execution evidence, and browser-preview parity.
 
 ## Next release gates
 

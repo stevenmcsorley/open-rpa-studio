@@ -22,6 +22,16 @@ The xlsx_read and xlsx_write activities operate on local .xlsx files in the desk
 
 `sqlite_query` runs one parameter-bound read-only query against a local approved-root `.db`, `.sqlite`, or `.sqlite3` file. It returns row objects, applies result, size and execution-time caps, checks cancellation through SQLite's VM progress hook, and audits attempts/completions without SQL text or parameter values. Write/DDL, `PRAGMA`, `ATTACH`, and multi-statement statements are denied. See [SQLite Query activity](SQLITE-ACTIVITY.md).
 
+## Filtering record collections
+
+`filter_rows` retains input objects in their original order when configured conditions match. `rows` names a variable or expression that returns a list; `result` names the output variable. `match` is `all` (AND) or `any` (OR). Each condition specifies a field, operator and, except for `is_empty` / `is_not_empty`, a JSON comparison value. Operators include equality, string/list membership, string prefixes/suffixes and ordered numeric or string comparisons. `ignoreCase` applies to text comparisons. A value may use a safe expression such as `"{{ minimumAmount }}"` to supply a typed runtime value. User code is never evaluated. Input is limited to 100,000 object records and 100 conditions; the desktop engine checks cancellation while scanning and records only aggregate input/output counts.
+
+```json
+{"id":"open-orders","type":"filter_rows","rows":"orders","conditions":[{"field":"status","operator":"equals","value":"open","ignoreCase":true},{"field":"total","operator":"greater_or_equal","value":"{{ minimumTotal }}"}],"match":"all","result":"eligibleOrders"}
+```
+
+The visual properties editor provides condition rows and validates JSON values as they are edited. Browser preview implements the same basic operators but remains an isolated, no-filesystem preview.
+
 ## PDF text extraction
 
 `pdf_read_text` extracts selectable PDF text within the project file-size quota, respects cancellation between pages, preserves page boundaries with form-feed separators, and reports page count to a separate variable. It supports an optional bounded page limit and approximate layout mode. Encrypted PDFs and image-only OCR are not supported. See [PDF activity limits](PDF-ACTIVITIES.md).

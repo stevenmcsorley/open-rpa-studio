@@ -205,6 +205,26 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                     problems.append({"code":"argument-inputs","message":"Invoke Workflow inputs must be an object","activityId":str(aid or "")})
                 if "outputs" in item and not isinstance(item["outputs"],dict):
                     problems.append({"code":"argument-outputs","message":"Invoke Workflow outputs must be an object","activityId":str(aid or "")})
+            elif typ == "filter_rows":
+                if not isinstance(item.get("rows","rows"),(str,list)):
+                    problems.append({"code":"filter-input","message":"Filter Rows rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                conditions=item.get("conditions")
+                operators={"equals","not_equals","contains","not_contains","starts_with","ends_with","greater_than","greater_or_equal","less_than","less_or_equal","is_empty","is_not_empty"}
+                if not isinstance(conditions,list) or not 1<=len(conditions)<=100:
+                    problems.append({"code":"filter-conditions","message":"Filter Rows needs 1–100 conditions","activityId":str(aid or "")})
+                else:
+                    for condition_index,condition in enumerate(conditions):
+                        if not isinstance(condition,dict) or not isinstance(condition.get("field"),str) or not condition["field"].strip() or len(condition["field"])>256 or not isinstance(condition.get("operator"),str) or condition.get("operator") not in operators:
+                            problems.append({"code":"filter-condition","message":f"Filter Rows condition {condition_index+1} needs a field and supported operator","activityId":str(aid or "")})
+                            continue
+                        if condition["operator"] not in {"is_empty","is_not_empty"} and "value" not in condition:
+                            problems.append({"code":"filter-value","message":f"Filter Rows condition {condition_index+1} needs a comparison value","activityId":str(aid or "")})
+                        try: json.dumps(condition.get("value"),allow_nan=False)
+                        except (TypeError,ValueError): problems.append({"code":"filter-value","message":f"Filter Rows condition {condition_index+1} value must be finite JSON data","activityId":str(aid or "")})
+                        if "ignoreCase" in condition and not isinstance(condition["ignoreCase"],bool):problems.append({"code":"filter-ignore-case","message":f"Filter Rows condition {condition_index+1} ignoreCase must be boolean","activityId":str(aid or "")})
+                if not isinstance(item.get("match","all"),str) or item.get("match","all") not in {"all","any"}:problems.append({"code":"filter-match","message":"Filter Rows match must be 'all' or 'any'","activityId":str(aid or "")})
+                result=item.get("result","filteredRows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"filter-result","message":"Filter Rows result must be a variable name","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -569,7 +589,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
