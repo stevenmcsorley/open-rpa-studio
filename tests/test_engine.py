@@ -422,6 +422,7 @@ def test_run_history_survives_restart_and_marks_interrupted_without_replay(tmp_p
     assert record["status"] == "interrupted"
     assert "unknown" in record["recoveryNote"]
     assert record["events"][0]["activityId"] == "send"
+    assert "recordedAt" in record["events"][0] and "T" in record["events"][0]["recordedAt"]
     assert reopened.list_runs()[0]["runId"] == run_id
 
 def test_history_persists_completed_failed_result(tmp_path: Path):

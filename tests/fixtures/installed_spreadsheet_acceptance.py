@@ -66,6 +66,9 @@ def main() -> None:
         result = send(4, "workflow.run", {"project": project, "root": created["root"], "workflow": "Main"})
         assert result["status"] == "succeeded", result
         assert result["variables"]["loaded"] == [{"name": "=1+1", "amount": 6}], result
+        saved_run = send(8, "run.get", {"runId": result["runId"]})["run"]
+        assert saved_run["status"] == "succeeded" and saved_run["workflowSha256"], saved_run
+        assert saved_run["events"] and all("recordedAt" in event for event in saved_run["events"]), saved_run
         workbook_path = Path(created["root"]) / "result.xlsx"
         contents = {}
         with zipfile.ZipFile(workbook_path) as source:

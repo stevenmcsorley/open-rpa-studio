@@ -42,7 +42,10 @@ export type DesktopWindow={title:string;processId:number;controlType:string};
 export type DesktopControl={name:string;automationId:string;controlType:string;matchCount:number;enabled:boolean;actions:string[]};
 export async function listDesktopWindows(allowDesktop:boolean):Promise<DesktopWindow[]>{return (await rpc('desktop.inspect.windows',{allowDesktop})).windows??[];}
 export async function listDesktopControls(windowTitle:string,processId:number,allowDesktop:boolean):Promise<DesktopControl[]>{return (await rpc('desktop.inspect.controls',{windowTitle,processId,allowDesktop})).controls??[];}
-export async function getRunHistory(limit=50):Promise<any[]>{const value=await rpc('run.history',{limit});return value.runs??[];}
+export type RunHistorySummary={runId:string;projectPath:string;projectName:string;workflow:string;workflowSha256:string;status:string;startedAt:string;endedAt:string|null;error:Record<string,unknown>|null;recoveryNote:string|null};
+export type RunHistoryDetail=RunHistorySummary&{result:{status?:string;activities?:Record<string,{status:string;type:string;durationMs?:number;error?:string}>;error?:Record<string,unknown>}|null;events:Record<string,unknown>[]};
+export async function getRunHistory(limit=50):Promise<RunHistorySummary[]>{const value=await rpc('run.history',{limit});return value.runs??[];}
+export async function getRunDetails(runId:string):Promise<RunHistoryDetail|null>{const value=await rpc('run.get',{runId});return value.run??null;}
 export async function getAdapterStatus():Promise<any>{return rpc('adapter.status');}
 export async function getAuditHistory(limit=200):Promise<any[]>{const value=await rpc('audit.history',{limit});return value.events??[];}
 export type AiConfig={provider:string;baseUrl?:string;credentialService?:string;credentialUsername?:string};

@@ -1,4 +1,11 @@
 # Changelog
+## 0.1.20 — Inspectable durable run history
+
+- Replaced the bare run-history list with a selectable execution record showing activity status and duration, stored events and their durable timestamps, workflow digest, error details, and interruption guidance.
+- Interrupted executions explicitly warn that external side effects are uncertain. History is for inspection; it does not offer a resume or replay action.
+- The history panel avoids displaying the machine-specific project path.
+- Verification: 42 frontend tests, 130 Python tests, production Vite build, offline Cargo check, targeted interruption-history test; Windows installer build produced a 60.77 MiB NSIS package. Installer SHA-256: `587cc881c5b8f1b37ef1be9fa79885f5c033ab642ac6da492276b04130a82600`. CycloneDX SBOM contains 478 dependency components; fresh isolated install and launch passed. The bundled bridge passed spreadsheet read/write, XML DTD/entity rejection, and live `run.get` verification including persisted event timestamps. No terminal process was launched.
+
 ## 0.1.19 — Provider-neutral AI failure repair
 
 - Added a repair-from-failure path to the existing AI workflow panel. It captures the workflow snapshot and structured failure identifiers, then uses the same configured provider, workflow validator and review-before-replace path as normal drafting.

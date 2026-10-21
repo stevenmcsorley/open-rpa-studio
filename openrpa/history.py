@@ -154,7 +154,8 @@ class RunHistory:
             row = db.execute("SELECT run_id,project_path,project_name,workflow_name,workflow_sha256,status,started_at,ended_at,result_json,error_json,recovery_note FROM runs WHERE run_id=?", (run_id,)).fetchone()
             if not row:
                 return None
-            events = [json.loads(x[0]) for x in db.execute("SELECT event_json FROM run_events WHERE run_id=? ORDER BY sequence", (run_id,))]
+            event_rows = db.execute("SELECT created_at,event_json FROM run_events WHERE run_id=? ORDER BY sequence", (run_id,)).fetchall()
+            events = [{**json.loads(raw), "recordedAt": created_at} for created_at, raw in event_rows]
         keys = ("runId", "projectPath", "projectName", "workflow", "workflowSha256", "status", "startedAt", "endedAt")
         record = dict(zip(keys, row[:8]))
         record.update(result=json.loads(row[8]) if row[8] else None, error=json.loads(row[9]) if row[9] else None,
