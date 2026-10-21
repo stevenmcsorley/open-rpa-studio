@@ -273,6 +273,21 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"sort-limit","message":"Sort Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
                 result=item.get("result","sortedRows")
                 if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"sort-result","message":"Sort Rows result must be a variable name","activityId":str(aid or "")})
+            elif typ == "map_rows":
+                if not isinstance(item.get("rows","rows"),(str,list)):problems.append({"code":"map-input","message":"Map Rows rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                mappings=item.get("mappings",[])
+                if not isinstance(mappings,list) or not 1<=len(mappings)<=100:problems.append({"code":"map-mappings","message":"Map Rows needs 1–100 field mappings","activityId":str(aid or "")})
+                else:
+                    fields=set()
+                    for mapping_index,mapping in enumerate(mappings):
+                        if not isinstance(mapping,dict) or not isinstance(mapping.get("field"),str) or not mapping["field"].strip() or len(mapping["field"])>256 or not isinstance(mapping.get("expression"),str) or not mapping["expression"].strip() or len(mapping["expression"])>4096:
+                            problems.append({"code":"map-mapping","message":f"Map Rows mapping {mapping_index+1} needs an output field and expression of at most 4,096 characters","activityId":str(aid or "")})
+                        elif mapping["field"] in fields:problems.append({"code":"map-field-duplicate","message":f"Map Rows output field '{mapping['field']}' is duplicated","activityId":str(aid or "")})
+                        else:fields.add(mapping["field"])
+                limit=item.get("maxRows",100_000)
+                if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"map-limit","message":"Map Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
+                result=item.get("result","mappedRows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"map-result","message":"Map Rows result must be a variable name","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -637,7 +652,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",

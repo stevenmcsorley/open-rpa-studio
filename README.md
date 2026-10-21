@@ -133,7 +133,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed row filtering, bounded typed-key joins, grouped aggregates and stable multi-key sorting; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed row filtering, bounded typed-key joins, grouped aggregates, stable multi-key sorting and expression-based row projection; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
 
 ![Open RPA Studio workflow designer with a Filter Rows activity selected and typed status and value conditions configured in its properties panel](docs/assets/filter-rows-activity.png)
 
@@ -150,6 +150,10 @@ Core activities include variable assignment and logging; credential lookup by va
 ![Open RPA Studio with the Sort Rows activity configured for stable multi-key sorting and explicit null ordering](docs/assets/sort-rows-activity.png)
 
 *Sort Rows supports ordered field priorities, ascending or descending order, explicit null placement, stable ties, mixed-type rejection and a configurable input limit. This is an illustrative unsaved browser-preview workflow.*
+
+![Open RPA Studio with Map Rows projecting displayName, ordinal and calculated value fields from source records](docs/assets/map-rows-activity.png)
+
+*Map Rows builds a new record shape from safe expressions over each source row and its zero-based index. Only configured output fields are included; the screenshot shows the default editable browser-preview workflow.*
 
 ### Debugging and run history
 

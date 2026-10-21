@@ -886,6 +886,30 @@ class WorkflowEngine:
             result=sorted(rows,key=cmp_to_key(compare))
             v[a.get("result","sortedRows")]=result
             self._emit({"event":"data-sorted","activityId":a["id"],"inputRows":len(rows),"outputRows":len(result),"keyCount":len(keys)},logs)
+        elif kind == "map_rows":
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str):rows=evaluate(rows,v)
+            mappings=a.get("mappings",[]);limit=a.get("maxRows",100_000)
+            if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:raise WorkflowError("Map Rows maxRows must be an integer from 1 to 100,000",a["id"],"map-limit")
+            if not isinstance(rows,list) or len(rows)>limit:raise WorkflowError("Map Rows input must be a list within its configured row limit",a["id"],"map-input")
+            if not isinstance(mappings,list) or not 1<=len(mappings)<=100:raise WorkflowError("Map Rows needs 1–100 field mappings",a["id"],"map-mappings")
+            fields=set()
+            for mapping_index,mapping in enumerate(mappings):
+                if not isinstance(mapping,dict) or not isinstance(mapping.get("field"),str) or not mapping["field"].strip() or len(mapping["field"])>256 or not isinstance(mapping.get("expression"),str) or not mapping["expression"].strip() or len(mapping["expression"])>4096:raise WorkflowError(f"Map Rows mapping {mapping_index+1} is invalid",a["id"],"map-mapping")
+                if mapping["field"] in fields:raise WorkflowError(f"Map Rows output field '{mapping['field']}' is duplicated",a["id"],"map-field-duplicate")
+                fields.add(mapping["field"])
+            result=[];scope=dict(v);scope["row"]=None;scope["rowIndex"]=0
+            for row_index,row in enumerate(rows):
+                if row_index%256==0:self._check_cancel()
+                if not isinstance(row,dict) or len(row)>2_000:raise WorkflowError(f"Map Rows record {row_index+1} must be an object with at most 2,000 fields",a["id"],"map-row-type")
+                scope["row"]=row;scope["rowIndex"]=row_index;output={}
+                for mapping in mappings:
+                    try:value=evaluate(mapping["expression"],scope)
+                    except Exception as exc:raise WorkflowError(f"Map Rows expression for '{mapping['field']}' failed on input row {row_index+1}: {str(exc)[:400]}",a["id"],"map-expression") from exc
+                    output[mapping["field"]]=value
+                result.append(output)
+            v[a.get("result","mappedRows")]=result
+            self._emit({"event":"data-mapped","activityId":a["id"],"inputRows":len(rows),"outputRows":len(result),"mappedFieldCount":len(mappings)},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes

@@ -142,6 +142,25 @@ def test_sort_rows_is_stable_multi_key_and_keeps_null_placement_independent_of_d
     malformed={**workflow,"activities":[{**activity,"keys":[{"field":"score","direction":[]}]}]}
     assert "sort-key" in {problem["code"] for problem in validate_workflow(malformed)}
 
+def test_map_rows_projects_safe_expressions_without_mutating_source(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Map","main":"Main","workflows":{"Main":"main.json"}}
+    rows=[{"name":"Ada Lovelace","amount":12.5,"private":"hidden"},{"name":"Grace Hopper","amount":8,"private":"hidden"}]
+    activity={"id":"map","type":"map_rows","rows":"rows","mappings":[{"field":"displayName","expression":"upper(row.name)"},{"field":"ordinal","expression":"rowIndex + 1"},{"field":"dollars","expression":"row.amount * 2"}],"result":"mapped"}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Map","variables":[{"name":"rows","type":"array","value":rows}],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[];result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded",result.error
+    assert result.variables["mapped"]==[{"displayName":"ADA LOVELACE","ordinal":1,"dollars":25.0},{"displayName":"GRACE HOPPER","ordinal":2,"dollars":16}]
+    assert result.variables["rows"]==rows and "private" not in result.variables["mapped"][0]
+    assert next(event for event in events if event.get("event")=="data-mapped")=={"event":"data-mapped","activityId":"map","inputRows":2,"outputRows":2,"mappedFieldCount":3}
+    duplicate={**workflow,"activities":[{**activity,"mappings":[{"field":"same","expression":"row.name"},{"field":"same","expression":"row.amount"}]}]}
+    assert "map-field-duplicate" in {problem["code"] for problem in validate_workflow(duplicate)}
+    bad={**workflow,"activities":[{**activity,"mappings":[{"field":"invalid","expression":"row.name.upper()"}]}]}
+    (tmp_path/"main.json").write_text(json.dumps(bad),encoding="utf-8")
+    failed=run_project(project,tmp_path)
+    assert failed.status=="failed" and failed.error["code"]=="map-expression"
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{
