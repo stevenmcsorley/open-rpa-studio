@@ -686,8 +686,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             if params.get("allowNetwork") is not True:raise ValueError("Discovering API response fields requires enabling Allow network")
             profile=api_connections.get_profile(_api_connections_path(),str(params.get("profileId","")))
             path=params.get("path","/")
-            if not isinstance(path,str) or len(path)>8192 or not path.startswith("/") or path.startswith("//") or "#" in path or ".." in path.split("?",1)[0].replace("\\","/").split("/"):
-                raise ValueError("API discovery path must start with / and remain inside the configured API host")
+            if not isinstance(path,str) or len(path)>8192 or not path.startswith("/") or path.startswith("//") or "?" in path or "#" in path or ".." in path.replace("\\","/").split("/"):
+                raise ValueError("API discovery path must start with / and cannot contain a query, fragment, or traversal; configure query parameters separately")
             query=params.get("query",{})
             if not isinstance(query,dict) or len(query)>100:
                 raise ValueError("API discovery query must be an object with at most 100 parameters")
@@ -696,6 +696,8 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             for key,value in query.items():
                 if not isinstance(key,str) or not key or len(key)>256 or isinstance(value,(dict,list)) or value is None:
                     raise ValueError("API discovery query values must be named scalar values")
+                if any(term in key.casefold() for term in ("token","secret","password","credential","authorization","cookie","api-key","api_key","apikey")):
+                    raise ValueError("Credential-like query parameters are blocked; configure authentication on the saved API connection")
                 if isinstance(value,str) and ("{{" in value or "}}" in value):
                     raise ValueError("Replace workflow expressions with concrete values before discovering response fields")
                 query_values.append((key,str(value)))

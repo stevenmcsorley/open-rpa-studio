@@ -766,6 +766,10 @@ def test_api_response_discovery_requires_explicit_network_permission_and_concret
     assert "Allow network" in replies[-1]["error"]["message"] and not calls
     bridge.handle({"id":2,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders","query":{"cursor":"{{ nextCursor }}"},"allowNetwork":True}})
     assert "concrete values" in replies[-1]["error"]["message"] and not calls
+    bridge.handle({"id":3,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders","query":{"access_token":"must-not-send"},"allowNetwork":True}})
+    assert "Credential-like query parameters" in replies[-1]["error"]["message"] and not calls
+    bridge.handle({"id":4,"method":"api.connections.discover","params":{"profileId":profile["id"],"path":"/orders?token=must-not-send","allowNetwork":True}})
+    assert "configure query parameters separately" in replies[-1]["error"]["message"] and not calls
 
 
 def test_openapi_url_fetch_is_permission_gated_bounded_and_audited(monkeypatch):
