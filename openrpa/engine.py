@@ -287,7 +287,7 @@ class WorkflowEngine:
             if self.options.debugger is not None:
                 self.options.debugger.before_activity(aid,depth,variables,self.options.cancel,lambda event:self._emit(event,logs),
                     snapshot=self._debug_snapshot,editable=lambda current:self._debug_editable_variables(workflow_name,current),
-                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value))
+                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value),redact=self._redact_value)
                 self._check_cancel()
             started = time.perf_counter()
             state = {"status": "running", "type": kind, "workflow": workflow_name}
@@ -343,7 +343,7 @@ class WorkflowEngine:
             if self.options.debugger is not None:
                 self.options.debugger.before_activity(aid,0,variables,self.options.cancel,lambda event:self._emit(event,logs),
                     snapshot=self._debug_snapshot,editable=lambda current:self._debug_editable_variables(workflow_name,current),
-                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value))
+                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value),redact=self._redact_value)
                 self._check_cancel()
             states[aid]={"status":"running","type":node_type,"workflow":workflow_name}
             self._emit({"event":"activity-started","activityId":aid,"type":node_type},logs)
@@ -387,7 +387,7 @@ class WorkflowEngine:
             if self.options.debugger is not None:
                 self.options.debugger.before_activity(current,0,variables,self.options.cancel,lambda event:self._emit(event,logs),
                     snapshot=self._debug_snapshot,editable=lambda active:self._debug_editable_variables(workflow_name,active),
-                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value))
+                    validate_edit=lambda name,value:self._validate_debug_edit(workflow_name,variables,name,value),redact=self._redact_value)
                 self._check_cancel()
             state_type="state_machine_state"
             states[current]={"status":"running","type":state_type,"workflow":workflow_name,"label":state.get("label",current)}

@@ -239,6 +239,10 @@ def handle(request: dict[str, Any]) -> None:
             else: active_debugger.step_out()
             history.audit(method,{"runId":active_run_id})
             result={"requested":method.split(".",1)[1],"runId":active_run_id}
+        elif method == "debug.evaluate_watch":
+            if active_debugger is None or active_run_id is None:
+                raise ValueError("No debug run is active")
+            result = active_debugger.evaluate_watch(params.get("expression"))
         elif method == "run.history":
             result = {"runs": history.list_runs(params.get("limit", 50))}
         elif method == "run.get":

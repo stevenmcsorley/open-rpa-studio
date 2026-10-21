@@ -31,6 +31,8 @@ export async function validateWorkflow(project:Project,workflow:Workflow,workflo
 export async function runWorkflow(project:Project,root:string,workflow:string,allowNetwork:boolean,allowDesktop=false,debug=false):Promise<RunResult>{return rpc('workflow.run',{project,root,workflow,allowNetwork,allowDesktop,debug});}
 export async function cancelWorkflow():Promise<void>{await rpc('workflow.cancel');}
 export async function debugControl(action:'pause'|'resume'|'step_over'|'step_into'|'step_out'):Promise<void>{await rpc(`debug.${action}`);}
+export type DebugWatchResult={status:'ok';type:string;value:unknown}|{status:'error';error:string};
+export async function evaluateDebugWatch(expression:string):Promise<DebugWatchResult>{return rpc('debug.evaluate_watch',{expression});}
 export async function setDebugVariable(name:string,value:unknown):Promise<void>{await rpc('debug.set_variable',{name,value});}
 export type BrowserControl={selectorKind:'role'|'test_id'|'placeholder';selector:string;role:string;name:string;tag:string;inputType:string;placeholder:string;matchCount:number;actions:string[]};
 export async function openBrowserInspector(url:string,allowNetwork:boolean):Promise<{url:string;title:string;status:number|null}>{return rpc('browser.inspect.open',{url,allowNetwork});}

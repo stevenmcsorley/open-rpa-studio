@@ -54,6 +54,36 @@ def test_debug_run_starts_paused_and_steps_over_real_activities(tmp_path):
     assert output[0].variables["value"]=="2"
     assert [event["activityId"] for event in events if event.get("event")=="activity-completed"]==["one","two","done"]
 
+def test_safe_watch_expressions_use_live_scope_redact_secrets_and_bound_large_results():
+    import pytest
+    debugger=DebugController()
+    variables={"rows":[{"amount":10},{"amount":25}],"credentials":{"api":"private-watch-secret"},"large":["x"*16 for _ in range(1400)]}
+    def redact(value):
+        if isinstance(value,str): return value.replace("private-watch-secret","[REDACTED]")
+        if isinstance(value,list): return [redact(item) for item in value]
+        if isinstance(value,dict): return {key:redact(item) for key,item in value.items()}
+        return value
+    ready=threading.Event()
+    def pause():
+        debugger.before_activity("inspect",0,variables,lambda:False,lambda event:ready.set(),redact=redact)
+    thread=threading.Thread(target=pause);thread.start()
+    assert ready.wait(2)
+    assert debugger.evaluate_watch("len(rows)")=={"status":"ok","type":"int","value":2}
+    assert debugger.evaluate_watch("rows[1].amount")["value"]==25
+    assert debugger.evaluate_watch("credentials.api")["value"]=="[REDACTED]"
+    assert "private-watch-secret" not in str(debugger.evaluate_watch("credentials"))
+    assert debugger.evaluate_watch("__import__('os')")["status"]=="error"
+    large=debugger.evaluate_watch("large")
+    assert large["status"]=="ok" and large["value"]["truncated"] is True
+    debugger.resume();thread.join(2);assert not thread.is_alive()
+    with pytest.raises(ValueError,match="only while paused"):
+        debugger.evaluate_watch("len(rows)")
+
+def test_watch_expression_is_length_bounded():
+    import pytest
+    debugger=DebugController()
+    with pytest.raises(ValueError,match="1–2048"):
+        debugger.evaluate_watch("x"*2049)
 
 def test_step_into_pauses_inside_control_flow(tmp_path):
     debugger=DebugController()
@@ -193,6 +223,7 @@ def test_debug_variable_snapshot_redacts_vault_secrets(tmp_path,monkeypatch):
     _wait_for(events,condition,"debug.paused","inspect")
     snapshot=next(event["variables"] for event in events if event.get("event")=="debug.paused")
     assert snapshot["apiKey"]=="[REDACTED]"
+    assert debugger.evaluate_watch("apiKey")["value"]=="[REDACTED]"
     assert "never-display-this-secret" not in json.dumps(events)
     debugger.resume()
     thread.join(3)
@@ -216,7 +247,7 @@ def test_native_bridge_exposes_debug_pause_step_and_resume(tmp_path,monkeypatch)
         raise AssertionError("Timed out waiting for bridge message")
     root=tmp_path/"project"
     root.mkdir()
-    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[{"name":"items","type":"any","value":[{"total":12},{"total":34}]}],"arguments":[],"activities":[
         {"id":"first","type":"log","message":"first"},
         {"id":"second","type":"log","message":"second"},
     ]}
@@ -226,6 +257,11 @@ def test_native_bridge_exposes_debug_pause_step_and_resume(tmp_path,monkeypatch)
     pause=next_matching(lambda message:message.get("event")=="run.event" and message["data"].get("event")=="debug.paused")
     assert pause["event"]=="run.event" and pause["data"]["event"]=="debug.paused" and pause["data"]["activityId"]=="first"
     assert "variables" in pause["data"]
+    bridge.handle({"id":8,"method":"debug.evaluate_watch","params":{"expression":"items[1].total"}})
+    watched=next_matching(lambda message:message.get("id")==8)
+    assert watched["result"]=={"status":"ok","type":"int","value":34}
+    bridge.handle({"id":9,"method":"debug.evaluate_watch","params":{"expression":"__import__('os')"}})
+    assert next_matching(lambda message:message.get("id")==9)["result"]["status"]=="error"
     bridge.handle({"id":2,"method":"debug.step_over","params":{}})
     assert next_matching(lambda message:message.get("id")==2)["id"]==2
     pause=next_matching(lambda message:message.get("event")=="run.event" and message["data"].get("event")=="debug.paused")

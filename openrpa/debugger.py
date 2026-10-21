@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 import json
 from typing import Any, Callable
+from .expressions import evaluate
 
 
 class DebugController:
@@ -27,6 +28,27 @@ class DebugController:
         self._step_out_depth: int | None = None
         self._live_variables: dict[str,Any] | None = None
         self._edit_validator: Callable[[str,Any],None] | None = None
+        self._watch_redactor: Callable[[Any],Any] | None = None
+
+    def evaluate_watch(self, expression: str) -> dict[str, Any]:
+        """Evaluate a bounded, safe watch against the live scope while paused."""
+        if not isinstance(expression, str) or not expression.strip() or len(expression) > 2048:
+            raise ValueError("Watch expressions must contain 1–2048 characters")
+        with self._condition:
+            if not self._paused or self._live_variables is None:
+                raise ValueError("Watch expressions can be evaluated only while paused at an activity boundary")
+            variables = self._watch_redactor(self._live_variables) if self._watch_redactor else self._live_variables
+            try:
+                value = evaluate(expression, variables)
+                if self._watch_redactor:
+                    value = self._watch_redactor(value)
+                encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, default=str, separators=(",", ":"))
+                if len(encoded.encode("utf-8")) > 16384:
+                    preview = encoded[:1024]
+                    return {"status": "ok", "type": type(value).__name__, "value": {"truncated": True, "preview": preview}}
+                return {"status": "ok", "type": type(value).__name__, "value": value}
+            except Exception as exc:
+                return {"status": "error", "error": f"{type(exc).__name__}: {exc}"[:512]}
 
     def set_variable(self, name: str, value: Any) -> dict[str,str]:
         """Edit an existing live value only while stopped at an activity boundary."""
@@ -107,12 +129,14 @@ class DebugController:
     def before_activity(self, activity_id: str, depth: int, variables: dict[str, Any], cancelled: Callable[[], bool], emit: Callable[[dict[str, Any]], None],
                         snapshot: Callable[[dict[str,Any]],dict[str,Any]] | None = None,
                         editable: Callable[[dict[str,Any]],list[str]] | None = None,
-                        validate_edit: Callable[[str,Any],None] | None = None) -> None:
+                        validate_edit: Callable[[str,Any],None] | None = None,
+                        redact: Callable[[Any],Any] | None = None) -> None:
         with self._condition:
             self._current_id = activity_id
             self._current_depth = depth
             self._live_variables=variables
             self._edit_validator=validate_edit
+            self._watch_redactor=redact
             step_into = self._step_into_depth is not None and depth >= self._step_into_depth
             if step_into:
                 self._step_into_depth = None
@@ -138,10 +162,12 @@ class DebugController:
             if cancelled():
                 self._live_variables=None
                 self._edit_validator=None
+                self._watch_redactor=None
                 return
             emit({"event":"debug.resumed","activityId":activity_id,"depth":depth})
             self._live_variables=None
             self._edit_validator=None
+            self._watch_redactor=None
 
     def after_activity(self, activity_id: str, depth: int) -> None:
         with self._condition:

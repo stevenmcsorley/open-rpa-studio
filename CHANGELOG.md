@@ -1,4 +1,11 @@
 # Changelog
+## 0.1.22 — Live debugger watch expressions
+
+- Added watch expressions to the paused debugger panel. They evaluate against the engine's current full scope using the same restricted expression evaluator as workflows.
+- Watch evaluation is permitted only at an activity boundary while paused, rejects Python code, redacts registered credentials, limits expression length to 2,048 characters, and truncates serialized results beyond 16 KiB.
+- Watch expressions and results are session-only; they are not stored in projects, run history or the audit trail.
+- Verification: 44 frontend tests, 132 Python tests, production Vite build, offline Cargo check, and `npm audit` with zero vulnerabilities. Windows installer acceptance pending.
+
 ## 0.1.21 — Patched frontend build and test dependencies
 
 - Upgraded Vite and its React plugin to supported patched major versions, and Vitest/Tinypool to versions without the advisories reported by npm audit.
