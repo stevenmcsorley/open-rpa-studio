@@ -1,0 +1,12 @@
+.run-argument-fields{flex:none;max-height:30vh;overflow:auto;padding:9px 2px 10px;border-bottom:1px solid #303741}
+.run-argument-fields>header{display:flex;align-items:baseline;gap:9px;margin-bottom:7px}
+.run-argument-fields>header strong{font-size:8px;letter-spacing:.8px;color:#cbd3dd}
+.run-argument-fields>header small{font-size:8px;color:#7e8995}
+.run-argument-field{display:grid;grid-template-columns:minmax(135px,.36fr) minmax(0,1fr);align-items:start;gap:6px 12px;padding:5px 2px}
+.run-argument-field>span{display:grid;gap:3px;padding-top:5px;min-width:0}
+.run-argument-field>span strong{font-size:9px;color:#d7dde5;overflow-wrap:anywhere}
+.run-argument-field>span small{font:7px 'DM Mono',monospace;color:#82909e}
+.run-argument-field input,.run-argument-field select,.run-argument-field textarea{width:100%;min-width:0;border:1px solid #353d47;border-radius:4px;background:#12151a;color:#e1e6ec;padding:6px 8px;font-size:9px}
+.run-argument-field textarea{resize:vertical;font:8px 'DM Mono',monospace;line-height:1.45}
+.run-argument-field input:focus,.run-argument-field select:focus,.run-argument-field textarea:focus{outline:1px solid #789d68;border-color:#789d68}
+.run-argument-error{grid-column:2;color:#ffaaa5;font-size:8px;line-height:1.35}

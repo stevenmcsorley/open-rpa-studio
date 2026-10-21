@@ -6,7 +6,7 @@ function expr(s:string,v:Record<string,any>):any{
   if(m){const a=v[m[1]];let b:any;try{b=JSON.parse(m[3])}catch{b=v[m[3]]??m[3].replace(/^['"]|['"]$/g,'')}switch(m[2]){case'==':return a===b;case'!=':return a!==b;case'>':return a>b;case'<':return a<b;case'>=':return a>=b;case'<=':return a<=b;case'+':return a+b;case'-':return a-b;case'*':return a*b;case'/':return a/b;case'in':return b.includes(a)}}
   if(/^\w+$/.test(x)&&x in v)return v[x];return x;
 }
-function val(x:any,v:Record<string,any>):any{if(typeof x==='string'){const m=x.match(/^\{\{(.*?)\}\}$/);return m?expr(m[1],v):x.replace(/\{\{(.*?)\}\}/g,(_,e)=>String(expr(e,v)));}return x;}
+function val(x:any,v:Record<string,any>):any{if(typeof x==='string'){const m=x.match(/^\{\{([^{}]*)\}\}$/);return m?expr(m[1],v):x.replace(/\{\{(.*?)\}\}/g,(_,e)=>String(expr(e,v)));}return x;}
 function matchesArgumentType(value:any,type:string):boolean{return type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value)}
 export function validate(w:Workflow):any[]{
   if(!w||w.format!=='openrpa.workflow')return[{code:'format',message:'Unsupported workflow format'}];

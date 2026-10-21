@@ -15,7 +15,7 @@ self.onmessage=async({data}:{data:{id:number;method:string;params:any}})=>{
     } else if(method==='project.save'){
       const {root,project,workflows}=params;files.set(`${root}/project.json`,JSON.stringify(project,null,2));for(const [name,wf]of Object.entries(workflows as Record<string,Workflow>))files.set(`${root}/${project.workflows[name]}`,JSON.stringify(wf,null,2));result={saved:true};
     } else if(method==='workflow.validate'){const problems=[...validate(params.workflow),...validateBindings(params.workflows??opened?.workflows??{},params.workflowName??params.workflow.name)];result={valid:problems.length===0,problems};}
-    else if(method==='workflow.run'){const name=params.workflow;const wf=opened?.workflows[name]??params.project.workflows[name];result=await run(wf,params.allowNetwork,e=>self.postMessage({event:'run.event',data:e}),opened?.workflows,name);}
+    else if(method==='workflow.run'){const name=params.workflow;const wf=opened?.workflows[name]??params.project.workflows[name];result=await run(wf,params.allowNetwork,e=>self.postMessage({event:'run.event',data:e}),opened?.workflows,name,params.inputs??{});}
     else if(method==='workflow.cancel')result={cancelled:false};
     else if(method==='activity.catalog')result=CATALOG;
     else throw Error(`Unknown bridge method: ${method}`);

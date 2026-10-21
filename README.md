@@ -136,6 +136,12 @@ Core activities include variable assignment and logging; credential lookup by va
 
 ### Debugging and run history
 
+When you run or debug a workflow with input arguments, Studio collects typed values in the run review dialog, validates required fields and JSON values, and passes the inputs to the selected workflow. Output and in/out argument values appear in the execution variables.
+
+![Open RPA Studio run review dialog collecting string, integer, boolean, object and array workflow inputs](docs/assets/run-input-arguments.png)
+
+*The example shows illustrative workflow arguments. Input values are run-specific and are not written into the workflow definition.*
+
 - Boundary-based breakpoints and debugger start-paused mode.
 - Conditional breakpoints on activities, flowchart nodes and state-machine entries use the safe expression language. False conditions continue; true conditions pause, and invalid conditions pause for review rather than being silently ignored.
 - Pause, continue, step-over, step-into, step-out, and cancellation at activity boundaries.
