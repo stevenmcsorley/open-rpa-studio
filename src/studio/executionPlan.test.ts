@@ -33,6 +33,11 @@ describe('run impact plan', () => {
     expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
   });
 
+  it('treats bounded row joins as local data logic without requesting permissions',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'join',type:'join_rows',left:'orders',right:'buyers',leftKey:'buyerId',rightKey:'id'}]});
+    expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
+  });
+
   it('reports copy and screenshot output paths as writes while keeping desktop permission visible', () => {
     const plan = buildExecutionPlan({ ...base, activities: [
       { id: 'copy', type: 'file_copy', source: 'in.csv', destination: 'out.csv' },

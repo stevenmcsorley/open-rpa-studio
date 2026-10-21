@@ -65,6 +65,33 @@ def test_filter_rows_rejects_bad_rules_and_non_object_records(tmp_path: Path):
     assert result.status=="failed"
     assert result.error["code"]=="filter-row-type"
 
+def test_join_rows_preserves_duplicates_types_left_unmatched_and_row_limit(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Join","main":"Main","workflows":{"Main":"main.json"}}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Join","variables":[
+        {"name":"orders","type":"array","value":[{"id":1,"item":"book"},{"id":2,"item":"pen"},{"id":"1","item":"string-id"},{"id":3,"item":"none"}]},
+        {"name":"accounts","type":"array","value":[{"key":1,"owner":"Ada"},{"key":1,"owner":"Grace"},{"key":"1","owner":"Text identity"}]}
+    ],"arguments":[],"activities":[
+        {"id":"left-join","type":"join_rows","left":"orders","right":"accounts","leftKey":"id","rightKey":"key","joinType":"left","rightPrefix":"account_","result":"enriched"}
+    ]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[];result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded"
+    rows=result.variables["enriched"]
+    assert len(rows)==5
+    assert [row["account_owner"] for row in rows]==["Ada","Grace",None,"Text identity",None]
+    assert rows[0]["id"]==1 and rows[0]["account_key"]==1
+    metrics=next(event for event in events if event.get("event")=="data-joined")
+    assert (metrics["leftRows"],metrics["rightRows"],metrics["outputRows"],metrics["matchedLeftRows"])==(4,3,5,2)
+    workflow["activities"][0]["joinType"]="inner";workflow["activities"][0]["maxRows"]=1
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    limited=run_project(project,tmp_path)
+    assert limited.status=="failed" and limited.error["code"]=="join-output-limit"
+    workflow["activities"][0]["maxRows"]=100_000
+    workflow["variables"][0]["value"][0]["account_owner"]="left value"
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    collision=run_project(project,tmp_path)
+    assert collision.status=="failed" and collision.error["code"]=="join-field-collision"
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{

@@ -32,6 +32,16 @@ The xlsx_read and xlsx_write activities operate on local .xlsx files in the desk
 
 The visual properties editor provides condition rows and validates JSON values as they are edited. Browser preview implements the same basic operators but remains an isolated, no-filesystem preview.
 
+## Joining record collections
+
+`join_rows` combines two lists of objects using a typed key on each side. `joinType` supports `inner` (matching rows only) and `left` (preserve unmatched rows from the left input). Duplicate keys produce the full one-to-many or many-to-many result. Left-side fields keep their names; right-side fields receive `rightPrefix` (default `right_`) to avoid collisions. Null or missing keys do not match. Keys match only within the same scalar type; finite numbers compare numerically, while booleans and strings remain distinct. Inputs are capped at 100,000 objects each and 2,000 fields per object; `maxRows` bounds the expanded result to 100,000 rows. An over-limit join fails without assigning a partial result. Cancellation is checked while indexing and producing rows.
+
+```json
+{"id":"enrich-orders","type":"join_rows","left":"orders","right":"customers","leftKey":"customerId","rightKey":"id","joinType":"left","rightPrefix":"customer_","maxRows":100000,"result":"enrichedOrders"}
+```
+
+The join is a native local operation. It preserves left-row order and the source order of duplicate right-side matches. The execution event records counts and join type only, not record contents.
+
 ## PDF text extraction
 
 `pdf_read_text` extracts selectable PDF text within the project file-size quota, respects cancellation between pages, preserves page boundaries with form-feed separators, and reports page count to a separate variable. It supports an optional bounded page limit and approximate layout mode. Encrypted PDFs and image-only OCR are not supported. See [PDF activity limits](PDF-ACTIVITIES.md).

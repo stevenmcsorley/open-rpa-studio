@@ -225,6 +225,19 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(item.get("match","all"),str) or item.get("match","all") not in {"all","any"}:problems.append({"code":"filter-match","message":"Filter Rows match must be 'all' or 'any'","activityId":str(aid or "")})
                 result=item.get("result","filteredRows")
                 if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"filter-result","message":"Filter Rows result must be a variable name","activityId":str(aid or "")})
+            elif typ == "join_rows":
+                for field_name,default in (("left","leftRows"),("right","rightRows")):
+                    if not isinstance(item.get(field_name,default),(str,list)):problems.append({"code":"join-input","message":f"Join Rows {field_name} input must be a variable name, expression, or array","activityId":str(aid or "")})
+                for field_name in ("leftKey","rightKey"):
+                    if not isinstance(item.get(field_name),str) or not item[field_name].strip() or len(item[field_name])>256:problems.append({"code":"join-key","message":f"Join Rows {field_name} must be non-empty text of at most 256 characters","activityId":str(aid or "")})
+                join_type=item.get("joinType","inner")
+                if not isinstance(join_type,str) or join_type not in {"inner","left"}:problems.append({"code":"join-type","message":"Join Rows supports inner or left joins","activityId":str(aid or "")})
+                prefix=item.get("rightPrefix","right_")
+                if not isinstance(prefix,str) or len(prefix)>128:problems.append({"code":"join-prefix","message":"Join Rows rightPrefix must be text no longer than 128 characters","activityId":str(aid or "")})
+                limit=item.get("maxRows",100_000)
+                if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"join-limit","message":"Join Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
+                result=item.get("result","joinedRows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"join-result","message":"Join Rows result must be a variable name","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -589,7 +602,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",

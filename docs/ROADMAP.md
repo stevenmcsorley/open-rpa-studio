@@ -2,6 +2,9 @@
 
 ## Built in this slice
 
+- Added `Filter Rows` with a visual typed-condition editor and bounded AND/OR evaluation.
+- Added `Join Rows` with typed keys, inner/left modes, duplicate-key expansion, right-field prefixes, cancellation and an explicit output row ceiling.
+
 - Versioned local project format and Python execution engine.
 - Safe expression evaluation, argument/variable scoping, sequence/if/for-each/while/retry/switch/try-call control flow with shared execution quotas. Retry Scope supports filtered errors, bounded backoff, variable rollback and explicit repeat-safety acknowledgement.
 - File, text, regex, CSV, JSON, wait, and explicitly permissioned HTTP activities.

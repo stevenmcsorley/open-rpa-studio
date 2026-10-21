@@ -84,7 +84,7 @@ export function buildExecutionPlan(workflow: Workflow, workflows: Record<string,
       else actions.push({ id, scope, type, label: LABELS[type], detail: `Child workflow ${target || '(not specified)'} ${child ? 'contains a recursive call' : 'could not be inspected'}`, risk: 'external' });
       continue;
     }
-    if (type === 'assign' || type === 'log' || type === 'if' || type === 'for_each' || type === 'while' || type === 'switch' || type === 'retry' || type === 'try' || type === 'wait' || type === 'json_parse' || type === 'transform_field' || type === 'filter_rows' || type === 'regex_replace' || type === 'regex_match') continue;
+    if (type === 'assign' || type === 'log' || type === 'if' || type === 'for_each' || type === 'while' || type === 'switch' || type === 'retry' || type === 'try' || type === 'wait' || type === 'json_parse' || type === 'transform_field' || type === 'filter_rows' || type === 'join_rows' || type === 'regex_replace' || type === 'regex_match') continue;
     const path = item.path ?? item.directory;
     const source = item.source;
     const destination = item.destination;

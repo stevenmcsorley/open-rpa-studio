@@ -14,6 +14,7 @@ import zipfile
 import sqlite3
 import base64
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -700,6 +701,56 @@ class WorkflowEngine:
                 if matched: result.append(row)
             v[a.get("result","filteredRows")]=result
             self._emit({"event":"data-filtered","activityId":a["id"],"inputRows":len(rows),"outputRows":len(result),"conditionCount":len(conditions)},logs)
+        elif kind == "join_rows":
+            left=interpolate(a.get("left","leftRows"),v);right=interpolate(a.get("right","rightRows"),v)
+            if isinstance(left,str): left=evaluate(left,v)
+            if isinstance(right,str): right=evaluate(right,v)
+            if not isinstance(left,list) or not isinstance(right,list) or len(left)>100_000 or len(right)>100_000:
+                raise WorkflowError("Join Rows inputs must each be lists of at most 100,000 records",a["id"],"join-input")
+            left_key=a.get("leftKey");right_key=a.get("rightKey");mode=a.get("joinType","inner");prefix=a.get("rightPrefix","right_");max_rows=a.get("maxRows",100_000)
+            if not isinstance(left_key,str) or not left_key or not isinstance(right_key,str) or not right_key:
+                raise WorkflowError("Join Rows needs non-empty left and right key fields",a["id"],"join-key")
+            if mode not in {"inner","left"} or not isinstance(prefix,str) or len(prefix)>128 or not isinstance(max_rows,int) or isinstance(max_rows,bool) or not 1<=max_rows<=100_000:
+                raise WorkflowError("Join Rows configuration is invalid",a["id"],"join-config")
+            for label,records in (("left",left),("right",right)):
+                if any(not isinstance(row,dict) or len(row)>2_000 for row in records):
+                    raise WorkflowError(f"Join Rows {label} input must contain objects with at most 2,000 fields",a["id"],"join-row-type")
+            left_fields:set[str]=set()
+            right_fields:set[str]=set()
+            def join_key(value:Any)->tuple[str,Any]|None:
+                if value is None:return None
+                if isinstance(value,bool):return ("boolean",value)
+                if isinstance(value,str):return ("string",value)
+                if isinstance(value,int):return ("number",Decimal(value))
+                if isinstance(value,float) and math.isfinite(value):return ("number",Decimal(str(value)))
+                return None
+            index:dict[tuple[str,Any],list[dict[str,Any]]]={}
+            for position,row in enumerate(right):
+                if position%256==0:self._check_cancel()
+                right_fields.update(row.keys())
+                key=join_key(row.get(right_key))
+                if key is not None:index.setdefault(key,[]).append(row)
+            for position,row in enumerate(left):
+                if position%256==0:self._check_cancel()
+                left_fields.update(row.keys())
+            if any(prefix+field in left_fields for field in right_fields):
+                raise WorkflowError("A prefixed right-side field would overwrite a left-side field; choose another rightPrefix",a["id"],"join-field-collision")
+            result=[]
+            for position,row in enumerate(left):
+                if position%256==0:self._check_cancel()
+                matches=index.get(join_key(row.get(left_key)),[]) if join_key(row.get(left_key)) is not None else []
+                if not matches and mode=="left":matches=[None]
+                for other in matches:
+                    if len(result)%256==0:self._check_cancel()
+                    if len(result)>=max_rows:raise WorkflowError(f"Join Rows output exceeds the configured {max_rows:,} row limit",a["id"],"join-output-limit")
+                    merged=dict(row)
+                    if other is not None:
+                        for field,value in other.items():merged[prefix+field]=value
+                    else:
+                        for field in (right[0].keys() if right else []):merged[prefix+field]=None
+                    result.append(merged)
+            name=a.get("result","joinedRows");v[name]=result
+            self._emit({"event":"data-joined","activityId":a["id"],"leftRows":len(left),"rightRows":len(right),"outputRows":len(result),"joinType":mode,"matchedLeftRows":sum(1 for row in left if join_key(row.get(left_key)) in index)},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes
