@@ -122,6 +122,68 @@ def test_openai_compatible_fallback_still_rejects_malformed_json_without_another
     assert len(calls)==2
 
 
+def test_ollama_retries_once_with_json_mode_when_schema_format_is_rejected(monkeypatch):
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    calls=[];warnings=[]
+    def call(url,local,method="GET",**kwargs):
+        calls.append(kwargs["body"])
+        if len(calls)==1:
+            raise ai.ProviderHttpError(400,'{"error":"invalid format: JSON Schema is not supported"}')
+        return {"response":json.dumps(draft)}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("ollama","model-x","make a log",["log"],on_compatibility_fallback=warnings.append)
+    assert result==draft and len(calls)==2
+    assert calls[0]["format"]["type"]=="object"
+    assert calls[1]["format"]=="json"
+    assert "JSON Schema:" in calls[1]["prompt"]
+    assert len(warnings)==1 and "Ollama" in warnings[0]
+
+
+@pytest.mark.parametrize("status,body",[
+    (401,'{"error":"unauthorized: bad key"}'),
+    (500,'{"error":"invalid format: JSON Schema is not supported"}'),
+])
+def test_ollama_does_not_retry_credential_or_server_errors(monkeypatch,status,body):
+    calls=[]
+    def call(*args,**kwargs):
+        calls.append(kwargs["body"])
+        raise ai.ProviderHttpError(status,body)
+    monkeypatch.setattr(ai,"_call",call)
+    with pytest.raises(ai.ProviderHttpError):
+        ai.draft("ollama","model-x","make a log",["log"])
+    assert len(calls)==1
+
+
+def test_openai_responses_retries_json_object_mode_only_for_rejected_schema(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    calls=[];warnings=[]
+    def call(url,local,method="GET",**kwargs):
+        calls.append(kwargs["body"])
+        if len(calls)==1:
+            raise ai.ProviderHttpError(400,'{"error":{"message":"text.format json_schema is not supported by this model"}}')
+        return {"status":"completed","output_text":json.dumps(draft)}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("openai_responses","model-x","make a log",["log"],credential_service="s",credential_username="u",on_compatibility_fallback=warnings.append)
+    assert result==draft and len(calls)==2
+    assert calls[0]["text"]["format"]["type"]=="json_schema"
+    assert calls[1]["text"]["format"]=={"type":"json_object"}
+    assert "JSON Schema:" in calls[1]["instructions"]
+    assert calls[1]["store"] is False and len(warnings)==1
+
+
+def test_openai_responses_does_not_retry_authentication_error(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    calls=[]
+    def call(*args,**kwargs):
+        calls.append(kwargs["body"])
+        raise ai.ProviderHttpError(401,'{"error":{"message":"invalid API key"}}')
+    monkeypatch.setattr(ai,"_call",call)
+    with pytest.raises(ai.ProviderHttpError,match="HTTP 401"):
+        ai.draft("openai_responses","model-x","make a log",["log"],credential_service="s",credential_username="u")
+    assert len(calls)==1
+
+
 @pytest.mark.parametrize("status,body",[
     (400,'{"error":{"message":"invalid API key"}}'),
     (500,'{"error":{"message":"response_format json_schema unsupported"}}'),

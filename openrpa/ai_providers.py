@@ -53,9 +53,26 @@ class ProviderHttpError(ValueError):
         if self.status not in {400,404,422}:
             return False
         diagnostic=self._diagnostic
-        mentions_schema=any(term in diagnostic for term in ("response_format","json_schema","json schema","structured output"))
-        rejects_parameter=any(term in diagnostic for term in ("unsupported","not supported","does not support","doesn't support","not support","unrecognized","unknown parameter","unknown field","invalid parameter","not available"))
-        return mentions_schema and rejects_parameter
+        return self.rejects_structured_setting(("response_format","text.format","json_schema","json schema","structured output"))
+
+    def rejects_ollama_json_schema(self) -> bool:
+        if self.status not in {400,422}:
+            return False
+        diagnostic=self._diagnostic
+        mentions_format="format" in diagnostic and any(term in diagnostic for term in ("json_schema","json schema","schema"))
+        rejects_parameter=self._rejects_parameter()
+        return mentions_format and rejects_parameter
+
+    def rejects_structured_setting(self, setting_terms: tuple[str,...]) -> bool:
+        if self.status not in {400,404,422}:
+            return False
+        diagnostic=self._diagnostic
+        mentions_setting=any(term in diagnostic for term in setting_terms)
+        return mentions_setting and self._rejects_parameter()
+
+    def _rejects_parameter(self) -> bool:
+        diagnostic=self._diagnostic
+        return any(term in diagnostic for term in ("unsupported","not supported","does not support","doesn't support","not support","unrecognized","unknown parameter","unknown field","invalid parameter","not available","invalid format"))
 
 
 def catalog() -> list[dict[str,Any]]:
@@ -225,7 +242,18 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
     instructions=instructions.replace("Return only the requested structured result.","Return only the requested structured result. "+format_instruction)
     if provider=="ollama":
         endpoint,local=_endpoint(provider,base_url,"/api/generate")
-        response=_call(endpoint,local,"POST",body={"model":model,"prompt":instructions+"\n\nUser task JSON:\n"+task_payload,"stream":False,"format":schema,"options":{"temperature":0}},timeout=180,provider=provider,cancel=cancel)
+        ollama_instructions=instructions+"\n\nUser task JSON:\n"+task_payload
+        body={"model":model,"prompt":ollama_instructions,"stream":False,"format":schema,"options":{"temperature":0}}
+        try:
+            response=_call(endpoint,local,"POST",body=body,timeout=180,provider=provider,cancel=cancel)
+        except ProviderHttpError as exc:
+            if not exc.rejects_ollama_json_schema():
+                raise
+            if on_compatibility_fallback is not None:
+                on_compatibility_fallback("The Ollama server rejected JSON Schema mode; Studio retried once with JSON mode and will still validate the draft locally.")
+            fallback_instructions=instructions+"\n\nCompatibility mode: output exactly one raw JSON object, without Markdown fences, conforming to this JSON Schema:\n"+json.dumps(schema,ensure_ascii=False,separators=(",",":"))+"\n\nUser task JSON:\n"+task_payload
+            fallback_body={**body,"prompt":fallback_instructions,"format":"json"}
+            response=_call(endpoint,local,"POST",body=fallback_body,timeout=180,provider=provider,cancel=cancel)
         generated=response.get("response")
         if not isinstance(generated,str): raise ValueError("Ollama response did not contain a workflow draft")
         try: return json.loads(generated)
@@ -241,10 +269,19 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
         return block["input"]
     if spec["kind"]=="openai_responses":
         endpoint,local=_endpoint(provider,base_url,"/responses")
-        response=_call(endpoint,local,"POST",body={"model":model,"instructions":instructions,
+        body={"model":model,"instructions":instructions,
             "input":task_payload,"store":False,
-            "text":{"format":{"type":"json_schema","name":"open_rpa_workflow","strict":False,"schema":schema}}},
-            timeout=180,secret=secret,provider=provider,cancel=cancel)
+            "text":{"format":{"type":"json_schema","name":"open_rpa_workflow","strict":False,"schema":schema}}}
+        try:
+            response=_call(endpoint,local,"POST",body=body,timeout=180,secret=secret,provider=provider,cancel=cancel)
+        except ProviderHttpError as exc:
+            if not exc.rejects_json_schema():
+                raise
+            if on_compatibility_fallback is not None:
+                on_compatibility_fallback("The endpoint rejected JSON Schema mode; Studio retried once with JSON-object mode and will still validate the draft locally.")
+            fallback_body={**body,"instructions":instructions+"\n\nCompatibility mode: output exactly one JSON object, without Markdown fences, conforming to this JSON Schema:\n"+json.dumps(schema,ensure_ascii=False,separators=(",",":")),
+                "text":{"format":{"type":"json_object"}}}
+            response=_call(endpoint,local,"POST",body=fallback_body,timeout=180,secret=secret,provider=provider,cancel=cancel)
         if response.get("status") not in (None,"completed"):
             reason=response.get("incomplete_details") or response.get("error") or response.get("status")
             raise ValueError(f"OpenAI Responses API did not complete the draft: {reason}")
