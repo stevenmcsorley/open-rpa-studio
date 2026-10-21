@@ -189,6 +189,42 @@ def test_api_response_mapping_preserves_nested_json_and_enforces_projected_byte_
     assert failed.status=="failed" and failed.error["activityId"]=="fetch" and failed.error["code"]=="api-response-output-limit"
 
 
+def test_reusable_openapi_operation_workflow_invokes_with_typed_inputs_and_outputs(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Orders","baseUrl":"https://api.example.test/v1"})
+    requests=[]
+    payload={"items":[{"id":"o-17","customer":{"name":"Ada"}}]}
+    def fake_request(url,*_args):
+        requests.append(url)
+        return {"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps(payload)}
+    monkeypatch.setattr(engine,"restricted_http_request",fake_request)
+    operation={"format":"openrpa.workflow","formatVersion":1,"name":"Orders API - List Orders","executionModel":"sequence",
+        "variables":[],"arguments":[
+            {"name":"pathOrgId","type":"string","direction":"in","required":True},
+            {"name":"queryState","type":"string","direction":"in","required":True},
+            {"name":"apiResponse","type":"object","direction":"out","required":False,"target":"apiResponse"},
+            {"name":"apiItems","type":"array","direction":"out","required":False,"target":"apiItems"}],
+        "activities":[{"id":"api-request","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orgs/{{ pathOrgId }}/orders","query":{"state":"{{ queryState }}"},"result":"apiResponse",
+            "responseMapping":{"responseCode":"200","itemsPointer":"/items","fields":[{"name":"orderId","path":"/id"},{"name":"customer","path":"/customer"}],"result":"apiItems","maxItems":10,"maxOutputBytes":5_000_000}}]}
+    main={"format":"openrpa.workflow","formatVersion":1,"name":"Main","executionModel":"sequence","arguments":[],"variables":[{"name":"org","type":"string","value":"north"},{"name":"state","type":"string","value":"open"}],
+        "activities":[{"id":"invoke-orders","type":"invoke_workflow","workflow":operation["name"],"inputs":{"pathOrgId":"{{ org }}","queryState":"{{ state }}"},"outputs":{"apiResponse":"rawResponse","apiItems":"orders"}}]}
+    workflows={"Main":main,operation["name"]:operation}
+    assert validate_workflow(main,set(workflows))==[]
+    assert validate_workflow(operation,set(workflows))==[]
+    from openrpa.model import validate_workflow_bindings
+    assert validate_workflow_bindings(workflows)==[]
+    root=tmp_path/"project";(root/"workflows").mkdir(parents=True,exist_ok=True)
+    (root/"workflows/main.workflow.json").write_text(json.dumps(main),encoding="utf-8")
+    (root/"workflows/orders-api.workflow.json").write_text(json.dumps(operation),encoding="utf-8")
+    project={"format":"openrpa.project","formatVersion":1,"name":"Reusable API test","main":"Main","workflows":{"Main":"workflows/main.workflow.json",operation["name"]:"workflows/orders-api.workflow.json"}}
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="succeeded",result.error
+    assert requests==["https://api.example.test/v1/orgs/north/orders?state=open"]
+    assert result.variables["orders"]==[{"orderId":"o-17","customer":{"name":"Ada"}}]
+    assert result.variables["rawResponse"]["status"]==200
+
+
 def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configuration():
     from openrpa.model import validate_workflow
     base={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":"profile","path":"/items","result":"response","responseMapping":{"responseCode":"200","itemsPointer":"/items","fields":[{"name":"id","path":"/id"}],"result":"items","maxItems":10}}]}

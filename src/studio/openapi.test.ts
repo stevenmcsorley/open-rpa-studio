@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { configureFromOpenApi,configureOpenApiOperation,connectionSeedFromOpenApi,parseOpenApi } from './openapi';
+import { configureFromOpenApi,configureOpenApiOperation,connectionSeedFromOpenApi,createReusableApiWorkflow,parseOpenApi } from './openapi';
 
 const spec=`openapi: 3.0.3
 info: { title: Inventory, version: '2.1' }
@@ -173,6 +173,46 @@ components:
     expect(operation.responseMapping).toEqual({responseCode:'200',itemsPointer:'/data/items',fields:[{name:'id',path:'/id'},{name:'customerName',path:'/customer/name'},{name:'active',path:'/active'}]});
     const configured=configureOpenApiOperation(operation,[{name:'apiItems'}]);
     expect(configured.patch.responseMapping).toEqual({...operation.responseMapping,result:'apiItems2',maxItems:10000,maxOutputBytes:5_000_000});
+  });
+  it('generates an editable reusable API workflow with typed inputs and outputs',()=>{
+    const operation=parseOpenApi(`openapi: 3.1.0
+info: {title: Orders, version: '1'}
+servers: [{url: 'https://orders.example/v1'}]
+paths:
+  /orgs/{orgId}/orders:
+    get:
+      operationId: listOrders
+      parameters:
+        - {name: orgId, in: path, required: true, schema: {type: string}}
+        - {name: state, in: query, required: true, schema: {type: string}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200':
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        customer: {type: object, properties: {name: {type: string}}}
+`).operations[0];
+    const reusable=createReusableApiWorkflow(operation,'saved-orders','Orders API - List Orders');
+    expect(reusable).toMatchObject({format:'openrpa.workflow',formatVersion:1,name:'Orders API - List Orders',executionModel:'sequence'});
+    expect(reusable.arguments).toEqual([
+      {name:'pathOrgId',type:'string',direction:'in',required:true},
+      {name:'queryState',type:'string',direction:'in',required:true},
+      {name:'apiResponse',type:'object',direction:'out',required:false,target:'apiResponse'},
+      {name:'apiItems',type:'array',direction:'out',required:false,target:'apiItems'}
+    ]);
+    expect(reusable.activities[0]).toMatchObject({type:'api_request',connectionId:'saved-orders',method:'GET',path:'/orgs/{{ pathOrgId }}/orders',query:{state:'{{ queryState }}'},result:'apiResponse',responseMapping:{result:'apiItems',maxItems:10_000,maxOutputBytes:5_000_000}});
+    expect(reusable.activities[0].query).not.toHaveProperty('pageSize');
+    expect(()=>createReusableApiWorkflow(operation,'','Invalid')).toThrow('Choose a saved API connection');
   });
   it('leaves mapping unset for ambiguous arrays and never fetches external response schemas',()=>{
     const ambiguous=parseOpenApi(`openapi: 3.0.3

@@ -1,5 +1,6 @@
 import { parse } from 'yaml';
 import type { ApiConnectionProfile } from './bridge';
+import type { Workflow } from './types';
 
 export type OpenApiParameter={name:string;in:'path'|'query'|'header';required:boolean;variable:string;description?:string};
 export type ApiResponseField={name:string;path:string};
@@ -182,6 +183,27 @@ export function configureOpenApiOperation(operation:OpenApiOperation,existingVar
   if(operation.responseMapping){let result='apiItems';let suffix=2;while(used.has(result.toLowerCase()))result=`apiItems${suffix++}`;used.add(result.toLowerCase());response={...operation.responseMapping,result,maxItems:10_000,maxOutputBytes:5_000_000};}
   const patch={...configureFromOpenApi({...operation,parameters:required}),responseMapping:response,pagination:undefined,...(operation.method!=='GET'||operation.body!==undefined?{retryPolicy:undefined}:{})};
   return {patch,parameters,variables:required.map(parameter=>({name:parameter.variable,type:'string' as const,value:''}))};
+}
+
+export function createReusableApiWorkflow(operation:OpenApiOperation,connectionId:string,name:string):Workflow{
+  if(!connectionId.trim())throw new Error('Choose a saved API connection before generating a reusable workflow.');
+  if(!name.trim()||name.length>200)throw new Error('Reusable API workflow name must contain 1–200 characters.');
+  const configured=configureOpenApiOperation(operation,[]);
+  const restrictedHeader=/^(authorization|cookie|set-cookie|host|connection|content-length|transfer-encoding|proxy-authorization)$/i;
+  if(configured.parameters.some(parameter=>parameter.in==='header'&&(restrictedHeader.test(parameter.name)||/(token|secret|api[-_]?key|password|credential)/i.test(parameter.name))))
+    throw new Error('This operation declares a credential-like header parameter. Configure it as authentication on the saved API connection instead of exposing it as a workflow input.');
+  const inputArguments=configured.parameters.filter(parameter=>parameter.required).map(parameter=>({name:parameter.variable,type:'string' as const,direction:'in' as const,required:true}));
+  const used=new Set(inputArguments.map(argument=>argument.name.toLowerCase()));
+  if(configured.patch.responseMapping)used.add(String(configured.patch.responseMapping.result).toLowerCase());
+  const allocate=(base:string)=>{let candidate=base;let suffix=2;while(used.has(candidate.toLowerCase()))candidate=`${base}${suffix++}`;used.add(candidate.toLowerCase());return candidate};
+  const responseName=allocate('apiResponse');
+  const outputs:Workflow['arguments']=[{name:responseName,type:'object',direction:'out',required:false,target:responseName}];
+  if(configured.patch.responseMapping){
+    const mappedName=String(configured.patch.responseMapping.result);
+    outputs.push({name:mappedName,type:'array' as const,direction:'out' as const,required:false,target:mappedName});
+  }
+  const activity:Workflow['activities'][number]={id:'api-request',type:'api_request',label:`Call ${operation.name}`,connectionId,...configured.patch,result:responseName};
+  return {format:'openrpa.workflow',formatVersion:1,name,executionModel:'sequence',variables:[],arguments:[...inputArguments,...outputs],activities:[activity]};
 }
 
 export function connectionSeedFromOpenApi(operation:OpenApiOperation,title='Imported API'): {profile:OpenApiConnectionSeed;warning?:string}{
