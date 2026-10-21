@@ -30,6 +30,6 @@
 3. **Automation adapters:** add editable selector healing and broaden accessibility acceptance across GTK, Qt, WPF, Win32, WinForms and packaged-app targets. Browser waits/assertions and bounded browser interaction recording are implemented.
 4. **Security:** signed plugin metadata, dependency/SBOM scans, adversarial package and egress tests, threat-model review, safe package verification.
 5. **Distribution:** Windows x64 per-user NSIS installer now builds and installs in a workspace-local smoke test, with a bundled Python engine and no-console child process. Still verify on a clean Windows machine; sign binaries; test upgrades, uninstall and WebView2 bootstrap behavior; produce Linux AppImage/deb on a supported Linux build host.
-6. **AI (optional):** integration tests against available local models and authenticated remote providers, per-provider endpoint validation and retry/compatibility handling. Core authoring/execution remains available without a model.
+6. **AI (optional):** integration tests against available local models and authenticated remote providers; broader per-provider structured-output fallbacks, bounded cancellation, and compatibility handling remain. Typed model IDs now work when a host's model catalogue is unavailable. Core authoring/execution remains available without a model.
 
 “Production” requires passing these operational and security gates for each supported platform; the initial vertical slice is not yet a production-certified release.

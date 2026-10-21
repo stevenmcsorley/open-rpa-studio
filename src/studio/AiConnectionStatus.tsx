@@ -5,6 +5,7 @@ export type AiConnectionState =
   | { status: 'checking' }
   | { status: 'connected'; modelCount: number; durationMs: number }
   | { status: 'empty'; durationMs: number }
+  | { status: 'catalog-failed'; message: string }
   | { status: 'failed'; message: string };
 
 export function AiConnectionStatus({ state }: { state: AiConnectionState }) {
@@ -16,6 +17,9 @@ export function AiConnectionStatus({ state }: { state: AiConnectionState }) {
   }
   if (state.status === 'connected') {
     return <div className="ai-connection-status connected" role="status"><CheckCircle2 size={13} /><span>Connected · {state.modelCount} model{state.modelCount === 1 ? '' : 's'} · {state.durationMs} ms</span></div>;
+  }
+  if (state.status === 'catalog-failed') {
+    return <div className="ai-connection-status warning" role="alert"><CircleAlert size={13} /><span>Model catalogue unavailable · {state.message} · enter a model ID to try generation</span></div>;
   }
   if (state.status === 'empty') {
     return <div className="ai-connection-status warning" role="status"><CircleAlert size={13} /><span>Endpoint responded but listed no models · {state.durationMs} ms</span></div>;

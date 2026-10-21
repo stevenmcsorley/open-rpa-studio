@@ -1,11 +1,13 @@
 # Changelog
 ## Unreleased
 
+- AI model selection now accepts an exact manually entered provider model ID when an endpoint does not expose or filters its model catalogue; saved model IDs are preserved across a catalogue refresh.
+- Added a distinct catalogue-unavailable status so a missing `GET /models` route does not incorrectly imply the generation endpoint is unusable.
 - Added a flowchart minimap showing graph topology, selected node and the visible canvas viewport, with pointer and keyboard navigation.
 - Fixed large flowcharts expanding the designer beyond its allocated workspace; long graphs now scroll inside the canvas. The Fit control accounts for both graph dimensions.
 - Added a state-machine transition overview generated from saved states and guards; selecting a state in the graph opens its existing editable state panel.
 - Refreshed public README screenshots to show both graph editors.
-- Verification: 55 frontend tests and the production Vite build pass; a live 11-node flowchart confirmed minimap scrolling and a browser interaction confirmed state-graph selection updates the editor.
+- Verification: 58 frontend tests, the production Vite build, and 33 targeted AI adapter/profile tests pass. A localhost OpenAI-compatible mock returned HTTP 404 for `/models` and successfully generated a validated-shape draft using a manually supplied model ID.
 
 ## 0.1.28 — Local MCP server for AI clients
 

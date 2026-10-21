@@ -18,4 +18,11 @@ describe('AiConnectionStatus', () => {
     expect(failed).toContain('role="alert"');
     expect(failed).toContain('HTTP 401');
   });
+
+  it('explains that a missing model catalogue does not block manual model selection',()=>{
+    const html=renderToStaticMarkup(createElement(AiConnectionStatus,{state:{status:'catalog-failed',message:'HTTP 404'}}));
+    expect(html).toContain('Model catalogue unavailable');
+    expect(html).toContain('enter a model ID to try generation');
+    expect(html).toContain('HTTP 404');
+  });
 });

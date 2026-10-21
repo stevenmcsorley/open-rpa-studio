@@ -110,6 +110,8 @@ The core editor and execution engine work without an AI model or network access.
 - OpenRouter.
 - Compatible remote HTTPS endpoints configured by the user.
 
+The model picker accepts typed model IDs as well as discovered IDs. This lets compatible endpoints work when their model catalogue is disabled or filtered; the chosen ID is still sent to the selected provider and provider errors remain visible.
+
 Provider credentials are references into the operating-system credential vault (Windows Credential Manager, macOS Keychain, or Linux Secret Service). In the desktop AI panel, enter a key into the password field and choose **Store API key securely**; the key is sent to the local bridge, stored in the OS vault, then cleared from the form. Save named connection profiles to remember provider, endpoint, model and vault references across launches. Profiles contain no credentials. Alternatively, use `openrpa credential SERVICE USERNAME`. Secrets are never placed in workflow files or audit records. Remote prompts disclose the provider route before a request. Task descriptions are JSON-encoded user content, separate from system instructions; this does not eliminate prompt injection. AI output is treated as untrusted, parsed as a bounded schema, validated by the workflow validator, and requires user review before insertion. Local models are optional; unavailable providers do not disable non-AI features.
 
 This is a set of provider-protocol adapters, not a promise that every model endpoint implements tool calling or structured output identically. Some compatible servers may reject schema-constrained requests.
