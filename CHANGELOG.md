@@ -1,6 +1,9 @@
 # Changelog
 ## Unreleased
 
+- State-machine graph edges are now directly editable: select an edge to change its destination or guard, reorder guarded routes, remove it, or add a new safe `False`-guarded route. Blank guards remain the final fallback, and duplicate fallbacks are rejected. Added regression tests and a public README screenshot of the actual editor.
+- Verification: all 62 frontend tests pass; TypeScript and the production Vite build pass; `git diff --check` passes. Screenshot captured from the live browser preview.
+
 - Added request-ID-scoped AI draft cancellation across Studio, the native bridge and provider HTTP transports. Cancellation interrupts socket waits and discards late results; requests already received by a provider may continue server-side.
 - Verification: the native-bridge cancellation regression, 169 Python tests, 58 frontend tests and the production Vite build pass.
 

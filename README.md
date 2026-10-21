@@ -12,6 +12,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *State-machine overview nodes are generated from the executable state and transition definitions. Select a node to edit that state's activities and guards.*
 
+![Open RPA Studio state-machine graph with a selected transition and inline guard and destination editor](docs/assets/state-machine-editor.png)
+
+*Select a transition edge to edit its destination or guard, reorder guarded routes, remove it, or add a new safe False-guarded route. Blank guards represent the fallback and remain last.*
+
 Execution history now opens full saved run records with activity durations, event timestamps, workflow digests, errors and clear interruption warnings. Interrupted runs are inspectable and are never silently replayed.
 
 The AI drafting panel can also prepare a workflow repair from the latest failed run. It excludes runtime variable values, argument defaults and raw error text from the repair prompt, then requires validation and review before replacing the current workflow. Remote providers may receive configured literals from the workflow.

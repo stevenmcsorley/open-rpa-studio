@@ -26,7 +26,7 @@
 ## Next release gates
 
 1. **Debugging completion:** workflow invocation failures now carry a bounded, redacted call path and origin workflow/activity through run results and durable history. Add durable debug checkpoints; paused variable editing and Step Out are supported at activity boundaries. Mid-activity pause remains adapter-dependent.
-2. **Visual authoring:** extend graph overview/navigation to nested workflow branches and add direct transition-edit gestures to the state-machine graph; state selection, guarded-edge display and flowchart navigation are implemented.
+2. **Visual authoring:** extend graph overview/navigation to nested workflow branches. The state-machine graph now supports selecting, adding, editing, reordering, and removing transitions; flowchart navigation and the minimap are implemented.
 3. **Automation adapters:** add editable selector healing and broaden accessibility acceptance across GTK, Qt, WPF, Win32, WinForms and packaged-app targets. Browser waits/assertions and bounded browser interaction recording are implemented.
 4. **Security:** signed plugin metadata, dependency/SBOM scans, adversarial package and egress tests, threat-model review, safe package verification.
 5. **Distribution:** Windows x64 per-user NSIS installer now builds and installs in a workspace-local smoke test, with a bundled Python engine and no-console child process. Still verify on a clean Windows machine; sign binaries; test upgrades, uninstall and WebView2 bootstrap behavior; produce Linux AppImage/deb on a supported Linux build host.
