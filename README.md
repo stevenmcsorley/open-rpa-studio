@@ -16,14 +16,14 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.20 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.18). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.21 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.18). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.20 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `587cc881c5b8f1b37ef1be9fa79885f5c033ab642ac6da492276b04130a82600`. Verify the file before running it:
+The v0.1.21 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `765ae50bfa40f50d1c64a5b3664da8492f4a2efe616cca01a18cee0985673ccd`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.20-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.21-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer

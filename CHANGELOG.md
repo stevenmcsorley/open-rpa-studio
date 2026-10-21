@@ -1,4 +1,10 @@
 # Changelog
+## 0.1.21 — Patched frontend build and test dependencies
+
+- Upgraded Vite and its React plugin to supported patched major versions, and Vitest/Tinypool to versions without the advisories reported by npm audit.
+- Declared the Node.js compatibility range required by the build plugins.
+- Verification: `npm audit` reports zero vulnerabilities; 42 frontend tests, 130 Python tests, production build and offline Cargo check passed. Windows x64 installer built (60.77 MiB); SHA-256: `765ae50bfa40f50d1c64a5b3664da8492f4a2efe616cca01a18cee0985673ccd`. Fresh isolated install and launch passed; only the expected bundled `openrpa-bridge.exe` child appeared. The installed bridge passed XLSX round-trip, XML DTD/entity rejection and persisted `run.get` event-timestamp verification.
+
 ## 0.1.20 — Inspectable durable run history
 
 - Replaced the bare run-history list with a selectable execution record showing activity status and duration, stored events and their durable timestamps, workflow digest, error details, and interruption guidance.
