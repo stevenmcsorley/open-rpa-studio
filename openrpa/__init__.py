@@ -1,2 +1,2 @@
 """Open RPA Studio local workflow engine."""
-__version__ = "0.1.33"
+__version__ = "0.1.34"

@@ -1,4 +1,8 @@
 # Changelog
+## 0.1.34
+- MCP project synchronization now selects the single newly created or changed workflow after a clean reload, so newly built workflows appear directly in the designer. Studio identifies the MCP-created/updated workflow in its status message. Multiple simultaneous changes keep the current selection; unsaved local edits still require a deliberate reload.
+- Added focused workflow-change detection tests. Verification: 247 Python tests, 121 frontend tests and the production frontend build pass. Windows NSIS installer: 69.12 MiB, SHA-256 `8e13a9bde3f4f5ca567809dbfebd42a3df1260397569dbb0b34879defc65cf36`.
+
 ## 0.1.33
 - Added a reusable API connection manager in Studio and native MCP discovery for saved connection metadata. Bearer tokens and API-key values remain in the OS credential vault; API workflow results and audit records do not include the stored secret.
 - Added a dedicated **API Request** activity editor and engine support for bounded GET/POST/PUT/PATCH calls, query parameters, request bodies, shared headers, host-bound relative paths, request-size/time limits, per-connection pacing, network permission checks, and audit events.
