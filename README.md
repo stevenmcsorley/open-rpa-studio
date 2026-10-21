@@ -74,6 +74,8 @@ The v0.1.28 installer is unsigned. Windows SmartScreen may show an unknown-publi
 Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.28-x64.exe -Algorithm SHA256
 ```
 
+To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies. The published v0.1.28 installer above remains the latest GitHub release until a new release is published.
+
 ## Build the Windows installer
 
 ### Prerequisites
@@ -133,7 +135,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 
 The Python engine is separate from the UI process and can also run from the command line. Supported control flow includes If/Else, For Each, While, Switch, Retry Scope with explicit repeat-safety acknowledgement, Try/Catch/Finally, flowcharts, and reusable workflow invocation with typed arguments. The expression evaluator accepts a bounded expression grammar and never calls `eval()` on workflow text.
 
-Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed row filtering, bounded typed-key joins, grouped aggregates, stable multi-key sorting, expression-based row projection, typed-key deduplication and explicit row-schema validation; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
+Core activities include variable assignment and logging; credential lookup by vault reference; file read/write/copy/move/delete/list operations; text/regex processing; JSON, CSV and XLSX data operations, including typed row filtering, bounded typed-key joins, grouped aggregates, stable multi-key sorting, expression-based row projection, typed-key deduplication and explicit row-schema validation; selectable PDF text extraction and optional local Tesseract image OCR; wait; HTTP requests; browser actions; Windows UI Automation; Linux AT-SPI desktop accessibility; screenshots; and optional desktop coordinates. Activity permissions, quotas, validation, structured logs, and execution status are handled by the engine, not simulated by the editor.
 
 ![Open RPA Studio workflow designer with a Filter Rows activity selected and typed status and value conditions configured in its properties panel](docs/assets/filter-rows-activity.png)
 
@@ -162,6 +164,10 @@ Core activities include variable assignment and logging; credential lookup by va
 ![Open RPA Studio with Validate Rows rules for required typed fields and explicit validation outputs](docs/assets/validate-rows-activity.png)
 
 *Validate Rows checks records against explicit field types and required/non-empty constraints. It leaves source rows untouched and emits invalid rows with structured field-level reasons.*
+
+![Open RPA Studio with the local OCR Image activity configured for an installed Tesseract runtime](docs/assets/image-ocr-activity.png)
+
+*OCR Image reads an approved local PNG, JPEG or BMP through Tesseract. The desktop runtime reports whether OCR is installed; the browser preview cannot read local files. See [local image OCR limits and setup](docs/IMAGE-OCR.md).*
 
 ### Debugging and run history
 

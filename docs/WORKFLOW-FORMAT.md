@@ -54,7 +54,7 @@ The visual editor lets users add and remove grouping fields and aggregation defi
 
 ## PDF text extraction
 
-`pdf_read_text` extracts selectable PDF text within the project file-size quota, respects cancellation between pages, preserves page boundaries with form-feed separators, and reports page count to a separate variable. It supports an optional bounded page limit and approximate layout mode. Encrypted PDFs and image-only OCR are not supported. See [PDF activity limits](PDF-ACTIVITIES.md).
+`pdf_read_text` extracts selectable PDF text within the project file-size quota, respects cancellation between pages, preserves page boundaries with form-feed separators, and reports page count to a separate variable. It supports an optional bounded page limit and approximate layout mode. Encrypted PDFs and image-only OCR directly inside PDFs are not supported. The separate [local OCR activity](IMAGE-OCR.md) accepts PNG, JPEG and BMP image files.
 
 ## State machine
 

@@ -12,6 +12,7 @@ import io
 import copy as copy_module
 import zipfile
 import sqlite3
+import subprocess
 import base64
 from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
@@ -1059,6 +1060,65 @@ class WorkflowEngine:
                 v[a.get("pageCountResult","pageCount")]=page_count
             except WorkflowError:raise
             except Exception as exc:raise WorkflowError(f"Cannot extract text from PDF: {type(exc).__name__}: {exc}",a["id"],"pdf-read-error") from exc
+        elif kind == "image_ocr":
+            path=self._path(a["path"],v)
+            if path.suffix.lower() not in {".png",".jpg",".jpeg",".bmp"}:raise WorkflowError("OCR Image supports PNG, JPEG, and BMP files only",a["id"],"ocr-format")
+            if not path.is_file():raise WorkflowError("OCR Image input file does not exist",a["id"],"ocr-not-found")
+            self.options.audit("file.read",{"activityId":a["id"],"path":self._audit_path(path)})
+            if path.stat().st_size>self._max_file_bytes:raise WorkflowError("OCR Image input exceeds configured file size limit",a["id"],"file-size-limit")
+            executable=shutil.which("tesseract")
+            if not executable:raise WorkflowError("Tesseract OCR is unavailable; install Tesseract and ensure it is on PATH",a["id"],"ocr-runtime")
+            try:
+                from PIL import Image
+                with Image.open(path) as image:
+                    if image.format not in {"PNG","JPEG","BMP"}:raise WorkflowError("OCR Image supports PNG, JPEG, and BMP image data only",a["id"],"ocr-format")
+                    width,height=image.size
+                    if width<1 or height<1 or width*height>30_000_000:raise WorkflowError("OCR Image dimensions must not exceed 30 megapixels",a["id"],"ocr-pixel-limit")
+                    image.verify()
+            except WorkflowError:raise
+            except ImportError as exc:raise WorkflowError("Pillow is unavailable; install the optional Open RPA Studio OCR dependency",a["id"],"ocr-runtime") from exc
+            except Exception as exc:raise WorkflowError(f"Cannot validate OCR Image input: {type(exc).__name__}",a["id"],"ocr-image-invalid") from exc
+            language=a.get("language","eng");psm=a.get("pageSegmentationMode",3);timeout=float(a.get("timeoutSeconds",60))
+            self.options.audit("image.ocr.attempt",{"activityId":a["id"],"path":self._audit_path(path),"language":language,"pageSegmentationMode":psm})
+            secret_markers=("API_KEY","APIKEY","TOKEN","SECRET","PASSWORD","CREDENTIAL","AUTHORIZATION")
+            environment={key:value for key,value in os.environ.items() if not any(marker in key.upper() for marker in secret_markers)}
+            environment["OMP_THREAD_LIMIT"]="1"
+            flags=getattr(subprocess,"CREATE_NO_WINDOW",0)
+            deadline=time.monotonic()+timeout
+            try:
+                with tempfile.TemporaryFile() as output:
+                    process=subprocess.Popen([executable,str(path),"stdout","-l",language,"--psm",str(psm)],cwd=str(self.root),stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,env=environment,creationflags=flags)
+                    try:
+                        while process.poll() is None:
+                            self._check_cancel()
+                            if time.monotonic()>=deadline:
+                                process.terminate()
+                                try:process.wait(timeout=2)
+                                except subprocess.TimeoutExpired:process.kill();process.wait()
+                                raise WorkflowError("OCR Image exceeded its configured timeout",a["id"],"ocr-timeout")
+                            output.seek(0,os.SEEK_END)
+                            if output.tell()>self._max_file_bytes:
+                                process.terminate()
+                                try:process.wait(timeout=2)
+                                except subprocess.TimeoutExpired:process.kill();process.wait()
+                                raise WorkflowError("OCR Image output exceeds configured data limit",a["id"],"file-size-limit")
+                            time.sleep(min(0.05,max(0.005,deadline-time.monotonic())))
+                    except RunCancelled:
+                        process.terminate()
+                        try:process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:process.kill();process.wait()
+                        raise
+                    exit_code=process.wait()
+                    if exit_code!=0:raise WorkflowError("Tesseract failed to recognize the image; check the image and installed language data",a["id"],"ocr-failed")
+                    output.seek(0);raw=output.read(self._max_file_bytes+1)
+                    if len(raw)>self._max_file_bytes:raise WorkflowError("OCR Image output exceeds configured data limit",a["id"],"file-size-limit")
+                    try:recognized=raw.decode("utf-8")
+                    except UnicodeDecodeError as exc:raise WorkflowError("Tesseract returned invalid UTF-8 text",a["id"],"ocr-output") from exc
+                v[a.get("result","recognizedText")]=recognized
+                self.options.audit("image.ocr.completed",{"activityId":a["id"],"path":self._audit_path(path),"outputBytes":len(raw)})
+                self._emit({"event":"image-ocr-completed","activityId":a["id"],"outputBytes":len(raw)},logs)
+            except WorkflowError:raise
+            except OSError as exc:raise WorkflowError(f"Cannot start Tesseract OCR: {type(exc).__name__}",a["id"],"ocr-runtime") from exc
         elif kind == "sqlite_query":
             path=self._path(a["path"],v)
             if path.suffix.lower() not in {".db",".sqlite",".sqlite3"}:raise WorkflowError("SQLite Query supports .db, .sqlite, or .sqlite3 files only",a["id"],"sqlite-format")

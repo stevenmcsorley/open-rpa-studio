@@ -1,6 +1,10 @@
 # Changelog
 ## Unreleased
 
+- Added OCR Image, an optional local Tesseract activity for PNG, JPEG and BMP files. It probes runtime availability, preflights images with Pillow, enforces 30-megapixel/input/output/time limits, checks cancellation, redacts secret-like environment variables from the subprocess and records local audit evidence. Added an executable packaged-bridge OCR acceptance check and a public Studio screenshot.
+- Added Map Rows, Distinct Rows and Validate Rows for bounded, non-mutating data preparation, typed-key deduplication and explicit schema validation with structured row errors.
+- Verification: 225 Python tests, 116 frontend tests, production frontend build, frozen-bridge Pillow acceptance check and a real Tesseract workflow recognizing `OPEN RPA LOCAL OCR 2026` all pass. Current-source CI is pending.
+
 - Added project-wide search across workflows, nested activities, sequence branches, flowchart nodes and transitions, state-machine states and transitions, and variable/argument names. Ctrl+Shift+F opens a navigable result list capped at 100 results. Credential-like fields and variable/argument default values are excluded. Added a public screenshot.
 - Verification: all 77 frontend tests pass, including nested-path matching, graph/state coverage, secret-field exclusion and result caps. The production build passes; Playwright verified search results and selecting a match navigates to its editable activity. Python remains at 181 passing tests.
 - Extended conditional breakpoints to flowchart control nodes and state-machine entries. The native debugger evaluates each expression at the boundary before execution, continues only when the condition is false, and fails closed by pausing on invalid expressions. Added a public screenshot of the state-entry inspector.

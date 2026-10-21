@@ -343,6 +343,16 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 max_pages=item.get("maxPages",500)
                 if not isinstance(max_pages,int) or isinstance(max_pages,bool) or not 1<=max_pages<=5000:problems.append({"code":"pdf-page-limit","message":"PDF maximum pages must be between 1 and 5,000","activityId":str(aid or "")})
                 if "layoutMode" in item and not isinstance(item["layoutMode"],bool):problems.append({"code":"pdf-layout-mode","message":"PDF layoutMode must be a boolean","activityId":str(aid or "")})
+            elif typ == "image_ocr":
+                if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"ocr-path","message":"OCR Image needs a non-empty image path","activityId":str(aid or "")})
+                result=item.get("result","recognizedText")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"ocr-result","message":"OCR Image result must be a variable name","activityId":str(aid or "")})
+                language=item.get("language","eng")
+                if not isinstance(language,str) or not 1<=len(language)<=64 or any(not (character.isascii() and (character.isalnum() or character in "_+.-")) for character in language):problems.append({"code":"ocr-language","message":"OCR Image language must be a 1–64 character Tesseract language identifier","activityId":str(aid or "")})
+                psm=item.get("pageSegmentationMode",3)
+                if not isinstance(psm,int) or isinstance(psm,bool) or not 0<=psm<=13:problems.append({"code":"ocr-psm","message":"OCR Image pageSegmentationMode must be an integer from 0 to 13","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",60)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=300:problems.append({"code":"ocr-timeout","message":"OCR Image timeoutSeconds must be from 1 to 300","activityId":str(aid or "")})
             elif typ == "sqlite_query":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"sqlite-path","message":"SQLite Query needs a non-empty database path","activityId":str(aid or "")})
                 query=item.get("query")
@@ -681,7 +691,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
-    "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
+    "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "image_ocr", "json_parse", "json_write",
     "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-rpa-studio-engine"
-version = "0.1.28"
+version = "0.1.29"
 description = "Local-first visual automation workflow engine"
 requires-python = ">=3.11"
 dependencies = ["regex>=2024.11,<2027", "openpyxl>=3.1,<4", "defusedxml>=0.7.1,<1", "pypdf>=6.19,<7"]
@@ -17,6 +17,7 @@ desktop = [
     "pywinauto>=0.6.9,<1 ; sys_platform == 'win32'",
 ]
 credentials = ["keyring>=25,<27"]
+ocr = ["Pillow>=10,<13"]
 
 [project.scripts]
 openrpa = "openrpa.cli:main"

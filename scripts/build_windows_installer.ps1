@@ -7,18 +7,18 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'Node.js and n
 
 Write-Host 'Locking and syncing the Windows build dependencies...'
 uv lock
-uv sync --locked --extra dev --extra browser --extra desktop --extra credentials
+uv sync --locked --extra dev --extra browser --extra desktop --extra credentials --extra ocr
 if ($LASTEXITCODE -ne 0) { throw 'uv dependency sync failed.' }
 
 $resourceDir = Join-Path $appRoot 'src-tauri\resources'
 $workDir = Join-Path $appRoot '.build\pyinstaller'
 New-Item -ItemType Directory -Force -Path $resourceDir, $workDir | Out-Null
 Write-Host 'Freezing the Python workflow bridge into a self-contained executable...'
-uv run --locked --extra browser --extra desktop --extra credentials pyinstaller `
+uv run --locked --extra browser --extra desktop --extra credentials --extra ocr pyinstaller `
   --noconfirm --clean --onefile --name openrpa-bridge `
   --distpath $resourceDir --workpath $workDir --specpath $workDir `
   --paths $appRoot --collect-submodules openrpa --collect-all regex `
-  --collect-all playwright --collect-all pyautogui --collect-all pywinauto --collect-all comtypes --collect-all keyring --collect-all openpyxl --collect-all defusedxml `
+  --collect-all playwright --collect-all pyautogui --collect-all pywinauto --collect-all comtypes --collect-all keyring --collect-all openpyxl --collect-all defusedxml --collect-all PIL `
   (Join-Path $appRoot 'scripts\bridge_entry.py')
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed to create the bundled workflow engine.' }
 $bridgePath = Join-Path $resourceDir 'openrpa-bridge.exe'

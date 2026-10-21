@@ -24,7 +24,7 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - name: Install locked Python development dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra ocr --extra browser --extra desktop --extra credentials
       - name: Python engine tests
         run: uv run --locked --extra dev pytest -q
       - name: Install locked frontend dependencies
@@ -37,11 +37,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path src-tauri/resources, .build/pyinstaller | Out-Null
-          uv run --locked --extra browser --extra desktop --extra credentials pyinstaller `
+          uv run --locked --extra browser --extra desktop --extra credentials --extra ocr pyinstaller `
             --noconfirm --clean --onefile --name openrpa-bridge `
             --distpath src-tauri/resources --workpath .build/pyinstaller --specpath .build/pyinstaller `
             --paths . --collect-submodules openrpa --collect-all regex `
-            --collect-all playwright --collect-all pyautogui --collect-all keyring --collect-all openpyxl --collect-all defusedxml `
+            --collect-all playwright --collect-all pyautogui --collect-all keyring --collect-all openpyxl --collect-all defusedxml --collect-all PIL `
             scripts/bridge_entry.py
       - name: Check bundled CLI/MCP command
         shell: pwsh
@@ -49,5 +49,6 @@ jobs:
           src-tauri/resources/openrpa-bridge.exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'The bundled CLI/MCP command failed its startup check.' }
           uv run --locked python tests/fixtures/packaged_mcp_acceptance.py src-tauri/resources/openrpa-bridge.exe
+          uv run --locked python tests/fixtures/packaged_ocr_acceptance.py src-tauri/resources/openrpa-bridge.exe
       - name: Check Windows desktop host
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml

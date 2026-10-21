@@ -33,6 +33,11 @@ describe('run impact plan', () => {
     expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
   });
 
+  it('requires the file-read review for local OCR documents',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'ocr',type:'image_ocr',path:'scans/invoice.png',language:'eng'}]});
+    expect(plan.needsNetwork).toBe(false);expect(plan.needsDesktop).toBe(false);expect(plan.actions).toMatchObject([{id:'ocr',risk:'read',label:'OCR image (local Tesseract)',detail:'scans/invoice.png'}]);
+  });
+
   it('treats bounded row joins as local data logic without requesting permissions',()=>{
     const plan=buildExecutionPlan({...base,activities:[{id:'join',type:'join_rows',left:'orders',right:'buyers',leftKey:'buyerId',rightKey:'id'}]});
     expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});

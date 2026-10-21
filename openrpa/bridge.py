@@ -7,6 +7,8 @@ import tempfile
 import threading
 import hashlib
 import importlib.util
+import shutil
+import subprocess
 import atexit
 from pathlib import Path
 from typing import Any
@@ -354,7 +356,20 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 vault={"available":True,"reason":None}
             except Exception as exc:
                 vault={"available":False,"reason":str(exc)}
-            result = {"browser": browser, "desktop": desktop, "accessibility": accessibility,"credentialVault":vault}
+            ocr={"available":False,"reason":"Tesseract is not installed or is not on PATH"}
+            try:
+                from PIL import Image as _PillowImage
+                ocr.update({"imageDecoder":"Pillow","imageDecoderVersion":getattr(_PillowImage,"__version__","unknown")})
+            except ImportError:
+                ocr={"available":False,"reason":"Optional Pillow OCR dependency is not installed"}
+            executable=shutil.which("tesseract")
+            if executable and ocr.get("imageDecoder"):
+                try:
+                    version=subprocess.run([executable,"--version"],capture_output=True,text=True,timeout=3,check=False,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+                    if version.returncode==0:ocr.update({"available":True,"reason":None,"engine":"Tesseract","version":(version.stdout.splitlines() or [""])[0][:120]})
+                    else:ocr.update({"available":False,"reason":"Tesseract was found but its runtime probe failed"})
+                except Exception as exc:ocr.update({"available":False,"reason":f"Tesseract runtime probe failed: {type(exc).__name__}"})
+            result = {"browser": browser, "desktop": desktop, "accessibility": accessibility,"credentialVault":vault,"ocr":ocr}
         elif method == "desktop.inspect.windows":
             if params.get("allowDesktop") is not True:
                 raise ValueError("Desktop inspection requires explicit desktop permission in the Studio toolbar")

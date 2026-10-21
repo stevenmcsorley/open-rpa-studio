@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:616210c0-891b-537e-b547-e96a0c5a406d",
+  "serialNumber": "urn:uuid:f1c4b390-d7ef-530c-a293-11696404fa8b",
   "version": 1,
   "metadata": {
     "component": {
       "type": "application",
       "name": "Open RPA Studio",
-      "version": "0.1.28",
-      "purl": "pkg:generic/open-rpa-studio@0.1.28"
+      "version": "0.1.29",
+      "purl": "pkg:generic/open-rpa-studio@0.1.29"
     },
     "properties": [
       {
@@ -12690,9 +12690,9 @@
     {
       "type": "library",
       "name": "open-rpa-studio-engine",
-      "version": "0.1.28",
-      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.28",
-      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.28",
+      "version": "0.1.29",
+      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.29",
+      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.29",
       "properties": [
         {
           "name": "openrpa:licenseReview",
@@ -12776,9 +12776,9 @@
     {
       "type": "library",
       "name": "pillow",
-      "version": "13.0.0",
-      "purl": "pkg:pypi/pillow@13.0.0",
-      "bom-ref": "pkg:pypi/pillow@13.0.0",
+      "version": "12.3.0",
+      "purl": "pkg:pypi/pillow@12.3.0",
+      "bom-ref": "pkg:pypi/pillow@12.3.0",
       "properties": [
         {
           "name": "openrpa:licenseReview",
@@ -12792,7 +12792,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510"
+          "content": "3b8182a766685eaa002637e28b4ec8d6b18819a0c71f579bf0dbaa5830297cce"
         }
       ]
     },
