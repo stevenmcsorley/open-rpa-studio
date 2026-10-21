@@ -60,21 +60,27 @@ def main() -> None:
             raise AssertionError(f"Unexpected bridge response while waiting for {method}: {row}")
         raise AssertionError(f"Timed out waiting for bridge method {method}")
 
-    def wait_event(name: str, timeout: float = 10) -> dict:
+    def wait_event(name: str, timeout: float = 10, activity_id: str | None = None) -> dict:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             row = events.get(timeout=max(0.01, deadline - time.monotonic()))
             data = row.get("data", {})
-            if data.get("event") == name:
+            if data.get("event") == name and (activity_id is None or data.get("activityId") == activity_id):
                 return data
-        raise AssertionError(f"Timed out waiting for run event {name}")
+        raise AssertionError(f"Timed out waiting for run event {name} for activity {activity_id}")
 
     try:
         created = send("project.create", {"path": str(root / "project"), "name": "Debug watch acceptance"})
         project = created["project"]
         workflow = {"format": "openrpa.workflow", "formatVersion": 1, "name": "Main",
-                    "variables": [{"name": "rows", "type": "array", "value": [{"total": 12}, {"total": 34}]}],
-                    "arguments": [], "activities": [{"id": "inspect", "type": "log", "message": "inspect"}]}
+                    "variables": [{"name": "rows", "type": "array", "value": [{"total": 12}, {"total": 34}]},
+                                  {"name": "total", "type": "integer", "value": 34}],
+                    "arguments": [], "activities": [
+                        {"id": "first", "type": "log", "message": "first"},
+                        {"id": "skip", "type": "log", "message": "skip", "breakpoint": True, "breakpointCondition": "total > 100"},
+                        {"id": "inspect", "type": "log", "message": "inspect", "breakpoint": True, "breakpointCondition": "rows[1].total == 34"},
+                        {"id": "invalid", "type": "log", "message": "invalid", "breakpoint": True, "breakpointCondition": "missing > 0"},
+                    ]}
         send("project.save", {"root": created["root"], "project": project, "workflows": {"Main": workflow}})
         request_id += 1
         run_id = request_id
@@ -83,10 +89,19 @@ def main() -> None:
             "project": project, "root": created["root"], "workflow": "Main", "debug": True}}) + "\n")
         process.stdin.flush()
         paused = wait_event("debug.paused")
+        assert paused["activityId"] == "first", paused
+        send("debug.resume", {})
+        assert wait_event("activity-started", activity_id="skip")["activityId"] == "skip"
+        assert wait_event("activity-completed", activity_id="skip")["activityId"] == "skip"
+        paused = wait_event("debug.paused")
         assert paused["activityId"] == "inspect", paused
         assert send("debug.evaluate_watch", {"expression": "rows[1].total"}) == {"status": "ok", "type": "int", "value": 34}
         assert send("debug.evaluate_watch", {"expression": "len(rows)"}) == {"status": "ok", "type": "int", "value": 2}
         assert send("debug.evaluate_watch", {"expression": "__import__('os')"})["status"] == "error"
+        send("debug.resume", {})
+        failed_closed = wait_event("debug.paused")
+        assert failed_closed["activityId"] == "invalid", failed_closed
+        assert failed_closed["breakpointError"].startswith("ExpressionError:"), failed_closed
         send("debug.resume", {})
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -94,7 +109,7 @@ def main() -> None:
             if row.get("id") == run_id:
                 result = row["result"]
                 assert result["status"] == "succeeded", result
-                print("PASS: frozen bridge evaluated safe live-scope watches while paused, rejected Python, and resumed normally")
+                print("PASS: frozen bridge skipped false conditional breakpoints, paused on true and invalid conditions, evaluated redacted safe watches, rejected Python, and resumed normally")
                 return
             raise AssertionError(f"Unexpected bridge response during debug run: {row}")
         raise AssertionError("Timed out waiting for debug run completion")

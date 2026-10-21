@@ -4,7 +4,7 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-![Open RPA Studio browser preview with the CSV workflow open, activity palette, selected activity properties and execution panel](docs/assets/studio-overview.png)
+![Open RPA Studio browser preview with a conditional debugger breakpoint configured on a CSV activity](docs/assets/studio-overview.png)
 
 *The screenshot shows the isolated browser preview. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
@@ -16,14 +16,14 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer will be attached to the [Open RPA Studio v0.1.22 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.22). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer will be attached to the [Open RPA Studio v0.1.23 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.23). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.22 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `bb8762c4c1df64a0cc086994ef568ad197585991a45bb889d741d95e87d2f187`. Verify the file before running it:
+The v0.1.23 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `773f53aa8098b9441d0cf1c01a1008b46b79ea0a31abb9e732e4e0d6964546c6`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.22-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.23-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -81,6 +81,7 @@ Core activities include variable assignment and logging; credential lookup by va
 ### Debugging and run history
 
 - Boundary-based breakpoints and debugger start-paused mode.
+- Conditional activity breakpoints use the safe expression language. False conditions continue; true conditions pause, and invalid conditions pause for review rather than being silently ignored.
 - Pause, continue, step-over, step-into, step-out, and cancellation at activity boundaries.
 - Inspect variables and edit supported JSON-compatible values while paused, subject to type and credential protections.
 - Add watch expressions using the safe workflow expression language. Watches evaluate against the live engine scope only while paused, with registered secrets redacted and large results truncated.

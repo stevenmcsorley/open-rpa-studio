@@ -16,8 +16,10 @@ class DebugController:
     External actions are never replayed when resuming.
     """
 
-    def __init__(self, breakpoints: set[str] | None = None, start_paused: bool = True):
+    def __init__(self, breakpoints: set[str] | None = None, start_paused: bool = True,
+                 conditional_breakpoints: dict[str, str] | None = None):
         self.breakpoints = set(breakpoints or ())
+        self.conditional_breakpoints = dict(conditional_breakpoints or {})
         self._condition = threading.Condition()
         self._pause_requested = start_paused  # Debug usually starts before the first activity.
         self._paused = False
@@ -149,12 +151,25 @@ class DebugController:
                 self._step_out_depth=None
                 self._pause_requested=True
             stop = self._pause_requested or activity_id in self.breakpoints
+            breakpoint_error = None
+            condition = self.conditional_breakpoints.get(activity_id)
+            if condition:
+                try:
+                    outcome = evaluate(condition, variables)
+                    if type(outcome) is not bool:
+                        raise ValueError("Breakpoint condition must evaluate to true or false")
+                    stop = stop or outcome
+                except Exception as exc:
+                    # Fail closed: pause so a typo cannot silently skip a breakpoint.
+                    stop = True
+                    breakpoint_error = f"{type(exc).__name__}: {exc}"[:512]
             if not stop:
                 return
             self._pause_requested = False
             self._paused = True
             visible=snapshot(variables) if snapshot else variables
             event={"event":"debug.paused","activityId":activity_id,"depth":depth,"variables":visible}
+            if breakpoint_error: event["breakpointError"] = breakpoint_error
             if editable: event["editableVariables"]=editable(variables)
             emit(event)
             while self._paused and not cancelled():

@@ -16,6 +16,8 @@ While paused at an activity boundary, the debugger can edit existing JSON-compat
 
 Debugger watches reuse the restricted workflow expression evaluator against the full live scope, but only while paused at an activity boundary. The engine redacts registered credential strings from the scope before evaluation and from the result. Expressions are limited to 2,048 characters; serialized results over 16 KiB are returned as a truncated preview. Watch expressions and values remain in the active UI session and are not written to the project, audit trail, or run history. Unsupported expressions return a visible error and cannot run Python code.
 
+Activity breakpoints may include an optional `breakpointCondition` string (maximum 2,048 characters). It uses the same restricted evaluator against current variables. Only the Boolean value `true` pauses; `false` continues. Evaluation failures and non-Boolean values fail closed by pausing and attaching a bounded error to the debug event. Conditional activity breakpoints are supported in nested sequences and flowchart/state-machine activity bodies; conditional graph-node and state-entry breakpoints are not currently supported.
+
 The desktop bridge writes a SQLite WAL run ledger using full synchronous commits. The schema has its own version. A migration first creates a separate SQLite backup; unsupported/newer schemas fail closed. It stores a workflow SHA-256, identity, start/end status, bounded activity event history, errors and audit records. At launch, leftover `running` rows are changed to `interrupted`; there is no automatic retry/resume because external effects may already have occurred. History retains up to 300 runs, 512 KB of events per run and 10,000 audit events.
 
 ## Capabilities and security boundaries

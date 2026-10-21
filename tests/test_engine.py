@@ -69,6 +69,15 @@ def test_xlsx_rejects_oversized_expanded_archives_and_invalid_schema(tmp_path: P
     invalid_writer={**workflow,"activities":[{"id":"write","type":"xlsx_write","path":"out.xlsx","rows":"records","fields":[]}]}
     assert any(problem["code"]=="spreadsheet-fields" for problem in validate_workflow(invalid_writer))
 
+def test_conditional_breakpoint_schema_requires_enabled_breakpoint_and_bounded_text():
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Debug","variables":[],"arguments":[],"activities":[
+        {"id":"inspect","type":"log","breakpoint":True,"breakpointCondition":"amount > 10"}]}
+    assert validate_workflow(base)==[]
+    disabled={**base,"activities":[{**base["activities"][0],"breakpoint":False}]}
+    assert any(problem["code"]=="breakpoint-condition-disabled" for problem in validate_workflow(disabled))
+    oversized={**base,"activities":[{**base["activities"][0],"breakpointCondition":"x"*2049}]}
+    assert any(problem["code"]=="breakpoint-condition" for problem in validate_workflow(oversized))
+
 def test_openpyxl_uses_defused_xml_parser_for_workbook_content():
     with pytest.raises(EntitiesForbidden):
         fromstring(b'<!DOCTYPE x [<!ENTITY secret SYSTEM "file:///private-data">]><x>&secret;</x>')

@@ -136,6 +136,30 @@ def test_breakpoint_pauses_only_at_matching_activity(tmp_path):
     thread.join(3)
     assert not thread.is_alive() and output[0].status=="succeeded"
 
+def test_conditional_breakpoint_uses_safe_boolean_expression_and_fails_closed():
+    debugger=DebugController(start_paused=False,conditional_breakpoints={"inspect":"total >= 100","invalid":"unknown_value > 0"})
+    events=[]
+    debugger.before_activity("inspect",0,{"total":10},lambda:False,events.append)
+    assert events==[]
+    ready=threading.Event()
+    def pause(activity_id,variables):
+        debugger.before_activity(activity_id,0,variables,lambda:False,lambda event:(events.append(event),ready.set()))
+    thread=threading.Thread(target=pause,args=("inspect",{"total":150}));thread.start()
+    assert ready.wait(2) and events[-1]["event"]=="debug.paused"
+    debugger.resume();thread.join(2);assert not thread.is_alive()
+    ready.clear();thread=threading.Thread(target=pause,args=("invalid",{}));thread.start()
+    assert ready.wait(2) and events[-1]["breakpointError"].startswith("ExpressionError:")
+    debugger.resume();thread.join(2);assert not thread.is_alive()
+
+def test_conditional_breakpoint_conditions_are_collected_from_nested_activities():
+    from openrpa.bridge import _workflow_breakpoint_conditions, _workflow_breakpoints
+    workflow={"activities":[{"id":"outer","type":"if","condition":"True","then":[
+        {"id":"inner","type":"log","breakpoint":True,"breakpointCondition":"total > 5"}],"else":[]}],
+        "executionModel":"flowchart","flowchart":{"nodes":[{"id":"step","kind":"action","activity":{
+            "id":"graph-action","type":"log","breakpoint":True,"breakpointCondition":"enabled"}}]}}
+    assert _workflow_breakpoint_conditions(workflow)=={"inner":"total > 5","graph-action":"enabled"}
+    assert _workflow_breakpoints(workflow)==set()
+
 def test_flowchart_node_and_action_breakpoints_are_collected():
     from openrpa.bridge import _workflow_breakpoints
     workflow={"executionModel":"flowchart","activities":[],"flowchart":{"nodes":[

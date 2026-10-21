@@ -100,6 +100,12 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 seen.add(aid)
             if not isinstance(typ, str) or not typ:
                 problems.append({"code": "activity-type-missing", "message": f"{scope}[{i}] needs a type", "activityId": str(aid or "")})
+            if item.get("breakpointCondition") is not None:
+                condition = item.get("breakpointCondition")
+                if item.get("breakpoint") is not True:
+                    problems.append({"code": "breakpoint-condition-disabled", "message": "A conditional breakpoint requires the activity breakpoint to be enabled", "activityId": str(aid or "")})
+                elif not isinstance(condition, str) or len(condition) > 2048:
+                    problems.append({"code": "breakpoint-condition", "message": "Breakpoint condition must be text no longer than 2,048 characters", "activityId": str(aid or "")})
             if typ == "if":
                 if not isinstance(item.get("condition"), str):
                     problems.append({"code": "if-condition", "message": "If activity needs a condition expression", "activityId": str(aid or "")})

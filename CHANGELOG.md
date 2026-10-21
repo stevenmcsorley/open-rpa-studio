@@ -1,10 +1,16 @@
 # Changelog
+## 0.1.23 — Conditional activity breakpoints
+
+- Added optional safe-expression conditions to activity breakpoints. False conditions continue execution; true conditions pause at the boundary.
+- Invalid or non-Boolean conditions pause for review instead of silently skipping a breakpoint. Workflow validation bounds conditions to 2,048 characters and requires an enabled breakpoint.
+- Verification: 135 Python tests, 44 frontend tests, production Vite build, offline Cargo check, `npm audit` with zero vulnerabilities, and installed Windows bridge acceptance for false/true/invalid conditions plus watches and safe resume. GitHub CI pending.
+
 ## 0.1.22 — Live debugger watch expressions
 
 - Added watch expressions to the paused debugger panel. They evaluate against the engine's current full scope using the same restricted expression evaluator as workflows.
 - Watch evaluation is permitted only at an activity boundary while paused, rejects Python code, redacts registered credentials, limits expression length to 2,048 characters, and truncates serialized results beyond 16 KiB.
 - Watch expressions and results are session-only; they are not stored in projects, run history or the audit trail.
-- Verification: 44 frontend tests, 132 Python tests, production Vite build, offline Cargo check, and `npm audit` with zero vulnerabilities. Windows installer acceptance pending.
+- Verification: 44 frontend tests, 132 Python tests, production Vite build, offline Cargo check, `npm audit` with zero vulnerabilities, Windows installer launch, frozen-bridge debugger-watch acceptance, and spreadsheet acceptance. GitHub CI passed.
 
 ## 0.1.21 — Patched frontend build and test dependencies
 

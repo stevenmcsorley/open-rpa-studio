@@ -54,7 +54,9 @@ def _workflow_breakpoints(workflow: dict[str, Any]) -> set[str]:
         for item in items:
             if not isinstance(item,dict):
                 continue
-            if item.get("breakpoint") is True and isinstance(item.get("id"),str):
+            condition = item.get("breakpointCondition")
+            conditional = isinstance(condition, str) and bool(condition.strip())
+            if item.get("breakpoint") is True and not conditional and isinstance(item.get("id"),str):
                 found.add(item["id"])
             for branch in ("then","else","body","catch","finally"):
                 child=item.get(branch)
@@ -77,6 +79,34 @@ def _workflow_breakpoints(workflow: dict[str, Any]) -> set[str]:
             if state.get("breakpoint") is True and isinstance(state.get("id"),str):found.add(state["id"])
             activities=state.get("activities",[])
             if isinstance(activities,list):walk(activities)
+    return found
+
+def _workflow_breakpoint_conditions(workflow: dict[str, Any]) -> dict[str, str]:
+    """Collect conditional activity breakpoints without treating graph guards as breakpoints."""
+    found: dict[str, str] = {}
+    def walk(items: list[dict[str, Any]]) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            aid = item.get("id")
+            condition = item.get("breakpointCondition")
+            if item.get("breakpoint") is True and isinstance(aid, str) and isinstance(condition, str) and condition.strip():
+                found[aid] = condition
+            for branch in ("then", "else", "body", "catch", "finally"):
+                child = item.get(branch)
+                if isinstance(child, list): walk(child)
+            if item.get("type") == "switch":
+                for case in item.get("cases", []):
+                    if isinstance(case, dict) and isinstance(case.get("activities"), list): walk(case["activities"])
+                if isinstance(item.get("default"), list): walk(item["default"])
+    activities = workflow.get("activities", [])
+    if isinstance(activities, list): walk(activities)
+    if workflow.get("executionModel") == "flowchart":
+        for node in workflow.get("flowchart", {}).get("nodes", []):
+            if node.get("kind") == "action" and isinstance(node.get("activity"), dict): walk([node["activity"]])
+    if workflow.get("executionModel") == "state_machine":
+        for state in workflow.get("stateMachine", {}).get("states", []):
+            if isinstance(state.get("activities"), list): walk(state["activities"])
     return found
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -166,7 +196,10 @@ def handle(request: dict[str, Any]) -> None:
                 digest = hashlib.sha256(json.dumps(workflow_value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
                 run_id = history.start(str(root), str(project.get("name", "")), workflow_name, digest)
                 active_run_id = run_id
-                debugger=DebugController(_workflow_breakpoints(workflow_value)) if params.get("debug") else None
+                debugger=DebugController(
+                    _workflow_breakpoints(workflow_value),
+                    conditional_breakpoints=_workflow_breakpoint_conditions(workflow_value),
+                ) if params.get("debug") else None
                 active_debugger=debugger
             if params.get("allowNetwork"):
                 history.audit("permission.granted", {"runId": run_id, "permission": "network"})

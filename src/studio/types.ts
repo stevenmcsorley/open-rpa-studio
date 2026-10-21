@@ -1,4 +1,4 @@
-export type Activity = { id: string; type: string; [key: string]: unknown };
+export type Activity = { id: string; type: string; breakpoint?:boolean; breakpointCondition?:string; [key: string]: unknown };
 export type FlowNode = {id:string;kind:'start'|'action'|'decision'|'end';label?:string;condition?:string;breakpoint?:boolean;x?:number;y?:number;activity?:Activity};
 export type FlowTransition = {from:string;to:string;when?:'always'|'true'|'false'};
 export type Flowchart = {start:string;nodes:FlowNode[];transitions:FlowTransition[]};
