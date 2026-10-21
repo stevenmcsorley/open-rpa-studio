@@ -20,6 +20,7 @@
 - The Output pane collapses to its tab strip and can be resized by pointer or keyboard with bounds that preserve minimum designer space.
 - State-machine transition overview visualizes initial, final, guarded, cyclic and disconnected states, with graph-node selection wired to the existing state editor.
 - Example CSV automation and engine/UI verification.
+- Selected run records export as versioned JSON evidence with an atomic write, displayed SHA-256 digest, and destination-path-free audit metadata.
 - Desktop toolbar import/export for deterministic, integrity-checked `.orpa` project packages, with export workflow validation and safe empty-folder extraction.
 - Reusable workflow argument mapping with per-call-site outputs and preflight validation.
 - Bounded text extraction from selectable PDF pages, with a page-count output, page boundaries, explicit file-read auditing, and documented no-OCR/encryption limits.

@@ -12,6 +12,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *Run History includes searchable workflow, run-ID and error fields, status filters, and a read-only view of saved run evidence. This public screenshot uses illustrative sample records.*
 
+![Open RPA Studio showing the selected run's versioned JSON evidence export action](docs/assets/run-history-export.png)
+
+*Export creates a versioned JSON record and reports its SHA-256 digest. This public screenshot also uses illustrative sample records.*
+
 ![Open RPA Studio state-machine editor showing initial and final states, a directed transition overview and the selected state's activities](docs/assets/state-machine-overview.png)
 
 *State-machine overview nodes are generated from the executable state and transition definitions. Select a node to edit that state's activities and guards.*
@@ -139,6 +143,7 @@ Core activities include variable assignment and logging; credential lookup by va
 - Add watch expressions using the safe workflow expression language. Watches evaluate against the live engine scope only while paused, with registered secrets redacted and large results truncated.
 - Durable SQLite run history records workflow digests, times, statuses, activity events, errors, and security audit events.
 - Interrupted runs are marked for inspection; they are never resumed or repeated automatically because prior activities may have changed external systems.
+- Select a saved run and choose **Export evidence** to write a versioned JSON record with its status, workflow digest, activity results, errors and bounded event history. The export is atomic and its SHA-256 is shown after saving; export metadata is recorded in the audit log without retaining the destination path. Review exported evidence before sharing because saved events can contain sensitive business information. See the [run evidence format](docs/RUN_EVIDENCE_EXPORT.md).
 
 ### Optional AI providers
 

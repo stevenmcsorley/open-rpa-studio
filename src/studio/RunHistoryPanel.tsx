@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, Clock3, Hash, LoaderCircle, Search, X } from 'lucide-react';
+import { AlertCircle, Clock3, Download, Hash, LoaderCircle, Search, X } from 'lucide-react';
 import type { RunHistoryDetail, RunHistorySummary } from './bridge';
 import './RunHistoryPanel.css';
 
@@ -16,7 +16,7 @@ export function filterRunHistory(runs:RunHistorySummary[],query:string,status:st
   });
 }
 
-export function RunHistoryPanel({runs,selectedId,detail,loading,onSelect}:{runs:RunHistorySummary[];selectedId:string;detail:RunHistoryDetail|null;loading:boolean;onSelect:(id:string)=>void}){
+export function RunHistoryPanel({runs,selectedId,detail,loading,onSelect,onExport}:{runs:RunHistorySummary[];selectedId:string;detail:RunHistoryDetail|null;loading:boolean;onSelect:(id:string)=>void;onExport?:(id:string)=>void}){
   const [query,setQuery]=useState('');
   const [status,setStatus]=useState('all');
   const filteredRuns=filterRunHistory(runs,query,status);
@@ -31,7 +31,7 @@ export function RunHistoryPanel({runs,selectedId,detail,loading,onSelect}:{runs:
     </aside>
     <section className="run-history-detail" aria-label="Run details">
       {loading?<div className="run-history-empty"><LoaderCircle className="spin" size={16}/> Loading run record…</div>:!detail?<div className="run-history-empty"><Clock3 size={15}/> Select a run to inspect its saved evidence.</div>:<>
-        <header className="run-detail-heading"><div><span className={`run-status-pill ${statusClass(detail.status)}`}>{detail.status.toUpperCase()}</span><strong>{detail.projectName} / {detail.workflow}</strong></div><small>{date(detail.startedAt)}{detail.endedAt?` → ${date(detail.endedAt)}`:' · still open at shutdown'}</small></header>
+        <header className="run-detail-heading"><div><span className={`run-status-pill ${statusClass(detail.status)}`}>{detail.status.toUpperCase()}</span><strong>{detail.projectName} / {detail.workflow}</strong></div><div className="run-detail-actions"><small>{date(detail.startedAt)}{detail.endedAt?` → ${date(detail.endedAt)}`:' · still open at shutdown'}</small>{onExport&&<button type="button" className="run-evidence-export" onClick={()=>onExport(detail.runId)} title="Export this run as a versioned JSON evidence file"><Download size={12}/> Export evidence</button>}</div></header>
         {detail.recoveryNote&&<div className="run-recovery-warning"><AlertCircle size={15}/><span><strong>Interrupted run</strong>{detail.recoveryNote} External side effects may already have occurred. Inspect target systems before manually starting this workflow again.</span></div>}
         {detail.error&&<div className="run-detail-error"><strong>{String(detail.error.code??'Execution error')}</strong><span>{String(detail.error.message??'No error message was saved.')}</span></div>}
         <div className="run-detail-meta"><span><Hash size={12}/> Workflow SHA-256 <code>{detail.workflowSha256}</code></span><span>{detail.events.length} saved events</span></div>

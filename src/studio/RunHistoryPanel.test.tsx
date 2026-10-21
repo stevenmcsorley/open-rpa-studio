@@ -36,6 +36,15 @@ describe('RunHistoryPanel',()=>{
     expect(html).toContain('1 of 1 runs');
   });
 
+  it('exposes evidence export only when the host supplies an export action',()=>{
+    const props={runs:[interrupted],selectedId:interrupted.runId,detail:interrupted,loading:false,onSelect:()=>undefined};
+    const desktop=renderToStaticMarkup(createElement(RunHistoryPanel,{...props,onExport:()=>undefined}));
+    const readOnly=renderToStaticMarkup(createElement(RunHistoryPanel,props));
+    expect(desktop).toContain('Export evidence');
+    expect(desktop).toContain('versioned JSON evidence file');
+    expect(readOnly).not.toContain('Export evidence');
+  });
+
   it('filters saved runs by status and searchable error evidence',()=>{
     const succeeded:RunHistorySummary={...interrupted,runId:'run-success-01',workflow:'Import',status:'succeeded',recoveryNote:null};
     const failed:RunHistorySummary={...interrupted,runId:'run-failed-01',workflow:'Export',status:'failed',error:{code:'file-permission-denied',message:'Blocked output path'},recoveryNote:null};

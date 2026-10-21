@@ -298,6 +298,22 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             result = {"runs": history.list_runs(params.get("limit", 50))}
         elif method == "run.get":
             result = {"run": history.get_run(str(params.get("runId", "")))}
+        elif method == "run.export":
+            run_id = params.get("runId")
+            destination = params.get("destination")
+            if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 128:
+                raise ValueError("A valid run ID is required for evidence export")
+            if not isinstance(destination, str) or not destination.strip():
+                raise ValueError("A destination file is required for evidence export")
+            record = history.get_run(run_id)
+            if record is None:
+                raise ValueError("The selected run no longer exists in durable history")
+            envelope = {"format": "openrpa.run-evidence", "formatVersion": 1, "run": record}
+            serialized = json.dumps(envelope, ensure_ascii=False, indent=2) + "\n"
+            digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+            atomic_json(Path(destination).expanduser(), envelope)
+            history.audit("run.export", {"runId": run_id, "sha256": digest, "bytes": len(serialized.encode("utf-8"))})
+            result = {"sha256": digest, "bytes": len(serialized.encode("utf-8"))}
         elif method == "audit.history":
             result = {"events": history.list_audit(params.get("limit", 200))}
         elif method == "activity.catalog":

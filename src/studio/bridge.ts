@@ -48,6 +48,7 @@ export type RunHistorySummary={runId:string;projectPath:string;projectName:strin
 export type RunHistoryDetail=RunHistorySummary&{result:{status?:string;activities?:Record<string,{status:string;type:string;durationMs?:number;error?:string}>;error?:Record<string,unknown>}|null;events:Record<string,unknown>[]};
 export async function getRunHistory(limit=50):Promise<RunHistorySummary[]>{const value=await rpc('run.history',{limit});return value.runs??[];}
 export async function getRunDetails(runId:string):Promise<RunHistoryDetail|null>{const value=await rpc('run.get',{runId});return value.run??null;}
+export async function exportRunEvidence(runId:string,destination:string):Promise<{sha256:string;bytes:number}>{return rpc('run.export',{runId,destination});}
 export async function getAdapterStatus():Promise<any>{return rpc('adapter.status');}
 export async function getAuditHistory(limit=200):Promise<any[]>{const value=await rpc('audit.history',{limit});return value.events??[];}
 export type AiConfig={provider:string;baseUrl?:string;credentialService?:string;credentialUsername?:string};
