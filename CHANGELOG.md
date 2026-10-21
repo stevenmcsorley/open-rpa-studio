@@ -1,4 +1,9 @@
 # Changelog
+## 0.1.38
+- Made staged MCP workflows visible directly in the Studio designer: the active canvas now renders the latest validated snapshot under a non-modal live-build banner, with Insert and Dismiss controls. The editor updates as staged snapshots change instead of placing a full-screen dialog over the canvas.
+- Corrected the packaged MCP rollout path. The installed 0.1.30 bridge did not advertise `openrpa_stage_workflow_draft`, although current source does. This release packages the current MCP server and live canvas preview together.
+- Verification: 256 Python tests, all 127 frontend tests, TypeScript/production frontend build and `cargo check --locked` pass. The frozen 0.1.38 bridge was queried over MCP stdio: it advertises 14 tools including `openrpa_stage_workflow_draft`, reports all configured startup permissions, accepted a live draft, and cleared it successfully. The unsigned Windows NSIS installer is 69.17 MiB, SHA-256 `393260d40fdf61f1ae5392fe0dbbe9e1db2992ca769f99d91ab336ac0c20af82`.
+
 ## 0.1.37
 - Added validated MCP live workflow snapshots. With `--allow-edit`, an agent can stage each meaningful build step and Studio displays successive snapshots without changing the saved project. Users can insert a snapshot into the editor or dismiss it; a final MCP create/update clears the matching preview. Preview files are project-local, atomically replaced, validated before display and excluded from `.orpa` exports.
 - Added cross-layer MCP-to-Studio preview and commit regression coverage. Verification: 256 Python tests, all 127 frontend tests, production frontend build and `cargo check --locked` pass. The packaged bridge advertises the preview tools and successfully stages a workflow through real MCP stdio. Windows installer: 69.17 MiB, SHA-256 `28872c4e1a74a17fe5e26c24f5acefa245fbc1c4738561c8adb9263acac86054`.

@@ -64,7 +64,7 @@ API integrations include bounded **Paginated API Read**, reusable HTTPS connecti
 
 Execution history now opens full saved run records with activity durations, event timestamps, workflow digests, errors and clear interruption warnings. Interrupted runs are inspectable and are never silently replayed.
 
-When the bound MCP server creates or updates a single workflow, Studio detects the saved project change, opens that workflow, and names it in the status message. MCP calls save complete validated workflow versions; the canvas does not stream partial, unvalidated model output. Studio waits for an explicit reload when it has local unsaved edits.
+When the bound MCP server creates or updates a workflow, Studio detects the saved project change, opens that workflow, and names it in the status message. With `--allow-edit`, the agent can also stage successive validated snapshots while it builds; Studio switches the canvas to the staged workflow and shows a live-build banner. Staging does not change the saved project. Insert keeps the draft as local unsaved work; a final MCP create/update saves it. Studio waits for an explicit reload when local edits would otherwise be overwritten.
 
 The AI drafting panel can also prepare a workflow repair from the latest failed run. It excludes runtime variable values, argument defaults and raw error text from the repair prompt, then requires validation and review before replacing the current workflow. Remote providers may receive configured literals from the workflow.
 
@@ -72,14 +72,16 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows installer is available from the [Open RPA Studio v0.1.37 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.37). It adds live MCP workflow previews; the package is for evaluation and is not code-signed.
+The unsigned Windows installer is available from the [Open RPA Studio v0.1.38 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.38). It includes the MCP live-build banner and canvas preview; the package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.37 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it:
+The v0.1.38 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it:
+
+SHA-256: `393260d40fdf61f1ae5392fe0dbbe9e1db2992ca769f99d91ab336ac0c20af82`.
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.37-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.38-x64.exe -Algorithm SHA256
 ```
 
 To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies.
