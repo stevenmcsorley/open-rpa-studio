@@ -8,18 +8,20 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *The screenshot shows the isolated browser preview. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
+The AI drafting panel can also prepare a workflow repair from the latest failed run. It excludes runtime variable values, argument defaults and raw error text from the repair prompt, then requires validation and review before replacing the current workflow. Remote providers may receive configured literals from the workflow.
+
 Before every run, Studio now shows an impact review that expands saved child workflows, identifies file reads and writes, highlights destructive operations, and requests network or desktop permission for that run only. The review is a static plan: expressions and runtime data can still change actual targets. See [Run impact review](docs/RUN-IMPACT-REVIEW.md) for coverage and limits.
 
 ## Download and install
 
-The unsigned Windows development installer is available in the [Open RPA Studio v0.1.18 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.18). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available in the [Open RPA Studio v0.1.19 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.18). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.18 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `a4f13147608917e4f32d8f57f953301d8d30ae76b03946b986c19cefd9d80bef`. Verify the file before running it:
+The v0.1.19 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `36b819df8c0b6014a73d3a37b6e3547b78336c03c13513df4a515a09a13477b1`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.18-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.19-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer

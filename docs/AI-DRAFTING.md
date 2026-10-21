@@ -33,3 +33,10 @@ Remote providers require HTTPS and credentials stored through the OS credential-
 ## Saved provider connections
 
 The desktop AI panel can save and select multiple named connection profiles. The app stores provider ID, endpoint, model choice and OS-vault service/username references in the per-user `ai-connections.json` file alongside local application history. It rejects unknown fields, unsupported providers, unsafe local/remote URLs, duplicate IDs/names, oversized files and more than 100 profiles. API keys are never accepted as profile fields. Deleting a profile removes only that local configuration; it does not delete a credential from the OS vault.
+
+
+## Repairing a failed workflow
+
+After a failed desktop run, the AI panel can prepare a repair prompt from the exact workflow snapshot used for that run. It includes the structured failure code and workflow/activity identifiers, but omits raw error text, runtime variable values, and argument defaults. Object properties whose names resemble secrets (password, token, API key, authorization, credential, or cookie) are removed recursively.
+
+Configured literals that define behavior—such as file paths, URLs, selectors, and message strings—can remain in the workflow definition sent to the selected provider. Remote provider requests leave the computer. Inspect the prompt in the panel before sending it. A proposed repair must pass the normal workflow validator and remains an uncommitted draft until **Review and replace current workflow** is selected; it is never executed automatically. The in-memory failure snapshot is not persisted and is lost when Studio closes.

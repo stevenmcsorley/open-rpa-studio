@@ -1,4 +1,11 @@
 # Changelog
+## 0.1.19 — Provider-neutral AI failure repair
+
+- Added a repair-from-failure path to the existing AI workflow panel. It captures the workflow snapshot and structured failure identifiers, then uses the same configured provider, workflow validator and review-before-replace path as normal drafting.
+- The provider prompt omits runtime variable values, argument defaults, error messages and fields whose keys look like secrets. It warns that configured workflow literals, including paths, URLs, selectors and strings, may be sent to a remote provider.
+- Added privacy and immutability tests for the repair prompt, and refreshed the public README screenshot with the current Studio interface.
+- Verification: 40 frontend tests, 130 Python tests, production Vite build, offline Cargo check, and a 60.77 MiB Windows x64 installer build. Installer SHA-256: `36b819df8c0b6014a73d3a37b6e3547b78336c03c13513df4a515a09a13477b1`. CycloneDX SBOM contains 478 dependency components. Fresh-install acceptance: the installer completed in an isolated directory, the installed app launched with only its expected `openrpa-bridge.exe` child (no terminal process), and the frozen bridge passed the spreadsheet read/write and XML entity rejection fixture.
+
 ## 0.1.18 — Per-run impact review
 
 - Added a pre-run impact review for normal and debug execution. It inventories file reads/writes, HTTP destinations, browser and desktop actions, credential reads, destructive file operations, and saved child-workflow actions across sequences, nested branches, flowcharts and state machines.
