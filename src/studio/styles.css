@@ -48,3 +48,5 @@
 .selector-fallback-row select,.selector-fallback-row>input{min-width:0;width:100%;box-sizing:border-box}
 .selector-fallback-row>label{display:flex;align-items:center;gap:4px;font-size:10px;white-space:nowrap}
 .ai-warning{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;margin:9px 0;border:1px solid #6c5935;border-radius:5px;background:#30291d;color:#e5c58c;font-size:10px;line-height:1.5}.ai-warning svg{flex:none;margin-top:1px}
+
+.argument-editor{padding:0 0 5px}.argument-options{display:flex;gap:12px;padding:2px 3px 4px;color:#9da5b0;font-size:9px}.argument-options label{display:flex;align-items:center;gap:4px}.argument-options input{accent-color:#9bd67e}.argument-default{display:flex;flex-direction:column;gap:3px;padding:0 1px 4px}.argument-default textarea{resize:vertical;min-height:36px;max-height:100px;width:100%;border:1px solid #343b45;border-radius:3px;background:#111419;color:#d7dce3;padding:5px;font:9px 'DM Mono',monospace}.argument-default textarea[aria-invalid=true]{border-color:#b46c69}.argument-default small{font-size:8px;line-height:1.35;color:#77818d}.argument-default .argument-default-error{color:#ff9b93}

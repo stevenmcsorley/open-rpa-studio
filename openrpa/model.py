@@ -498,6 +498,8 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 problems.append({"code":"argument-type","message":f"Argument '{arg.get('name')}' has unsupported type {arg.get('type')}"})
             if isinstance(arg,dict) and arg.get("required",True) is not True and arg.get("required",True) is not False:
                 problems.append({"code":"argument-required","message":f"Argument '{arg.get('name')}' required must be a boolean"})
+            if isinstance(arg,dict) and "default" in arg and not _argument_value_matches(arg["default"],arg.get("type","any")):
+                problems.append({"code":"argument-default-type","message":f"Argument '{arg.get('name')}' default does not match declared type {arg.get('type','any')}"})
     return problems
 
 

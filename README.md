@@ -138,6 +138,10 @@ Core activities include variable assignment and logging; credential lookup by va
 
 When you run or debug a workflow with input arguments, Studio collects typed values in the run review dialog, validates required fields and JSON values, and passes the inputs to the selected workflow. Output and in/out argument values appear in the execution variables.
 
+![Open RPA Studio argument editor configuring required inputs, optional inputs, a typed JSON default and an output argument](docs/assets/argument-default-editor.png)
+
+*Workflow arguments now expose direction, required/optional status and typed JSON defaults in the editor. Defaults are checked against the declared type before they can be saved.*
+
 ![Open RPA Studio run review dialog collecting string, integer, boolean, object and array workflow inputs](docs/assets/run-input-arguments.png)
 
 *The example shows illustrative workflow arguments. Input values are run-specific and are not written into the workflow definition.*

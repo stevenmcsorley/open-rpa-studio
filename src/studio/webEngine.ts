@@ -7,12 +7,27 @@ function expr(s:string,v:Record<string,any>):any{
   if(/^\w+$/.test(x)&&x in v)return v[x];return x;
 }
 function val(x:any,v:Record<string,any>):any{if(typeof x==='string'){const m=x.match(/^\{\{([^{}]*)\}\}$/);return m?expr(m[1],v):x.replace(/\{\{(.*?)\}\}/g,(_,e)=>String(expr(e,v)));}return x;}
-function matchesArgumentType(value:any,type:string):boolean{return type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value)}
+function matchesArgumentType(value:any,type:string):boolean{return type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isSafeInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value)}
 export function validate(w:Workflow):any[]{
   if(!w||w.format!=='openrpa.workflow')return[{code:'format',message:'Unsupported workflow format'}];
   const ids=new Set<string>();const problems:any[]=[];
   if(!Array.isArray(w.activities))return[{code:'activities-type',message:'activities must be an array'}];
   if(![undefined,'sequence','flowchart','state_machine'].includes((w as any).executionModel))problems.push({code:'execution-model',message:'executionModel must be sequence, flowchart or state_machine'});
+  const args=(w as any).arguments??[];
+  if(!Array.isArray(args))problems.push({code:'arguments-type',message:'arguments must be an array'});
+  else{
+    const names=new Set<string>();
+    for(const arg of args){
+      if(!arg||typeof arg!=='object'||typeof arg.name!=='string'||!arg.name.trim())problems.push({code:'argument-invalid',message:'Each argument needs a name'});
+      else if(names.has(arg.name))problems.push({code:'argument-duplicate',message:`Duplicate argument: ${arg.name}`});
+      else names.add(arg.name);
+      if(!arg||typeof arg!=='object')continue;
+      if(!['string','integer','number','boolean','object','array','any'].includes(arg.type??'any'))problems.push({code:'argument-type',message:`Argument '${arg.name??''}' has unsupported type ${arg.type}`});
+      if(!['in','out','inout'].includes(arg.direction??'in'))problems.push({code:'argument-direction',message:`Invalid argument direction: ${arg.direction}`});
+      if(arg.required!==undefined&&typeof arg.required!=='boolean')problems.push({code:'argument-required',message:`Argument '${arg.name??''}' required must be a boolean`});
+      if(Object.hasOwn(arg,'default')&&!matchesArgumentType(arg.default,arg.type??'any'))problems.push({code:'argument-default-type',message:`Argument '${arg.name??''}' default does not match declared type ${arg.type??'any'}`});
+    }
+  }
   const walk=(items:any[])=>items.forEach((item:any)=>{
     if(!item.id)problems.push({code:'id',message:'Activity id is required'});
     else if(ids.has(item.id))problems.push({code:'duplicate',message:`Duplicate activity id ${item.id}`,activityId:item.id});
@@ -87,7 +102,7 @@ export function validate(w:Workflow):any[]{
 }
 export function validateBindings(workflows:Record<string,Workflow>,owner:string):any[]{
   const problems:any[]=[];const current=workflows[owner];if(!current)return problems;
-  const matches=(value:any,type:string)=>type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value);
+  const matches=(value:any,type:string)=>type==='any'||type==='string'&&typeof value==='string'||type==='integer'&&typeof value==='number'&&Number.isSafeInteger(value)||type==='number'&&typeof value==='number'&&Number.isFinite(value)||type==='boolean'&&typeof value==='boolean'||type==='object'&&value!==null&&typeof value==='object'&&!Array.isArray(value)||type==='array'&&Array.isArray(value);
   const visit=(items:any[])=>{for(const item of items||[]){if(!item||typeof item!=='object')continue;
     if(item.type==='invoke_workflow'){
       const target=String(item.workflow||'');const child=workflows[target];const add=(code:string,message:string)=>problems.push({code,message,activityId:item.id});

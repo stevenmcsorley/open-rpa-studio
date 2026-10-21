@@ -306,6 +306,17 @@ def test_invoke_workflow_rejects_bad_argument_names_directions_and_types(tmp_pat
         assert result.status=="failed"
         assert result.error["code"]==code
 
+def test_workflow_argument_defaults_must_match_declared_type():
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Defaults","variables":[],"activities":[]}
+    valid={**base,"arguments":[{"name":"limit","type":"integer","direction":"in","required":False,"default":12}]}
+    assert validate_workflow(valid)==[]
+    for arg in [
+        {"name":"limit","type":"integer","direction":"in","default":1.5},
+        {"name":"enabled","type":"boolean","direction":"in","default":"yes"},
+        {"name":"payload","type":"object","direction":"in","default":[]},
+    ]:
+        assert any(problem["code"]=="argument-default-type" for problem in validate_workflow({**base,"arguments":[arg]}))
+
 def test_invoke_workflow_maps_outputs_per_call_site(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Output mapping","main":"Main","workflows":{"Main":"main.json","Child":"child.json"}}
     main={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[{"name":"callerValue","type":"integer","value":0}],"arguments":[],"activities":[
