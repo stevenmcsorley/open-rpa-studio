@@ -69,4 +69,73 @@ describe('OpenAPI import',()=>{
     expect(configured.patch.path).toBe('/items/{{ pathItemId2 }}');
     expect(configured.patch.headers['X-Client']).toBe('{{ headerXClient }}');
   });
+  it('imports an unambiguous successful JSON object array as bounded response mapping',()=>{
+    const imported=parseOpenApi(`openapi: 3.1.0
+info: {title: Orders, version: '1'}
+paths:
+  /orders:
+    get:
+      responses:
+        '200':
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: {$ref: '#/components/schemas/Order'}
+components:
+  schemas:
+    Order:
+      type: object
+      properties:
+        id: {type: integer}
+        customer: {type: object, properties: {name: {type: string}}}
+        active: {type: boolean}
+        lines: {type: array, items: {type: string}}
+`);
+    const operation=imported.operations[0];
+    expect(operation.responseMapping).toEqual({responseCode:'200',itemsPointer:'/data/items',fields:[{name:'id',path:'/id'},{name:'customerName',path:'/customer/name'},{name:'active',path:'/active'}]});
+    const configured=configureOpenApiOperation(operation,[{name:'apiItems'}]);
+    expect(configured.patch.responseMapping).toEqual({...operation.responseMapping,result:'apiItems2',maxItems:10000});
+  });
+  it('leaves mapping unset for ambiguous arrays and never fetches external response schemas',()=>{
+    const ambiguous=parseOpenApi(`openapi: 3.0.3
+info: {title: Ambiguous, version: '1'}
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: ambiguous
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {type: object, properties: {id: {type: string}}}}
+                  archived: {type: array, items: {type: object, properties: {id: {type: string}}}}
+`);
+    expect(ambiguous.operations[0].responseMapping).toBeUndefined();
+    expect(ambiguous.warnings.some(item=>item.includes('multiple JSON object arrays'))).toBe(true);
+    const external=parseOpenApi(`openapi: 3.0.3
+info: {title: External, version: '1'}
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: external schema
+          content:
+            application/json:
+              schema: {$ref: 'https://example.invalid/schema.json'}
+`);
+    expect(external.operations[0].responseMapping).toBeUndefined();
+    expect(external.warnings.some(item=>item.includes('External OpenAPI reference is not imported'))).toBe(true);
+  });
 });

@@ -30,6 +30,21 @@ class RunCancelled(Exception):
     pass
 
 
+def _json_pointer_get(value: Any, pointer: str) -> Any:
+    if pointer == "":
+        return value
+    current = value
+    for raw in pointer[1:].split("/"):
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict) and token in current:
+            current = current[token]
+        elif isinstance(current, list) and token.isdigit() and str(int(token)) == token and int(token) < len(current):
+            current = current[int(token)]
+        else:
+            raise KeyError("JSON Pointer did not resolve")
+    return current
+
+
 @dataclass
 class RunOptions:
     allow_network: bool = False
@@ -1437,6 +1452,43 @@ class WorkflowEngine:
             response=restricted_http_request(url,method,headers,body,float(a.get("timeoutSeconds",20)),int(a.get("maxResponseBytes",5_000_000)))
             self._api_last_request_at[profile["id"]]=time.monotonic()
             v[a.get("result","response")]=response
+            mapping=a.get("responseMapping")
+            if mapping is not None:
+                status=response.get("status") if isinstance(response,dict) else None
+                if not isinstance(status,int) or isinstance(status,bool) or not 200<=status<300:
+                    raise WorkflowError("JSON response mapping requires a successful 2xx HTTP response",a["id"],"api-response-status")
+                try:
+                    body_text=response.get("body")
+                    if not isinstance(body_text,str):raise ValueError
+                    document=json.loads(body_text)
+                except (TypeError,ValueError,json.JSONDecodeError) as exc:
+                    raise WorkflowError("API response body is not valid JSON for the configured mapping",a["id"],"api-response-json") from exc
+                try:
+                    records=_json_pointer_get(document,mapping.get("itemsPointer",""))
+                except (KeyError,IndexError,ValueError,TypeError) as exc:
+                    raise WorkflowError("API response items pointer did not resolve",a["id"],"api-response-pointer") from exc
+                if not isinstance(records,list):
+                    raise WorkflowError("API response items pointer must select a JSON array",a["id"],"api-response-array")
+                max_items=int(mapping.get("maxItems",10_000))
+                if len(records)>max_items:
+                    raise WorkflowError("API response array exceeds the configured mapped-row limit",a["id"],"api-response-limit")
+                fields=mapping.get("fields",[]);mapped=[]
+                for record in records:
+                    self._check_cancel()
+                    if not isinstance(record,dict):
+                        raise WorkflowError("API response array items must be JSON objects",a["id"],"api-response-record")
+                    row={}
+                    for field_mapping in fields:
+                        try:value=_json_pointer_get(record,field_mapping["path"])
+                        except (KeyError,IndexError,ValueError,TypeError) as exc:
+                            raise WorkflowError("An API response field pointer did not resolve",a["id"],"api-response-field-pointer") from exc
+                        if value is not None and not isinstance(value,(str,bool,int,float)):
+                            raise WorkflowError("Mapped API response fields must contain scalar JSON values or null",a["id"],"api-response-field-type")
+                        if isinstance(value,float) and not math.isfinite(value):
+                            raise WorkflowError("Mapped API response number is not finite",a["id"],"api-response-field-type")
+                        row[field_mapping["name"]]=value
+                    mapped.append(row)
+                v[mapping["result"]]=mapped
         except WorkflowError:
             raise
         except EgressDenied as exc:

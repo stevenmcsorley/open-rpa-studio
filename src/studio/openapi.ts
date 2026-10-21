@@ -1,7 +1,10 @@
 import { parse } from 'yaml';
 
 export type OpenApiParameter={name:string;in:'path'|'query'|'header';required:boolean;variable:string;description?:string};
-export type OpenApiOperation={key:string;name:string;method:'GET'|'POST'|'PUT'|'PATCH';path:string;server:string;parameters:OpenApiParameter[];headers:Record<string,string>;query:Record<string,string>;body?:string;contentType?:string};
+export type ApiResponseField={name:string;path:string};
+export type OpenApiResponseMapping={responseCode:string;itemsPointer:string;fields:ApiResponseField[]};
+export type ApiResponseMapping=OpenApiResponseMapping&{result:string;maxItems:number};
+export type OpenApiOperation={key:string;name:string;method:'GET'|'POST'|'PUT'|'PATCH';path:string;server:string;parameters:OpenApiParameter[];headers:Record<string,string>;query:Record<string,string>;body?:string;contentType?:string;responseMapping?:OpenApiResponseMapping};
 export type OpenApiImport={title:string;version:string;operations:OpenApiOperation[];warnings:string[]};
 type Obj=Record<string,any>;
 const METHODS=['get','post','put','patch'] as const;
@@ -35,6 +38,59 @@ function sample(schema:unknown,root:Obj,depth=0):unknown{
   return null;
 }
 function serverFor(root:Obj,pathItem:Obj,operation:Obj):string{return [operation.servers?.[0]?.url,pathItem.servers?.[0]?.url,root.servers?.[0]?.url].find(value=>typeof value==='string')??''}
+function pointer(parts:string[]):string{return parts.map(part=>`/${part.replace(/~/g,'~0').replace(/\//g,'~1')}`).join('')}
+function schemaFields(schema:unknown,root:Obj,prefix:string,depth=0,used=new Set<string>()):ApiResponseField[]{
+  if(depth>4||!obj(schema))return [];
+  let current:unknown;try{current=resolveRef(root,schema)}catch{return []}
+  if(!obj(current))return [];
+  const primitive=['string','integer','number','boolean'].includes(current.type)||Array.isArray(current.enum)&&current.enum.length>0;
+  if(primitive&&prefix){let name=variableName(prefix.split('/').filter(Boolean).map(part=>part.replace(/~1/g,'/').replace(/~0/g,'~')).join('_'));const base=name;let suffix=2;while(used.has(name.toLowerCase()))name=`${base}${suffix++}`;used.add(name.toLowerCase());return [{name,path:prefix}]}
+  if(current.type==='object'||obj(current.properties)){
+    const fields:ApiResponseField[]=[];
+    for(const [key,value] of Object.entries(obj(current.properties)?current.properties:{}).slice(0,100)){
+      fields.push(...schemaFields(value,root,`${prefix}/${key.replace(/~/g,'~0').replace(/\//g,'~1')}`,depth+1,used));if(fields.length>=50)break;
+    }
+    return fields.slice(0,50);
+  }
+  return [];
+}
+function arraySchemas(schema:unknown,root:Obj,prefix:string,depth=0):{itemsPointer:string;itemSchema:unknown}[]{
+  if(depth>8||!obj(schema))return [];
+  let current:unknown;try{current=resolveRef(root,schema)}catch{return []}
+  if(!obj(current))return [];
+  if(current.type==='array'){
+    let item:unknown;try{item=resolveRef(root,current.items)}catch{return []}
+    if(obj(item)&&(item.type==='object'||obj(item.properties)))return [{itemsPointer:prefix,itemSchema:item}];
+    return [];
+  }
+  if(current.type==='object'||obj(current.properties)){
+    const found:{itemsPointer:string;itemSchema:unknown}[]=[];
+    for(const [key,value] of Object.entries(obj(current.properties)?current.properties:{}).slice(0,100))found.push(...arraySchemas(value,root,`${prefix}/${key.replace(/~/g,'~0').replace(/\//g,'~1')}`,depth+1));
+    return found.slice(0,100);
+  }
+  return [];
+}
+function responseMapping(operation:Obj,root:Obj,method:string,path:string,warnings:string[]):OpenApiResponseMapping|undefined{
+  const label=`${method.toUpperCase()} ${path}`;
+  try{
+    const responses=resolveRef(root,operation.responses);if(!obj(responses)){warnings.push(`${label}: no response object was available for response mapping.`);return}
+    const success=Object.keys(responses).filter(code=>/^2\d\d$/.test(code)).sort((a,b)=>a==='200'?-1:b==='200'?1:Number(a)-Number(b));
+    if(!success.length)return;
+    let code='';let schema:unknown;
+    for(const candidate of success){
+      const response=resolveRef(root,responses[candidate]);if(!obj(response)||!obj(response.content))continue;
+      const media=Object.entries(response.content).find(([type])=>type==='application/json'||type.endsWith('+json'));
+      if(media&&obj(media[1])&&obj(media[1].schema)){code=candidate;schema=media[1].schema;break;}
+    }
+    if(!code||!obj(schema))return;
+    try{resolveRef(root,schema)}catch(error){warnings.push(`${label}: response mapping was not imported: ${String(error)}`);return}
+    const arrays=arraySchemas(schema,root,'');
+    if(arrays.length!==1){if(arrays.length>1)warnings.push(`${label}: response ${code} has multiple JSON object arrays; automatic response mapping was left unset.`);return}
+    const fields=schemaFields(arrays[0].itemSchema,root,'');
+    if(!fields.length){warnings.push(`${label}: response ${code} has an object array but no supported scalar fields for mapping.`);return}
+    return {responseCode:code,itemsPointer:arrays[0].itemsPointer,fields};
+  }catch(error){warnings.push(`${label}: response mapping was not imported: ${String(error)}`);return}
+}
 
 export function parseOpenApi(text:string):OpenApiImport{
   if(typeof text!=='string'||new TextEncoder().encode(text).byteLength>MAX_SPEC_BYTES)throw new Error('OpenAPI file must be no larger than 2 MB');
@@ -68,7 +124,8 @@ export function parseOpenApi(text:string):OpenApiImport{
       }catch(error){warnings.push(`${methodKey.toUpperCase()} ${path}: ${String(error)}`)}
       if(body&&contentType)headers['Content-Type']=contentType;
       const method=methodKey.toUpperCase() as OpenApiOperation['method'];const name=String(operation.summary??operation.operationId??`${method} ${path}`).slice(0,200);const key=`${method} ${path}`;
-      operations.push({key,name,method,path,server:serverFor(root,pathItem,operation),parameters,headers,query,...(body!==undefined?{body}:{}),...(contentType?{contentType}:{})});
+      const mappedResponse=responseMapping(operation,root,methodKey,path,warnings);
+      operations.push({key,name,method,path,server:serverFor(root,pathItem,operation),parameters,headers,query,...(body!==undefined?{body}:{}),...(contentType?{contentType}:{}),...(mappedResponse?{responseMapping:mappedResponse}:{})});
     }
   }
   if(!operations.length)throw new Error('No supported GET/POST/PUT/PATCH operations were found in this OpenAPI document');
@@ -88,5 +145,8 @@ export function configureOpenApiOperation(operation:OpenApiOperation,existingVar
   const used=new Set(existingVariables.map(item=>item.name.toLowerCase()));
   const parameters=operation.parameters.map(parameter=>{let name=parameter.variable;let suffix=2;while(used.has(name.toLowerCase()))name=`${parameter.variable}${suffix++}`;used.add(name.toLowerCase());return {...parameter,variable:name};});
   const required=parameters.filter(parameter=>parameter.required);
-  return {patch:configureFromOpenApi({...operation,parameters:required}),parameters,variables:required.map(parameter=>({name:parameter.variable,type:'string' as const,value:''}))};
+  let response:ApiResponseMapping|undefined;
+  if(operation.responseMapping){let result='apiItems';let suffix=2;while(used.has(result.toLowerCase()))result=`apiItems${suffix++}`;used.add(result.toLowerCase());response={...operation.responseMapping,result,maxItems:10_000};}
+  const patch={...configureFromOpenApi({...operation,parameters:required}),...(response?{responseMapping:response}:{})};
+  return {patch,parameters,variables:required.map(parameter=>({name:parameter.variable,type:'string' as const,value:''}))};
 }

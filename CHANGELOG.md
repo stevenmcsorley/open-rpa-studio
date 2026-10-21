@@ -1,4 +1,9 @@
 # Changelog
+## 0.1.39
+- OpenAPI import now detects an unambiguous 2xx JSON array-of-objects response and generates editable JSON Pointer field mappings. The API Request editor can configure or adjust the array pointer, scalar output fields, result variable and row ceiling.
+- Native API Request execution parses and maps successful JSON responses into bounded record arrays while retaining the raw response. Added strict schema checks for RFC 6901 pointers, unique field names, output-variable conflicts and a 10,000-record cap; mapping errors identify the activity without exposing response contents.
+- Verification: 130 frontend tests, 258 Python tests, TypeScript production build and `cargo check --locked` pass. The frozen v0.1.39 bridge passes real MCP stdio staging/clear acceptance and advertises all 14 expected tools. Unsigned Windows NSIS installer: 69.18 MiB, SHA-256 `5c58e1ca8e6b17dd0492a4b286abfb8fbd5767cc4673a623793f0635d80f0df6`.
+
 ## 0.1.38
 - Made staged MCP workflows visible directly in the Studio designer: the active canvas now renders the latest validated snapshot under a non-modal live-build banner, with Insert and Dismiss controls. The editor updates as staged snapshots change instead of placing a full-screen dialog over the canvas.
 - Corrected the packaged MCP rollout path. The installed 0.1.30 bridge did not advertise `openrpa_stage_workflow_draft`, although current source does. This release packages the current MCP server and live canvas preview together.

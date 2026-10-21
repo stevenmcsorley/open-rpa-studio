@@ -86,6 +86,51 @@ def test_api_request_uses_vault_auth_relative_path_and_bounded_response(tmp_path
     assert "private-token" not in json.dumps(result.__dict__)
 
 
+def test_api_response_mapping_uses_json_pointers_and_enforces_limits(tmp_path,monkeypatch):
+    from openrpa import engine
+    from openrpa.model import validate_workflow
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Example","baseUrl":"https://api.example.test/v1"})
+    response={"status":200,"headers":{"Content-Type":"application/json"},"body":json.dumps({"data":{"items":[{"id":7,"display/name":"Order A"}]}})}
+    monkeypatch.setattr(engine,"restricted_http_request",lambda *args:response)
+    mapping={"responseCode":"200","itemsPointer":"/data/items","fields":[{"name":"id","path":"/id"},{"name":"displayName","path":"/display~1name"}],"result":"orders","maxItems":1}
+    activity={"id":"fetch","type":"api_request","connectionId":profile["id"],"path":"/orders","result":"response","responseMapping":mapping}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    root,project=_project(tmp_path,workflow)
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="succeeded"
+    assert result.variables["orders"]==[{"id":7,"displayName":"Order A"}]
+    assert result.variables["response"]["status"]==200
+    assert result.variables["response"]["body"]==response["body"]
+
+    failures=[
+        ({**response,"body":"{"},mapping,"api-response-json"),
+        (response,{**mapping,"itemsPointer":"/data/missing"},"api-response-pointer"),
+        ({**response,"body":json.dumps({"data":{"items":[{"id":1,"display/name":"A"},{"id":2,"display/name":"B"}]}})},{**mapping,"maxItems":1},"api-response-limit"),
+        ({**response,"body":json.dumps({"data":{"items":[{"id":{"nested":1},"display/name":"Order A"}]}})},mapping,"api-response-field-type"),
+        ({**response,"status":503},mapping,"api-response-status"),
+    ]
+    for next_response,next_mapping,code in failures:
+        monkeypatch.setattr(engine,"restricted_http_request",lambda *args,reply=next_response:reply)
+        activity["responseMapping"]=next_mapping
+        root,project=_project(tmp_path,workflow)
+        failed=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+        assert failed.status=="failed" and failed.error["activityId"]=="fetch" and failed.error["code"]==code
+
+
+def test_api_response_mapping_validation_rejects_unsafe_or_conflicting_configuration():
+    from openrpa.model import validate_workflow
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":"profile","path":"/items","result":"response","responseMapping":{"responseCode":"200","itemsPointer":"/items","fields":[{"name":"id","path":"/id"}],"result":"items","maxItems":10}}]}
+    assert validate_workflow(base)==[]
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["itemsPointer"]="items"
+    assert "api-response-pointer" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["result"]="response"
+    assert "api-response-result-conflict" in {problem["code"] for problem in validate_workflow(bad)}
+    bad=json.loads(json.dumps(base));bad["activities"][0]["responseMapping"]["responseCode"]="500"
+    assert "api-response-code" in {problem["code"] for problem in validate_workflow(bad)}
+
+
 def test_api_request_requires_network_and_rejects_host_or_path_escape(tmp_path,monkeypatch):
     from openrpa import engine
     monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)

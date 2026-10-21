@@ -11,6 +11,24 @@ FORMAT = "openrpa.workflow"
 VERSION = 1
 
 
+def _valid_json_pointer(value: Any) -> bool:
+    if not isinstance(value, str) or len(value) > 2048:
+        return False
+    if value == "":
+        return True
+    if not value.startswith("/"):
+        return False
+    index = 0
+    while index < len(value):
+        if value[index] == "~":
+            if index + 1 >= len(value) or value[index + 1] not in "01":
+                return False
+            index += 2
+        else:
+            index += 1
+    return True
+
+
 class WorkflowError(ValueError):
     def __init__(self, message: str, activity_id: str | None = None, code: str = "workflow-invalid"):
         super().__init__(message)
@@ -161,6 +179,41 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 result=item.get("result","response")
                 if not isinstance(result,str) or not result.isidentifier():
                     problems.append({"code":"api-request-result","message":"API Request result must be a variable name","activityId":str(aid or "")})
+                mapping=item.get("responseMapping")
+                if mapping is not None:
+                    if not isinstance(mapping,dict):
+                        problems.append({"code":"api-response-mapping","message":"API Request responseMapping must be an object","activityId":str(aid or "")})
+                    else:
+                        response_code=mapping.get("responseCode","")
+                        if not isinstance(response_code,str) or response_code and (len(response_code)!=3 or not response_code.isdigit() or response_code[0]!="2"):
+                            problems.append({"code":"api-response-code","message":"API response mapping responseCode must be empty or a 2xx status code","activityId":str(aid or "")})
+                        items_pointer=mapping.get("itemsPointer","")
+                        if not _valid_json_pointer(items_pointer):
+                            problems.append({"code":"api-response-pointer","message":"API response itemsPointer must be an RFC 6901 JSON Pointer (empty selects the root)","activityId":str(aid or "")})
+                        output_name=mapping.get("result")
+                        if not isinstance(output_name,str) or not output_name.isidentifier():
+                            problems.append({"code":"api-response-result","message":"API response mapping result must be a variable name","activityId":str(aid or "")})
+                        elif isinstance(result,str) and output_name==result:
+                            problems.append({"code":"api-response-result-conflict","message":"API response mapping result must differ from the raw API response variable","activityId":str(aid or "")})
+                        max_items=mapping.get("maxItems",10_000)
+                        if not isinstance(max_items,int) or isinstance(max_items,bool) or not 1<=max_items<=10_000:
+                            problems.append({"code":"api-response-limit","message":"API response mapping maxItems must be an integer from 1 to 10,000","activityId":str(aid or "")})
+                        fields=mapping.get("fields")
+                        if not isinstance(fields,list) or not 1<=len(fields)<=50:
+                            problems.append({"code":"api-response-fields","message":"API response mapping needs 1 to 50 field mappings","activityId":str(aid or "")})
+                        else:
+                            field_names:set[str]=set()
+                            for field in fields:
+                                if not isinstance(field,dict):
+                                    problems.append({"code":"api-response-field","message":"Each API response field must be an object","activityId":str(aid or "")});continue
+                                name=field.get("name");pointer=field.get("path")
+                                if not isinstance(name,str) or not name.isidentifier() or len(name)>100:
+                                    problems.append({"code":"api-response-field-name","message":"API response field name must be a variable-style identifier up to 100 characters","activityId":str(aid or "")})
+                                elif name.casefold() in field_names:
+                                    problems.append({"code":"api-response-field-duplicate","message":"API response field names must be unique ignoring case","activityId":str(aid or "")})
+                                else:field_names.add(name.casefold())
+                                if not _valid_json_pointer(pointer):
+                                    problems.append({"code":"api-response-field-pointer","message":"API response field path must be an RFC 6901 JSON Pointer","activityId":str(aid or "")})
             if typ == "if":
                 if not isinstance(item.get("condition"), str):
                     problems.append({"code": "if-condition", "message": "If activity needs a condition expression", "activityId": str(aid or "")})
