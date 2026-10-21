@@ -20,6 +20,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *Flowchart action nodes can contain nested control flow. Add and edit branch activities from the action inspector; these activities remain part of that executable graph node.*
 
+![Open RPA Studio flowchart with the selected action's nested activity outline open and a branch activity selected in the properties inspector](docs/assets/flowchart-action-outline.png)
+
+*Select a flowchart action to open its scoped outline. Branch paths remain visible while selecting nested activities, and the corresponding graph action stays highlighted.*
+
 ![Open RPA Studio state-machine graph with a selected transition and inline guard and destination editor](docs/assets/state-machine-editor.png)
 
 *Select a transition edge to edit its destination or guard, reorder guarded routes, remove it, or add a new safe False-guarded route. Blank guards represent the fallback and remain last.*

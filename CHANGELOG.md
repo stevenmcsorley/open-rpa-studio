@@ -1,6 +1,8 @@
 # Changelog
 ## Unreleased
 
+- Added a scoped, navigable activity outline for the selected flowchart action. It exposes nested branch paths, selects nested activities in the existing inspector, and keeps the containing graph action highlighted. Added a public browser-preview screenshot.
+- Verification: 69 frontend tests pass; TypeScript and production Vite build pass. Playwright converted the sample workflow to a flowchart, added an If action and nested Log activity, and confirmed the action outline lists both activities while the nested Log is selected.
 - Flowchart action inspectors now expose the existing nested sequence editor for If/Else, loops, Switch, and Try/Catch/Finally activities. Nested edits update the activity stored on the graph action node; branch additions, field edits, duplication and removal remain inside that node. Added tested graph-tree operations for locating, patching, appending and removing nested activities.
 - Verification: 69 frontend tests pass; all 170 Python tests pass; TypeScript and production Vite build pass. Playwright added a flowchart If action, added and selected a nested Then activity, duplicated and removed it within the same action, and validated the workflow with zero problems and no console errors.
 - Made sequence-canvas zoom functional with a live percentage, 10% increments, 50–150% bounds, and one-click reset; graph editors retain their own zoom controls. Kept the nested workflow outline pinned to its canvas viewport during scroll so deep-branch navigation remains available after jumping to an activity.
