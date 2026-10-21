@@ -45,6 +45,8 @@ jobs:
             --paths . --collect-submodules openrpa --collect-all regex `
             --collect-all playwright --collect-all pyautogui --collect-all keyring --collect-all openpyxl --collect-all defusedxml --collect-all PIL `
             scripts/bridge_entry.py
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Copy-Item -LiteralPath src-tauri/resources/openrpa-bridge.exe -Destination "src-tauri/resources/openrpa-bridge-$version.exe"
       - name: Check bundled CLI/MCP command
         shell: pwsh
         run: |
