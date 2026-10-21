@@ -5,7 +5,7 @@
 - Enforces `.pdf` input, rejects encrypted files, and validates distinct output variables plus a configurable 1–5,000 page limit. The browser preview validates settings and clearly requires the desktop filesystem engine to execute.
 - Added PDF read entries to the impact review and audit trail. Documented that image-only pages are not OCR and that layout extraction does not reconstruct tables.
 - Added pypdf 6.21.1 as a locked runtime dependency.
-- Verification: 139 Python tests, 48 frontend tests, production frontend build, offline Cargo check, zero npm audit vulnerabilities, and a 479-component SBOM passed. The 61.49 MiB Windows x64 installer installed into a fresh directory; its frozen bridge validated and ran a two-page PDF extraction with page boundaries and durable run evidence. Existing installed-bridge checks for AI model discovery/drafting, saved profiles, debugger watches and spreadsheet security also passed. Installer SHA-256: `2b3308bd4f8c06640109cea75f73c31973662d120b633c76fa089db969343cad`. GitHub CI follows this commit.
+- Verification: 139 Python tests, 48 frontend tests, production frontend build, offline Cargo check, zero npm audit vulnerabilities, and a 479-component SBOM passed. The 61.49 MiB Windows x64 installer installed into a fresh directory; its frozen bridge validated and ran a two-page PDF extraction with page boundaries and durable run evidence. Existing installed-bridge checks for AI model discovery/drafting, saved profiles, debugger watches and spreadsheet security also passed. Installer SHA-256: `2b3308bd4f8c06640109cea75f73c31973662d120b633c76fa089db969343cad`. GitHub CI passed (run 39531354859).
 
 ## 0.1.25 — AI provider connection diagnostics
 
