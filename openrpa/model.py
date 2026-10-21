@@ -288,6 +288,17 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"map-limit","message":"Map Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
                 result=item.get("result","mappedRows")
                 if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"map-result","message":"Map Rows result must be a variable name","activityId":str(aid or "")})
+            elif typ == "distinct_rows":
+                if not isinstance(item.get("rows","rows"),(str,list)):problems.append({"code":"distinct-input","message":"Distinct Rows rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                keys=item.get("keys",[])
+                if not isinstance(keys,list) or not 1<=len(keys)<=100 or any(not isinstance(key,str) or not key.strip() or len(key)>256 for key in keys):problems.append({"code":"distinct-keys","message":"Distinct Rows needs 1–100 non-empty key fields","activityId":str(aid or "")})
+                elif len(set(keys))!=len(keys):problems.append({"code":"distinct-key-duplicate","message":"Distinct Rows key fields must be unique","activityId":str(aid or "")})
+                keep=item.get("keep","first")
+                if not isinstance(keep,str) or keep not in {"first","last"}:problems.append({"code":"distinct-keep","message":"Distinct Rows keep must be 'first' or 'last'","activityId":str(aid or "")})
+                limit=item.get("maxRows",100_000)
+                if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"distinct-limit","message":"Distinct Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
+                result=item.get("result","distinctRows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"distinct-result","message":"Distinct Rows result must be a variable name","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -652,7 +663,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",

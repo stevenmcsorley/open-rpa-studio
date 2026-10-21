@@ -161,6 +161,29 @@ def test_map_rows_projects_safe_expressions_without_mutating_source(tmp_path: Pa
     failed=run_project(project,tmp_path)
     assert failed.status=="failed" and failed.error["code"]=="map-expression"
 
+def test_distinct_rows_keeps_first_or_last_with_typed_keys_and_stable_order(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Distinct","main":"Main","workflows":{"Main":"main.json"}}
+    rows=[{"id":1,"value":"first"},{"id":True,"value":"bool"},{"id":1.0,"value":"last"},{"id":None,"value":"null-a"},{"value":"null-b"}]
+    activity={"id":"distinct","type":"distinct_rows","rows":"rows","keys":["id"],"keep":"first","result":"unique"}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Distinct","variables":[{"name":"rows","type":"array","value":rows}],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[];result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded",result.error
+    assert [row["value"] for row in result.variables["unique"]]==["first","bool","null-a"]
+    assert next(event for event in events if event.get("event")=="data-distinct")=={"event":"data-distinct","activityId":"distinct","inputRows":5,"outputRows":3,"duplicateRowsRemoved":2,"keyCount":1,"kept":"first"}
+    last={**workflow,"activities":[{**activity,"keep":"last"}]}
+    (tmp_path/"main.json").write_text(json.dumps(last),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded"
+    assert [row["value"] for row in result.variables["unique"]]==["bool","last","null-b"]
+    bad={**workflow,"variables":[{"name":"rows","type":"array","value":[{"id":{"nested":1}}]}]}
+    (tmp_path/"main.json").write_text(json.dumps(bad),encoding="utf-8")
+    failed=run_project(project,tmp_path)
+    assert failed.status=="failed" and failed.error["code"]=="distinct-key-type"
+    malformed={**workflow,"activities":[{**activity,"keys":["id","id"]}]}
+    assert "distinct-key-duplicate" in {problem["code"] for problem in validate_workflow(malformed)}
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{

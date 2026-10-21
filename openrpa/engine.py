@@ -910,6 +910,36 @@ class WorkflowEngine:
                 result.append(output)
             v[a.get("result","mappedRows")]=result
             self._emit({"event":"data-mapped","activityId":a["id"],"inputRows":len(rows),"outputRows":len(result),"mappedFieldCount":len(mappings)},logs)
+        elif kind == "distinct_rows":
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str):rows=evaluate(rows,v)
+            keys=a.get("keys",[]);keep=a.get("keep","first");limit=a.get("maxRows",100_000)
+            if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:raise WorkflowError("Distinct Rows maxRows must be an integer from 1 to 100,000",a["id"],"distinct-limit")
+            if not isinstance(rows,list) or len(rows)>limit:raise WorkflowError("Distinct Rows input must be a list within its configured row limit",a["id"],"distinct-input")
+            if not isinstance(keys,list) or not 1<=len(keys)<=100 or any(not isinstance(key,str) or not key.strip() or len(key)>256 for key in keys):raise WorkflowError("Distinct Rows needs 1–100 non-empty key fields",a["id"],"distinct-keys")
+            if len(set(keys))!=len(keys):raise WorkflowError("Distinct Rows key fields must be unique",a["id"],"distinct-key-duplicate")
+            if not isinstance(keep,str) or keep not in {"first","last"}:raise WorkflowError("Distinct Rows keep must be 'first' or 'last'",a["id"],"distinct-keep")
+            seen=set();selected=[]
+            def atom(value:Any)->tuple[str,Any]:
+                if value is None:return ("null",None)
+                if isinstance(value,bool):return ("boolean",value)
+                if isinstance(value,str):return ("string",value)
+                if isinstance(value,int) and abs(value)<=9_007_199_254_740_991:return ("number",Decimal(value))
+                if isinstance(value,float) and math.isfinite(value):return ("number",Decimal(str(value)))
+                raise WorkflowError("Distinct Rows key values must be null, text, booleans, or finite safe numbers",a["id"],"distinct-key-type")
+            for index,row in enumerate(rows):
+                if index%256==0:self._check_cancel()
+                if not isinstance(row,dict) or len(row)>2_000:raise WorkflowError(f"Distinct Rows record {index+1} must be an object with at most 2,000 fields",a["id"],"distinct-row-type")
+                signature=tuple(atom(row.get(field)) for field in keys)
+                if keep=="first":
+                    if signature not in seen:seen.add(signature);selected.append(row)
+                else:selected.append((signature,row))
+            if keep=="last":
+                last_indices={}
+                for index,(signature,_row) in enumerate(selected):last_indices[signature]=index
+                selected=[row for index,(signature,row) in enumerate(selected) if last_indices[signature]==index]
+            v[a.get("result","distinctRows")]=selected
+            self._emit({"event":"data-distinct","activityId":a["id"],"inputRows":len(rows),"outputRows":len(selected),"duplicateRowsRemoved":len(rows)-len(selected),"keyCount":len(keys),"kept":keep},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes
