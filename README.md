@@ -16,14 +16,14 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer will be attached to the [Open RPA Studio v0.1.24 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.24). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer will be attached to the [Open RPA Studio v0.1.25 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.25). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.24 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `261fda0e78d0e2002b94333e5477c9e21b0663b66b63cedadc9a92811b1b3aef`. Verify the file before running it:
+The v0.1.25 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Its SHA-256 is `1560e7deb150f7928101308e103797976ee06b8246335d7e0864e072bb764daa`. Verify the file before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.24-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.25-x64.exe -Algorithm SHA256
 ```
 
 ## Build the Windows installer
@@ -71,6 +71,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Generate a candidate workflow from an optional AI provider, review the validation output, then explicitly insert the draft. Generated workflows are not run automatically.
 - Invoke reusable project workflows through a dedicated argument-mapping editor. Map typed inputs and per-call output variables; project validation catches missing required arguments, unknown names and incompatible directions before execution.
 - Choose whether AI drafts an activity sequence, connected flowchart, or state machine. Model-specific schemas and the same local workflow validator are applied before a draft can replace the current workflow.
+- Test configured AI endpoints from the model picker. Studio reports reachability, model count and request time, and distinguishes an empty model catalogue from a connection failure without sending a prompt.
 
 ### Workflow execution
 
