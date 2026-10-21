@@ -72,17 +72,17 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer is available from the [Open RPA Studio v0.1.28 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.28). The package is for evaluation and is not code-signed.
+The unsigned Windows installer is available from the [Open RPA Studio v0.1.37 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.37). It adds live MCP workflow previews; the package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 
-The v0.1.28 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it:
+The v0.1.37 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it:
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.28-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.37-x64.exe -Algorithm SHA256
 ```
 
-To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies. The published v0.1.28 installer above remains the latest GitHub release until a new release is published.
+To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies.
 
 ## Build the Windows installer
 
