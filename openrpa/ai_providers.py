@@ -6,13 +6,12 @@ as bridge parameters or serialized into project settings.
 from __future__ import annotations
 
 import json
-import urllib.error
-import urllib.request
+import threading
 from typing import Any
 from urllib.parse import urlsplit
 
 from .credentials import get_safe_keyring
-from .network import request as restricted_request
+from .network import RequestCancelled, request as restricted_request, request_loopback
 
 PROVIDERS = {
     "ollama": {"name":"Ollama","local":True,"defaultBaseUrl":"http://127.0.0.1:11434","requiresCredential":False,"kind":"ollama"},
@@ -25,11 +24,6 @@ PROVIDERS = {
     "local_openai_compatible": {"name":"Local OpenAI-compatible server","local":True,"defaultBaseUrl":"http://127.0.0.1:8000/v1","requiresCredential":False,"kind":"openai"},
 }
 MAX_RESPONSE_BYTES=2_000_000
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(req.full_url,code,"AI provider redirects are disabled",headers,fp)
-
-
 def catalog() -> list[dict[str,Any]]:
     return [{"id":key,**value} for key,value in PROVIDERS.items()]
 
@@ -67,32 +61,24 @@ def _credential(service: str|None, username: str|None) -> str|None:
 
 
 def _call(url: str, local: bool, method: str="GET", headers: dict[str,str]|None=None, body: dict[str,Any]|None=None,
-          timeout: float=10, secret: str|None=None, provider: str="") -> dict[str,Any]:
+          timeout: float=10, secret: str|None=None, provider: str="",
+          cancel: threading.Event | None=None) -> dict[str,Any]:
     raw=json.dumps(body,ensure_ascii=False).encode("utf-8") if body is not None else None
     hdr={"Accept":"application/json",**(headers or {})}
     if raw is not None: hdr["Content-Type"]="application/json"
     if secret:
         if provider=="claude": hdr["x-api-key"]=secret
         else: hdr["Authorization"]="Bearer "+secret
-    if local:
-        request=urllib.request.Request(url,data=raw,headers=hdr,method=method)
-        try:
-            with urllib.request.build_opener(_NoRedirect()).open(request,timeout=min(max(timeout,1),180)) as response:
-                payload=response.read(MAX_RESPONSE_BYTES+1)
-        except urllib.error.HTTPError as exc:
-            raise ValueError(f"Provider request failed with HTTP {exc.code}") from exc
-    else:
-        try:
-            result=restricted_request(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES)
-            if int(result["status"])<200 or int(result["status"])>=300:
-                raise ValueError(f"Provider request failed with HTTP {result['status']}")
-            try: return json.loads(str(result["body"]))
-            except json.JSONDecodeError as exc: raise ValueError("Provider returned invalid JSON") from exc
-        except ValueError: raise
-        except Exception as exc: raise ValueError(f"Provider network request failed: {type(exc).__name__}: {exc}") from exc
-    if len(payload)>MAX_RESPONSE_BYTES: raise ValueError("Provider response exceeded the 2 MB limit")
-    try: return json.loads(payload)
-    except json.JSONDecodeError as exc: raise ValueError("Provider returned invalid JSON") from exc
+    try:
+        result=(request_loopback(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,cancel)
+                if local else restricted_request(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,cancel))
+        if int(result["status"])<200 or int(result["status"])>=300:
+            raise ValueError(f"Provider request failed with HTTP {result['status']}")
+        try: return json.loads(str(result["body"]))
+        except json.JSONDecodeError as exc: raise ValueError("Provider returned invalid JSON") from exc
+    except RequestCancelled: raise
+    except ValueError: raise
+    except Exception as exc: raise ValueError(f"Provider network request failed: {type(exc).__name__}: {exc}") from exc
 
 
 def models(provider: str, base_url: str|None=None, credential_service: str|None=None,
@@ -145,7 +131,8 @@ def _schema(execution_model: str="sequence") -> dict[str,Any]:
 
 
 def draft(provider: str, model: str, prompt: str, activity_types: list[str], base_url: str|None=None,
-          credential_service: str|None=None, credential_username: str|None=None, execution_model: str="sequence") -> dict[str,Any]:
+          credential_service: str|None=None, credential_username: str|None=None, execution_model: str="sequence",
+          cancel: threading.Event | None=None) -> dict[str,Any]:
     if provider not in PROVIDERS: raise ValueError(f"Unknown AI provider: {provider}")
     if not isinstance(prompt,str) or not prompt.strip() or len(prompt)>12_000: raise ValueError("Describe the workflow in 1–12,000 characters")
     if not isinstance(model,str) or not model.strip() or len(model)>200: raise ValueError("Choose a model name")
@@ -161,7 +148,7 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
     instructions=instructions.replace("Return only the requested structured result.","Return only the requested structured result. "+format_instruction)
     if provider=="ollama":
         endpoint,local=_endpoint(provider,base_url,"/api/generate")
-        response=_call(endpoint,local,"POST",body={"model":model,"prompt":instructions+"\n\nUser task JSON:\n"+task_payload,"stream":False,"format":schema,"options":{"temperature":0}},timeout=180,provider=provider)
+        response=_call(endpoint,local,"POST",body={"model":model,"prompt":instructions+"\n\nUser task JSON:\n"+task_payload,"stream":False,"format":schema,"options":{"temperature":0}},timeout=180,provider=provider,cancel=cancel)
         generated=response.get("response")
         if not isinstance(generated,str): raise ValueError("Ollama response did not contain a workflow draft")
         try: return json.loads(generated)
@@ -171,7 +158,7 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
         endpoint,local=_endpoint(provider,base_url,"/v1/messages")
         response=_call(endpoint,local,"POST",headers={"anthropic-version":"2023-06-01"},body={"model":model,"max_tokens":4096,"system":instructions,
             "messages":[{"role":"user","content":task_payload}],
-            "tools":[{"name":"create_workflow","description":"Return the validated workflow draft","input_schema":schema}],"tool_choice":{"type":"tool","name":"create_workflow"}},timeout=180,secret=secret,provider=provider)
+            "tools":[{"name":"create_workflow","description":"Return the validated workflow draft","input_schema":schema}],"tool_choice":{"type":"tool","name":"create_workflow"}},timeout=180,secret=secret,provider=provider,cancel=cancel)
         block=next((item for item in response.get("content",[]) if isinstance(item,dict) and item.get("type")=="tool_use" and item.get("name")=="create_workflow"),None)
         if not block or not isinstance(block.get("input"),dict): raise ValueError("Claude did not return the required structured workflow tool result")
         return block["input"]
@@ -180,7 +167,7 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
         response=_call(endpoint,local,"POST",body={"model":model,"instructions":instructions,
             "input":task_payload,"store":False,
             "text":{"format":{"type":"json_schema","name":"open_rpa_workflow","strict":False,"schema":schema}}},
-            timeout=180,secret=secret,provider=provider)
+            timeout=180,secret=secret,provider=provider,cancel=cancel)
         if response.get("status") not in (None,"completed"):
             reason=response.get("incomplete_details") or response.get("error") or response.get("status")
             raise ValueError(f"OpenAI Responses API did not complete the draft: {reason}")
@@ -197,7 +184,7 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
         except (TypeError,json.JSONDecodeError) as exc: raise ValueError("OpenAI Responses API returned malformed structured output") from exc
     endpoint,local=_endpoint(provider,base_url,"/chat/completions")
     response=_call(endpoint,local,"POST",body={"model":model,"temperature":0,"messages":[{"role":"system","content":instructions},{"role":"user","content":task_payload}],
-        "response_format":{"type":"json_schema","json_schema":{"name":"open_rpa_workflow","strict":False,"schema":schema}}},timeout=180,secret=secret,provider=provider)
+        "response_format":{"type":"json_schema","json_schema":{"name":"open_rpa_workflow","strict":False,"schema":schema}}},timeout=180,secret=secret,provider=provider,cancel=cancel)
     try: return json.loads(response["choices"][0]["message"]["content"])
     except (KeyError,IndexError,TypeError,json.JSONDecodeError) as exc: raise ValueError("AI provider returned malformed structured output") from exc
 

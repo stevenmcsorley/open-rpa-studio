@@ -23,6 +23,8 @@ stdout_lock = threading.Lock()
 active_run_lock = threading.Lock()
 active_run_id: str | None = None
 active_debugger: DebugController | None = None
+ai_draft_lock = threading.Lock()
+ai_draft_cancellations: dict[str, threading.Event] = {}
 browser_inspector=BrowserInspector()
 atexit.register(browser_inspector.close)
 
@@ -131,7 +133,7 @@ def send(message: dict[str, Any]) -> None:
         sys.stdout.flush()
 
 
-def handle(request: dict[str, Any]) -> None:
+def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) -> None:
     global active_run_id, active_debugger
     method = request.get("method")
     params = request.get("params", {})
@@ -391,6 +393,16 @@ def handle(request: dict[str, Any]) -> None:
             history.audit("ai.models",{"provider":provider,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
             models=ai_providers.models(provider,params.get("baseUrl"),params.get("credentialService"),params.get("credentialUsername"))
             result={"models":models,"provider":provider}
+        elif method == "ai.cancel":
+            draft_id=params.get("draftId")
+            if not isinstance(draft_id,str) or not draft_id or len(draft_id)>128:
+                raise ValueError("AI draft cancellation requires a valid draft ID")
+            with ai_draft_lock:
+                cancellation=ai_draft_cancellations.get(draft_id)
+            if cancellation is not None:
+                cancellation.set()
+            history.audit("ai.cancel",{"draftId":draft_id,"active":cancellation is not None})
+            result={"cancelled":cancellation is not None,"draftId":draft_id}
         elif method == "ai.draft":
             provider=str(params.get("provider","ollama"))
             model=str(params.get("model","")).strip()
@@ -398,7 +410,9 @@ def handle(request: dict[str, Any]) -> None:
             execution_model=str(params.get("executionModel","sequence"))
             history.audit("ai.draft",{"provider":provider,"model":model[:200],"workflowModel":execution_model,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
             draft=ai_providers.draft(provider,model,params.get("prompt",""),types,params.get("baseUrl"),
-                params.get("credentialService"),params.get("credentialUsername"),execution_model)
+                params.get("credentialService"),params.get("credentialUsername"),execution_model,ai_cancel)
+            if ai_cancel is not None and ai_cancel.is_set():
+                raise ai_providers.RequestCancelled("Provider request was cancelled")
             payload_key={"sequence":"activities","flowchart":"flowchart","state_machine":"stateMachine"}.get(execution_model)
             if payload_key is None:raise ValueError("AI workflow model must be sequence, flowchart, or state_machine")
             if not isinstance(draft,dict) or set(draft)-{"explanation",payload_key}:
@@ -488,10 +502,35 @@ ACTIVITY_CATALOG = [
 
 def main() -> None:
     for line in sys.stdin:
+        request: Any = None
         try:
-            handle(json.loads(line))
+            request=json.loads(line)
+            if request.get("method")!="ai.draft":
+                handle(request)
+                continue
+            params=request.get("params",{})
+            draft_id=params.get("draftId",str(request.get("id","")))
+            if not isinstance(draft_id,str) or not draft_id or len(draft_id)>128:
+                raise ValueError("AI draft requires a valid draft ID")
+            cancellation=threading.Event()
+            with ai_draft_lock:
+                if draft_id in ai_draft_cancellations:
+                    raise ValueError("An AI draft with this ID is already active")
+                ai_draft_cancellations[draft_id]=cancellation
+
+            def finish_draft(current_request: dict[str, Any]=request, current_id: str=draft_id,
+                             current_cancel: threading.Event=cancellation) -> None:
+                try:
+                    handle(current_request,current_cancel)
+                finally:
+                    with ai_draft_lock:
+                        if ai_draft_cancellations.get(current_id) is current_cancel:
+                            ai_draft_cancellations.pop(current_id,None)
+
+            threading.Thread(target=finish_draft,name="openrpa-ai-draft",daemon=True).start()
         except Exception as exc:
-            send({"error": {"message": str(exc), "type": type(exc).__name__}})
+            send({"id":request.get("id") if isinstance(request,dict) else None,
+                  "error": {"message": str(exc), "type": type(exc).__name__}})
 
 
 if __name__ == "__main__":

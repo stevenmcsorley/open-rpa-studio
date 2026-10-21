@@ -1,8 +1,8 @@
 # Changelog
 ## Unreleased
 
-- Added a stop-waiting action for AI drafting: closing an in-flight dialog invalidates its request generation so late provider replies cannot repopulate a dismissed or reopened panel. The UI explicitly warns that this does not abort work already sent upstream.
-- Verification: 58 frontend tests and the production Vite build pass.
+- Added request-ID-scoped AI draft cancellation across Studio, the native bridge and provider HTTP transports. Cancellation interrupts socket waits and discards late results; requests already received by a provider may continue server-side.
+- Verification: the native-bridge cancellation regression, 169 Python tests, 58 frontend tests and the production Vite build pass.
 
 - AI model selection now accepts an exact manually entered provider model ID when an endpoint does not expose or filters its model catalogue; saved model IDs are preserved across a catalogue refresh.
 - Added a distinct catalogue-unavailable status so a missing `GET /models` route does not incorrectly imply the generation endpoint is unusable.

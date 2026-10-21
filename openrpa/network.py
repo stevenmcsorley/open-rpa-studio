@@ -7,14 +7,27 @@ workflow instead of being followed implicitly.
 from __future__ import annotations
 
 import http.client
+import errno
 import ipaddress
+import select
 import socket
 import ssl
+import threading
+import time
 from urllib.parse import urlsplit
 
 
 class EgressDenied(ValueError):
     pass
+
+
+class RequestCancelled(Exception):
+    """Raised when a caller cancels an in-flight HTTP request."""
+
+
+def _check_cancel(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise RequestCancelled("Provider request was cancelled")
 
 
 def _target(url: str) -> tuple[str, int, str, str]:
@@ -86,7 +99,13 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
 
 
 def request(url: str, method: str, headers: dict[str, str], body: bytes | None,
-            timeout: float, max_bytes: int) -> dict[str, object]:
+            timeout: float, max_bytes: int,
+            cancel: threading.Event | None = None) -> dict[str, object]:
+    if cancel is not None:
+        scheme, port, host, target = _target(url)
+        address = _resolve_public(host, port)
+        return _request_cancellable(scheme, host, port, address, target, method,
+                                    headers, body, timeout, max_bytes, cancel)
     scheme, port, host, target = _target(url)
     timeout = min(max(float(timeout), 1.0), 60.0)
     max_bytes = min(max(int(max_bytes), 1), 5_000_000)
@@ -104,6 +123,245 @@ def request(url: str, method: str, headers: dict[str, str], body: bytes | None,
                 "redirectBlocked": 300 <= response.status < 400}
     finally:
         connection.close()
+
+
+def request_loopback(url: str, method: str, headers: dict[str, str], body: bytes | None,
+                     timeout: float, max_bytes: int,
+                     cancel: threading.Event | None = None) -> dict[str, object]:
+    """Cancellable HTTP client for explicitly configured loopback model servers."""
+    _check_cancel(cancel)
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower()
+        if (parsed.scheme != "http" or host not in {"127.0.0.1", "::1", "localhost"}
+                or parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment):
+            raise EgressDenied("Local model requests must use plain HTTP on a loopback host")
+        port = parsed.port or 80
+    except ValueError as exc:
+        raise EgressDenied("Invalid local model URL") from exc
+    target = parsed.path or "/"
+    if parsed.query:
+        target += "?" + parsed.query
+    timeout = min(max(float(timeout), 1.0), 180.0)
+    max_bytes = min(max(int(max_bytes), 1), 5_000_000)
+    _check_cancel(cancel)
+    if cancel is not None:
+        return _request_cancellable("http", host, port, host, target, method,
+                                    headers, body, timeout, max_bytes, cancel)
+    connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        connection.request(method.upper(), target, body=body, headers=headers)
+        response = connection.getresponse()
+        payload = response.read(max_bytes + 1)
+        if len(payload) > max_bytes:
+            raise EgressDenied("HTTP response exceeded configured size limit")
+        return {"status": response.status, "headers": dict(response.getheaders()),
+                "body": payload.decode("utf-8", errors="replace"),
+                "redirectBlocked": 300 <= response.status < 400}
+    finally:
+        connection.close()
+
+
+def _wait_socket(sock: socket.socket, *, read: bool, write: bool,
+                 cancel: threading.Event, deadline: float) -> None:
+    while True:
+        _check_cancel(cancel)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Provider request timed out")
+        readable, writable, exceptional = select.select(
+            [sock] if read else [], [sock] if write else [], [sock], min(remaining, 0.1))
+        if exceptional:
+            raise OSError("Provider socket reported an exceptional condition")
+        if (read and readable) or (write and writable):
+            return
+
+
+def _connect_cancellable(host: str, port: int, address: str, cancel: threading.Event,
+                         deadline: float) -> socket.socket:
+    infos = socket.getaddrinfo(address, port, type=socket.SOCK_STREAM)
+    last_error: OSError | None = None
+    for family, socktype, proto, _canonname, sockaddr in infos:
+        _check_cancel(cancel)
+        sock = socket.socket(family, socktype, proto)
+        sock.setblocking(False)
+        try:
+            result = sock.connect_ex(sockaddr)
+            if result not in (0, errno.EISCONN):
+                pending_errors = {errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY,
+                                  getattr(errno, "WSAEWOULDBLOCK", 10035),
+                                  getattr(errno, "WSAEINPROGRESS", 10036)}
+                if result not in pending_errors:
+                    raise OSError(result, "Could not connect to provider")
+                _wait_socket(sock, read=False, write=True, cancel=cancel, deadline=deadline)
+                error = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if error:
+                    raise OSError(error, "Could not connect to provider")
+            return sock
+        except OSError as exc:
+            last_error = exc
+            sock.close()
+            if time.monotonic() >= deadline:
+                break
+    if last_error is not None:
+        raise last_error
+    raise OSError("Provider DNS returned no usable socket addresses")
+
+
+def _send_cancellable(sock: socket.socket, data: bytes, cancel: threading.Event,
+                      deadline: float) -> None:
+    view = memoryview(data)
+    while view:
+        _check_cancel(cancel)
+        try:
+            sent = sock.send(view)
+            if sent == 0:
+                raise OSError("Provider socket closed while sending the request")
+            view = view[sent:]
+        except (BlockingIOError, ssl.SSLWantWriteError):
+            _wait_socket(sock, read=False, write=True, cancel=cancel, deadline=deadline)
+        except ssl.SSLWantReadError:
+            _wait_socket(sock, read=True, write=False, cancel=cancel, deadline=deadline)
+        if not view:
+            return
+
+
+def _receive_cancellable(sock: socket.socket, cancel: threading.Event,
+                         deadline: float, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    limit = max_bytes + 65536
+    while True:
+        _wait_socket(sock, read=True, write=False, cancel=cancel, deadline=deadline)
+        try:
+            chunk = sock.recv(min(65536, limit + 1 - size))
+        except (BlockingIOError, ssl.SSLWantReadError):
+            continue
+        except ssl.SSLWantWriteError:
+            _wait_socket(sock, read=False, write=True, cancel=cancel, deadline=deadline)
+            continue
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > limit:
+            raise EgressDenied("Provider response exceeded the configured size limit")
+
+
+def _decode_response(raw: bytes, max_bytes: int) -> dict[str, object]:
+    marker = raw.find(b"\r\n\r\n")
+    if marker < 0 or marker > 65536:
+        raise EgressDenied("Provider returned an invalid or oversized HTTP header")
+    head = raw[:marker].decode("iso-8859-1", errors="replace").split("\r\n")
+    try:
+        status_parts = head[0].split(" ", 2)
+        version, status_text = status_parts[:2]
+        if not version.startswith("HTTP/"):
+            raise ValueError
+        status = int(status_text)
+    except (ValueError, IndexError):
+        raise EgressDenied("Provider returned an invalid HTTP status line") from None
+    response_headers: dict[str, str] = {}
+    for line in head[1:]:
+        if ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        key = name.strip().lower()
+        response_headers[key] = f"{response_headers[key]}, {value.strip()}" if key in response_headers else value.strip()
+    payload = raw[marker + 4:]
+    if "chunked" in response_headers.get("transfer-encoding", "").lower():
+        decoded = bytearray()
+        offset = 0
+        while True:
+            end = payload.find(b"\r\n", offset)
+            if end < 0:
+                raise EgressDenied("Provider returned a truncated chunked response")
+            try:
+                length = int(payload[offset:end].split(b";", 1)[0], 16)
+            except ValueError:
+                raise EgressDenied("Provider returned an invalid chunked response") from None
+            offset = end + 2
+            if length == 0:
+                break
+            if length < 0 or len(decoded) + length > max_bytes:
+                raise EgressDenied("Provider response exceeded the configured size limit")
+            if len(payload) < offset + length + 2 or payload[offset + length:offset + length + 2] != b"\r\n":
+                raise EgressDenied("Provider returned a truncated chunked response")
+            decoded.extend(payload[offset:offset + length])
+            offset += length + 2
+        payload = bytes(decoded)
+    elif "content-length" in response_headers:
+        try:
+            expected = int(response_headers["content-length"])
+        except ValueError:
+            raise EgressDenied("Provider returned an invalid Content-Length") from None
+        if expected < 0 or expected > max_bytes:
+            raise EgressDenied("Provider response exceeded the configured size limit")
+        if len(payload) < expected:
+            raise EgressDenied("Provider response ended before Content-Length bytes arrived")
+        payload = payload[:expected]
+    if len(payload) > max_bytes:
+        raise EgressDenied("Provider response exceeded the configured size limit")
+    return {"status": status, "headers": response_headers,
+            "body": payload.decode("utf-8", errors="replace"),
+            "redirectBlocked": 300 <= status < 400}
+
+
+def _request_cancellable(scheme: str, host: str, port: int, address: str, target: str,
+                         method: str, headers: dict[str, str], body: bytes | None,
+                         timeout: float, max_bytes: int,
+                         cancel: threading.Event) -> dict[str, object]:
+    timeout = min(max(float(timeout), 1.0), 180.0)
+    max_bytes = min(max(int(max_bytes), 1), 5_000_000)
+    if not method or any(character in method for character in " \r\n\t"):
+        raise EgressDenied("Invalid provider HTTP method")
+    if any(character in target for character in "\r\n\t") or " " in target:
+        raise EgressDenied("Invalid provider request target")
+    request_headers = {key.lower(): value for key, value in headers.items()}
+    if any(not key or any(character in key for character in ":\r\n\t ")
+           or any(character in value for character in "\r\n")
+           for key, value in request_headers.items()):
+        raise EgressDenied("Invalid provider HTTP header")
+    deadline = time.monotonic() + timeout
+    sock = _connect_cancellable(host, port, address, cancel, deadline)
+    try:
+        if scheme == "https":
+            context = ssl.create_default_context()
+            sock = context.wrap_socket(sock, server_hostname=host, do_handshake_on_connect=False)
+            sock.setblocking(False)
+            while True:
+                _check_cancel(cancel)
+                try:
+                    sock.do_handshake()
+                    break
+                except ssl.SSLWantReadError:
+                    _wait_socket(sock, read=True, write=False, cancel=cancel, deadline=deadline)
+                except ssl.SSLWantWriteError:
+                    _wait_socket(sock, read=False, write=True, cancel=cancel, deadline=deadline)
+        formatted_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        request_headers.setdefault("host", f"{formatted_host}:{port}" if port not in {80, 443} else formatted_host)
+        request_headers.setdefault("connection", "close")
+        request_headers.setdefault("accept-encoding", "identity")
+        payload = body or b""
+        if body is not None:
+            request_headers.setdefault("content-length", str(len(payload)))
+        head = [f"{method.upper()} {target} HTTP/1.1"]
+        head.extend(f"{key}: {value}" for key, value in request_headers.items())
+        _send_cancellable(sock, ("\r\n".join(head) + "\r\n\r\n").encode("iso-8859-1") + payload, cancel, deadline)
+        raw = _receive_cancellable(sock, cancel, deadline, max_bytes)
+        return _decode_response(raw, max_bytes)
+    except RequestCancelled:
+        raise
+    except Exception:
+        if cancel.is_set():
+            raise RequestCancelled("Provider request was cancelled") from None
+        raise
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
 
 
 def assert_public_url(url: str) -> None:
