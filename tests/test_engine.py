@@ -92,6 +92,35 @@ def test_join_rows_preserves_duplicates_types_left_unmatched_and_row_limit(tmp_p
     collision=run_project(project,tmp_path)
     assert collision.status=="failed" and collision.error["code"]=="join-field-collision"
 
+def test_group_rows_calculates_typed_groups_and_null_aware_aggregates(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Groups","main":"Main","workflows":{"Main":"main.json"}}
+    rows=[{"department":"A","amount":0.1},{"department":"A","amount":0.2},{"department":"A","amount":None},{"department":"B","amount":None},{"department":1,"amount":5},{"department":True,"amount":8},{"department":None,"amount":1},{"amount":2}]
+    aggregations=[{"operation":"count_rows","as":"records"},{"field":"amount","operation":"count_values","as":"priced"},{"field":"amount","operation":"sum","as":"total"},{"field":"amount","operation":"average","as":"mean"},{"field":"amount","operation":"min","as":"minimum"},{"field":"amount","operation":"max","as":"maximum"}]
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Groups","variables":[{"name":"rows","type":"array","value":rows}],"arguments":[],"activities":[{"id":"group","type":"group_rows","rows":"rows","groupBy":["department"],"aggregations":aggregations,"result":"summary"}]}
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[];result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded"
+    groups=result.variables["summary"]
+    assert [group.get("department") for group in groups]==["A","B",1,True,None]
+    assert groups[0]=={"department":"A","records":3,"priced":2,"total":0.3,"mean":0.15,"minimum":0.1,"maximum":0.2}
+    assert groups[1]=={"department":"B","records":1,"priced":0,"total":None,"mean":None,"minimum":None,"maximum":None}
+    assert groups[2]["records"]==1 and groups[3]["records"]==1
+    assert groups[4]["records"]==2
+    assert next(event for event in events if event.get("event")=="data-grouped")=={"event":"data-grouped","activityId":"group","inputRows":8,"outputGroups":5,"groupByCount":1,"aggregationCount":6}
+
+def test_group_rows_supports_empty_global_aggregate_and_rejects_bad_values(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Groups","main":"Main","workflows":{"Main":"main.json"}}
+    base={"format":"openrpa.workflow","formatVersion":1,"name":"Groups","variables":[{"name":"rows","type":"array","value":[]}],"arguments":[],"activities":[]}
+    activity={"id":"group","type":"group_rows","rows":"rows","groupBy":[],"aggregations":[{"operation":"count_rows","as":"records"},{"operation":"sum","field":"amount","as":"total"}],"result":"summary"}
+    (tmp_path/"main.json").write_text(json.dumps({**base,"activities":[activity]}),encoding="utf-8")
+    result=run_project(project,tmp_path)
+    assert result.status=="succeeded" and result.variables["summary"]==[{"records":0,"total":None}]
+    assert "group-output-duplicate" in {problem["code"] for problem in validate_workflow({**base,"activities":[{**activity,"aggregations":[{"operation":"count_rows","as":"records"},{"operation":"sum","field":"amount","as":"records"}]}]})}
+    bad={**base,"variables":[{"name":"rows","type":"array","value":[{"amount":"not numeric"}]}],"activities":[{**activity,"groupBy":["amount"],"aggregations":[{"operation":"sum","field":"amount","as":"total"}]}]}
+    (tmp_path/"main.json").write_text(json.dumps(bad),encoding="utf-8")
+    failed=run_project(project,tmp_path)
+    assert failed.status=="failed" and failed.error["code"]=="group-number-type"
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{

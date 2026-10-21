@@ -14,7 +14,7 @@ import zipfile
 import sqlite3
 import base64
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -751,6 +751,93 @@ class WorkflowEngine:
                     result.append(merged)
             name=a.get("result","joinedRows");v[name]=result
             self._emit({"event":"data-joined","activityId":a["id"],"leftRows":len(left),"rightRows":len(right),"outputRows":len(result),"joinType":mode,"matchedLeftRows":sum(1 for row in left if join_key(row.get(left_key)) in index)},logs)
+        elif kind == "group_rows":
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str):rows=evaluate(rows,v)
+            group_by=a.get("groupBy",[]);aggregations=a.get("aggregations",[]);max_groups=a.get("maxGroups",100_000)
+            if not isinstance(rows,list) or len(rows)>100_000:
+                raise WorkflowError("Group Rows input must be a list of at most 100,000 records",a["id"],"group-input")
+            if not isinstance(group_by,list) or len(group_by)>100 or any(not isinstance(field,str) or not field.strip() or len(field)>256 for field in group_by) or len(set(group_by))!=len(group_by):
+                raise WorkflowError("Group Rows needs up to 100 unique, non-empty group fields",a["id"],"group-fields")
+            operations={"count_rows","count_values","sum","average","min","max"}
+            if not isinstance(aggregations,list) or len(aggregations)>100:
+                raise WorkflowError("Group Rows supports up to 100 aggregations",a["id"],"group-aggregations")
+            aliases=set(group_by)
+            for index,aggregation in enumerate(aggregations):
+                if not isinstance(aggregation,dict) or aggregation.get("operation") not in operations or not isinstance(aggregation.get("as"),str) or not aggregation["as"].strip() or len(aggregation["as"])>256:
+                    raise WorkflowError(f"Group Rows aggregation {index+1} needs a supported operation and output field",a["id"],"group-aggregation")
+                if aggregation["operation"]!="count_rows" and (not isinstance(aggregation.get("field"),str) or not aggregation["field"].strip() or len(aggregation["field"])>256):
+                    raise WorkflowError(f"Group Rows aggregation {index+1} needs an input field",a["id"],"group-aggregation-field")
+                if aggregation["as"] in aliases:
+                    raise WorkflowError(f"Group Rows output field '{aggregation['as']}' is duplicated",a["id"],"group-output-duplicate")
+                aliases.add(aggregation["as"])
+            if not isinstance(max_groups,int) or isinstance(max_groups,bool) or not 1<=max_groups<=100_000:
+                raise WorkflowError("Group Rows maxGroups must be an integer from 1 to 100,000",a["id"],"group-limit")
+            def group_atom(value:Any)->tuple[str,Any]:
+                if value is None:return ("null",None)
+                if isinstance(value,bool):return ("boolean",value)
+                if isinstance(value,str):return ("string",value)
+                if isinstance(value,int):return ("number",Decimal(value))
+                if isinstance(value,float) and math.isfinite(value):return ("number",Decimal(str(value)))
+                raise WorkflowError("Group Rows can group only finite JSON scalar values",a["id"],"group-key-type")
+            groups:dict[tuple[Any,...],dict[str,Any]]={}
+            for position,row in enumerate(rows):
+                if position%256==0:self._check_cancel()
+                if not isinstance(row,dict) or len(row)>2_000:
+                    raise WorkflowError(f"Group Rows record {position+1} must be an object with at most 2,000 fields",a["id"],"group-row-type")
+                values=[row.get(field) for field in group_by]
+                key=tuple(group_atom(value) for value in values)
+                group=groups.get(key)
+                if group is None:
+                    if len(groups)>=max_groups:raise WorkflowError(f"Group Rows exceeds the configured {max_groups:,} group limit",a["id"],"group-limit")
+                    group={"keys":dict(zip(group_by,values)),"counts":[0]*len(aggregations),"totals":[Decimal(0) for _ in aggregations],"values":[None]*len(aggregations),"types":[None]*len(aggregations)}
+                    groups[key]=group
+                for agg_index,aggregation in enumerate(aggregations):
+                    operation=aggregation["operation"]
+                    if operation=="count_rows":group["counts"][agg_index]+=1;continue
+                    value=row.get(aggregation.get("field"))
+                    if value is None:continue
+                    if operation=="count_values":group["counts"][agg_index]+=1;continue
+                    if operation in {"sum","average"}:
+                        if isinstance(value,bool) or not isinstance(value,(int,float)) or (isinstance(value,float) and not math.isfinite(value)):
+                            raise WorkflowError(f"Group Rows {operation} field '{aggregation['field']}' must contain only finite numbers or nulls",a["id"],"group-number-type")
+                        amount=Decimal(value) if isinstance(value,int) else Decimal(str(value))
+                        current=group["totals"][agg_index]
+                        precision=max(28,max(current.adjusted(),amount.adjusted())-min(current.as_tuple().exponent,amount.as_tuple().exponent)+len(str(max(1,len(rows))))+2)
+                        with localcontext() as decimal_context:
+                            decimal_context.prec=precision
+                            group["totals"][agg_index]=current+amount
+                        group["counts"][agg_index]+=1;continue
+                    value_type="number" if isinstance(value,(int,float)) and not isinstance(value,bool) else "string" if isinstance(value,str) else None
+                    if value_type is None or isinstance(value,float) and not math.isfinite(value):
+                        raise WorkflowError(f"Group Rows {operation} field '{aggregation['field']}' must contain finite numbers, text or nulls",a["id"],"group-order-type")
+                    previous_type=group["types"][agg_index]
+                    if previous_type is not None and previous_type!=value_type:raise WorkflowError(f"Group Rows {operation} field '{aggregation['field']}' mixes text and numeric values",a["id"],"group-order-type")
+                    group["types"][agg_index]=value_type;old=group["values"][agg_index]
+                    group["values"][agg_index]=value if old is None or (operation=="min" and value<old) or (operation=="max" and value>old) else old
+            result=[]
+            for group in groups.values():
+                output=dict(group["keys"])
+                for agg_index,aggregation in enumerate(aggregations):
+                    operation=aggregation["operation"];count=group["counts"][agg_index]
+                    if operation in {"count_rows","count_values"}:value=count
+                    elif operation=="sum":
+                        total=group["totals"][agg_index]
+                        if count==0:value=None
+                        elif total==total.to_integral_value():value=int(total)
+                        else:
+                            value=float(total)
+                            if not math.isfinite(value):raise WorkflowError(f"Group Rows sum '{aggregation['as']}' exceeds the finite output range",a["id"],"group-number-range")
+                    elif operation=="average":
+                        value=None if count==0 else float(group["totals"][agg_index]/count)
+                        if value is not None and not math.isfinite(value):raise WorkflowError(f"Group Rows average '{aggregation['as']}' exceeds the finite output range",a["id"],"group-number-range")
+                    else:value=group["values"][agg_index]
+                    output[aggregation["as"]]=value
+                result.append(output)
+            if not result and not group_by and aggregations:
+                result=[{aggregation["as"]:(0 if aggregation["operation"] in {"count_rows","count_values"} else None) for aggregation in aggregations}]
+            v[a.get("result","groupedRows")]=result
+            self._emit({"event":"data-grouped","activityId":a["id"],"inputRows":len(rows),"outputGroups":len(result),"groupByCount":len(group_by),"aggregationCount":len(aggregations)},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes

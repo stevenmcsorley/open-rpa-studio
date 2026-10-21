@@ -38,6 +38,11 @@ describe('run impact plan', () => {
     expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
   });
 
+  it('treats row grouping as local data logic without requesting permissions',()=>{
+    const plan=buildExecutionPlan({...base,activities:[{id:'group',type:'group_rows',rows:'orders',groupBy:['department'],aggregations:[{operation:'count_rows',as:'records'}]}]});
+    expect(plan).toMatchObject({needsNetwork:false,needsDesktop:false,hasDestructiveActions:false,actions:[]});
+  });
+
   it('reports copy and screenshot output paths as writes while keeping desktop permission visible', () => {
     const plan = buildExecutionPlan({ ...base, activities: [
       { id: 'copy', type: 'file_copy', source: 'in.csv', destination: 'out.csv' },

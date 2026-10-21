@@ -42,6 +42,16 @@ The visual properties editor provides condition rows and validates JSON values a
 
 The join is a native local operation. It preserves left-row order and the source order of duplicate right-side matches. The execution event records counts and join type only, not record contents.
 
+## Grouping and aggregation
+
+`group_rows` collects records by up to 100 scalar fields and returns one output row for each unique key, in first-seen order. Missing and null values form the same group; string, Boolean and number keys remain type-aware. Supported aggregations are `count_rows`, `count_values` (non-null values), `sum`, `average`, `min`, and `max`. Numeric operations accept finite numbers and ignore null or missing fields; text and numeric values may not be mixed in one `min`/`max` result. An all-null sum and average are `null`, while counts are zero. With no grouping fields, an empty input still produces one aggregate row. Inputs are limited to 100,000 object records, 2,000 fields per record, 100 grouping fields and 100 aggregations; output groups are capped at 100,000. The native engine checks cancellation while scanning input.
+
+```json
+{"id":"department-summary","type":"group_rows","rows":"orders","groupBy":["department"],"aggregations":[{"field":"amount","operation":"sum","as":"totalAmount"},{"field":"amount","operation":"average","as":"averageAmount"},{"operation":"count_rows","as":"recordCount"}],"maxGroups":100000,"result":"departmentSummary"}
+```
+
+The visual editor lets users add and remove grouping fields and aggregation definitions. Browser preview uses exact decimal-string accumulation for ordinary safe numeric inputs; unsafe integer inputs are refused there because JavaScript cannot represent them exactly. The desktop engine retains Python integer precision.
+
 ## PDF text extraction
 
 `pdf_read_text` extracts selectable PDF text within the project file-size quota, respects cancellation between pages, preserves page boundaries with form-feed separators, and reports page count to a separate variable. It supports an optional bounded page limit and approximate layout mode. Encrypted PDFs and image-only OCR are not supported. See [PDF activity limits](PDF-ACTIVITIES.md).

@@ -238,6 +238,26 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"join-limit","message":"Join Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
                 result=item.get("result","joinedRows")
                 if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"join-result","message":"Join Rows result must be a variable name","activityId":str(aid or "")})
+            elif typ == "group_rows":
+                if not isinstance(item.get("rows","rows"),(str,list)):problems.append({"code":"group-input","message":"Group Rows rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                group_by=item.get("groupBy",[])
+                if not isinstance(group_by,list) or len(group_by)>100 or any(not isinstance(field,str) or not field.strip() or len(field)>256 for field in group_by) or isinstance(group_by,list) and len(set(group_by))!=len(group_by):problems.append({"code":"group-fields","message":"Group Rows needs up to 100 unique, non-empty group fields","activityId":str(aid or "")})
+                aggregations=item.get("aggregations",[])
+                if not isinstance(aggregations,list) or len(aggregations)>100:problems.append({"code":"group-aggregations","message":"Group Rows supports up to 100 aggregations","activityId":str(aid or "")})
+                else:
+                    aliases=set(group_by) if isinstance(group_by,list) and all(isinstance(field,str) for field in group_by) else set()
+                    operations={"count_rows","count_values","sum","average","min","max"}
+                    for aggregation_index,aggregation in enumerate(aggregations):
+                        operation=aggregation.get("operation") if isinstance(aggregation,dict) else None
+                        output_name=aggregation.get("as") if isinstance(aggregation,dict) else None
+                        if not isinstance(operation,str) or operation not in operations or not isinstance(output_name,str) or not output_name.strip() or len(output_name)>256:problems.append({"code":"group-aggregation","message":f"Group Rows aggregation {aggregation_index+1} needs a supported operation and output field","activityId":str(aid or "")});continue
+                        if operation!="count_rows" and (not isinstance(aggregation.get("field"),str) or not aggregation["field"].strip() or len(aggregation["field"])>256):problems.append({"code":"group-aggregation-field","message":f"Group Rows aggregation {aggregation_index+1} needs an input field","activityId":str(aid or "")})
+                        if output_name in aliases:problems.append({"code":"group-output-duplicate","message":f"Group Rows output field '{output_name}' is duplicated","activityId":str(aid or "")})
+                        aliases.add(output_name)
+                max_groups=item.get("maxGroups",100_000)
+                if not isinstance(max_groups,int) or isinstance(max_groups,bool) or not 1<=max_groups<=100_000:problems.append({"code":"group-limit","message":"Group Rows maxGroups must be an integer from 1 to 100,000","activityId":str(aid or "")})
+                result=item.get("result","groupedRows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"group-result","message":"Group Rows result must be a variable name","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -602,7 +622,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
