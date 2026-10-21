@@ -61,6 +61,24 @@ def test_mcp_stdio_escapes_unicode_for_legacy_windows_code_pages(tmp_path):
     assert response["result"]["structuredContent"]["workflow"]["activities"][0]["message"]=="price £528 · current"
 
 
+def test_api_connections_are_discoverable_and_credentials_are_planned_and_gated(tmp_path,monkeypatch):
+    from openrpa import api_connections
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    data=tmp_path/"app-data";data.mkdir()
+    monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(data/"api-connections.json"))
+    profile=api_connections.save_profile(data/"api-connections.json",{"name":"Inventory API","baseUrl":"https://inventory.example/v1","authType":"bearer"})
+    make_project(tmp_path/"project",[{"id":"request","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/items"}])
+    server=ProjectMCPServer(str(tmp_path/"project"),allow_run=True,allow_network=True,allow_credentials=False)
+    names={tool["name"] for tool in server._tools()}
+    assert "openrpa_list_api_connections" in names
+    connections=call(server,"openrpa_list_api_connections")["structuredContent"]["connections"]
+    assert connections==[{"id":profile["id"],"name":"Inventory API","baseUrl":"https://inventory.example/v1","authType":"bearer","credentialStored":False}]
+    plan=call(server,"openrpa_plan_workflow",{"name":"Main"})["structuredContent"]
+    assert plan["requires"]=={"network":True,"desktop":False,"credentials":True,"destructive":False}
+    denied=call(server,"openrpa_run_workflow",{"name":"Main"})
+    assert denied["isError"] is True and "--allow-credentials" in denied["content"][0]["text"]
+
+
 def test_mcp_activity_catalog_is_native_and_labels_required_permissions(tmp_path):
     from openrpa.activity_catalog import ACTIVITY_CATALOG
 

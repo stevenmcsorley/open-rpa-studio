@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from openrpa import api_connections
+from openrpa.engine import RunOptions, run_project
+
+
+class FakeKeyring:
+    def __init__(self): self.values={}
+    def set_password(self,service,username,password): self.values[(service,username)]=password
+    def get_password(self,service,username): return self.values.get((service,username))
+    def delete_password(self,service,username): self.values.pop((service,username),None)
+
+
+def test_api_connection_profiles_keep_secrets_out_of_local_json(tmp_path,monkeypatch):
+    vault=FakeKeyring();monkeypatch.setattr("openrpa.credentials.get_safe_keyring",lambda:vault)
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    path=tmp_path/"api-connections.json"
+    profile=api_connections.save_profile(path,{"name":"Ledger API","baseUrl":"https://ledger.example/v1","authType":"bearer","headers":{"Accept":"application/json"},"minIntervalSeconds":.25})
+    api_connections.store_secret(profile["id"],"top-secret-token")
+    assert api_connections.read_secret(profile["id"])=="top-secret-token"
+    assert api_connections.has_secret(profile["id"])
+    stored=path.read_text(encoding="utf-8")
+    assert "top-secret-token" not in stored
+    assert api_connections.list_profiles(path)==[profile]
+    api_connections.delete_profile(path,profile["id"])
+    assert api_connections.list_profiles(path)==[]
+    assert not api_connections.has_secret(profile["id"])
+
+
+@pytest.mark.parametrize("values",[
+    {"name":"Bad","baseUrl":"http://api.example"},
+    {"name":"Bad","baseUrl":"https://user:pass@api.example"},
+    {"name":"Bad","baseUrl":"https://api.example","headers":{"Authorization":"secret"}},
+    {"name":"Bad","baseUrl":"https://api.example","headers":{"X-Token":"secret"}},
+    {"name":"Bad","baseUrl":"https://api.example","authType":"api_key_header","apiKeyHeader":"X-API-Key","headers":{"x-api-key":"not-a-secret"}},
+    {"name":"Bad","baseUrl":"https://api.example","headers":{"X-Okay":"line\nbreak"}},
+    {"name":"Bad","baseUrl":"https://api.example","minIntervalSeconds":61},
+])
+def test_api_connection_profiles_reject_unsafe_configuration(tmp_path,monkeypatch,values):
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    with pytest.raises(ValueError):api_connections.save_profile(tmp_path/"connections.json",values)
+
+
+def _project(tmp_path,workflow):
+    root=tmp_path/"project";(root/"workflows").mkdir(parents=True,exist_ok=True)
+    (root/"workflows/main.workflow.json").write_text(json.dumps(workflow),encoding="utf-8")
+    project={"format":"openrpa.project","formatVersion":1,"name":"API Request test","main":"Main","workflows":{"Main":"workflows/main.workflow.json"}}
+    return root,project
+
+
+def test_api_request_uses_vault_auth_relative_path_and_bounded_response(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Example","baseUrl":"https://api.example.test/v1","authType":"bearer"})
+    monkeypatch.setattr(api_connections,"read_secret",lambda profile_id:"private-token")
+    requests=[]
+    def fake_request(url,method,headers,body,timeout,max_bytes):
+        requests.append((url,method,headers,body,timeout,max_bytes))
+        return {"status":200,"headers":{"Content-Type":"application/json"},"body":"{\"ok\":true}"}
+    monkeypatch.setattr(engine,"restricted_http_request",fake_request)
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[{"name":"page","type":"integer","value":2}],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","query":{"page":"{{page}}"},"headers":{"Accept":"application/json"},"result":"response"}]}
+    root,project=_project(tmp_path,workflow)
+    audits=[];result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json",audit=lambda action,details:audits.append((action,details))))
+    assert result.status=="succeeded"
+    assert requests[0][0]=="https://api.example.test/v1/orders?page=2"
+    assert requests[0][1]=="GET" and requests[0][2]["Authorization"]=="Bearer private-token"
+    assert requests[0][4:]==(20,5_000_000)
+    assert audits==[("api.request",{"activityId":"fetch","connectionId":profile["id"],"method":"GET","host":"api.example.test"})]
+    assert "private-token" not in json.dumps(result.__dict__)
+
+
+def test_api_request_requires_network_and_rejects_host_or_path_escape(tmp_path,monkeypatch):
+    from openrpa import engine
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Example","baseUrl":"https://api.example.test/v1"})
+    for path in ("//evil.example/x","https://evil.example/x","/%2e%2e/admin"):
+        workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":profile["id"],"path":path}]}
+        root,project=_project(tmp_path,workflow)
+        result=run_project(project,root,"Main",options=RunOptions(allow_network=True,api_connections_path=tmp_path/"connections.json"))
+        assert result.status=="failed" and result.error["activityId"]=="fetch"
+    workflow["activities"][0]["path"]="/orders"
+    root,project=_project(tmp_path,workflow)
+    result=run_project(project,root,"Main",options=RunOptions(allow_network=False,api_connections_path=tmp_path/"connections.json"))
+    assert result.status=="failed" and result.error["code"]=="network-permission-denied"
+
+
+def test_local_bridge_manages_connections_tests_only_status_and_never_saves_secret(tmp_path,monkeypatch):
+    from openrpa import bridge,network,credentials
+    monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
+    monkeypatch.setattr(api_connections,"assert_public_url",lambda url:None)
+    vault=FakeKeyring();monkeypatch.setattr(credentials,"get_safe_keyring",lambda:vault)
+    monkeypatch.setattr(network,"request",lambda *args:{"status":204,"headers":{"Content-Type":"application/json"},"body":"credential response must not be returned"})
+    class History:
+        def audit(self,*args):pass
+    replies=[];monkeypatch.setattr(bridge,"send",replies.append);monkeypatch.setattr(bridge,"history",History())
+    bridge.handle({"id":1,"method":"api.connections.save","params":{"profile":{"name":"Orders","baseUrl":"https://orders.example/v1","authType":"api_key_header","apiKeyHeader":"X-API-Key"},"secret":"never-write-me"}})
+    saved=replies[-1]["result"];profile=saved["profile"]
+    assert saved["credentialStored"] and profile["authType"]=="api_key_header"
+    assert "never-write-me" not in (tmp_path/"connections.json").read_text(encoding="utf-8")
+    bridge.handle({"id":2,"method":"api.connections.test","params":{"profileId":profile["id"],"path":"/health","allowNetwork":True}})
+    assert replies[-1]["result"]=={"status":204,"ok":True,"contentType":"application/json"}
+    assert "credential response" not in json.dumps(replies[-1])
+    bridge.handle({"id":4,"method":"api.connections.save","params":{"profile":{**profile,"authType":"bearer"}}})
+    assert replies[-1]["result"]["credentialStored"] is False
+    assert not vault.values
+    bridge.handle({"id":3,"method":"api.connections.delete","params":{"profileId":profile["id"]}})
+    assert replies[-1]["result"]["deleted"] and not vault.values

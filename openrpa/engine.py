@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode, unquote
 
 from .expressions import evaluate, interpolate
 from .model import WorkflowError, validate_workflow, validate_workflow_bindings
@@ -43,6 +43,7 @@ class RunOptions:
     max_duration_seconds: int = 3600
     max_activity_executions: int = 100_000
     debugger: Any | None = None
+    api_connections_path: Path | None = None
 
 
 @dataclass
@@ -59,6 +60,9 @@ class WorkflowEngine:
         self.project = project
         self.root = root.resolve()
         self.options = options or RunOptions()
+        if self.options.api_connections_path is None:
+            from .api_connections import default_store_path
+            self.options.api_connections_path=default_store_path()
         limits=project.get("limits",{}) if isinstance(project.get("limits",{}),dict) else {}
         self._max_run_seconds=min(max(int(limits.get("maxRunSeconds",self.options.max_duration_seconds)),1),86_400)
         self._max_activity_executions=min(max(int(limits.get("maxActivityExecutions",self.options.max_activity_executions)),1),1_000_000)
@@ -72,6 +76,7 @@ class WorkflowEngine:
         self._browser_context: Any = None
         self._browser_page: Any = None
         self._secret_values: set[str] = set()
+        self._api_last_request_at: dict[str, float] = {}
         self.workflows: dict[str, dict[str, Any]] = {}
         for key, rel in project["workflows"].items():
             path = (self.root / rel).resolve()
@@ -1235,6 +1240,8 @@ class WorkflowEngine:
             while time.monotonic() < end:
                 self._check_cancel()
                 time.sleep(min(0.05, end - time.monotonic()))
+        elif kind == "api_request":
+            self._api_activity(a,v)
         elif kind == "http_request":
             if not self.options.allow_network:
                 raise WorkflowError("HTTP access requires explicit per-run network permission", a["id"], "network-permission-denied")
@@ -1349,6 +1356,81 @@ class WorkflowEngine:
         elif kind=="file_delete":
             target=self._path(a["path"],v)
             self.options.audit("file.delete",{"activityId":a["id"],"path":self._audit_path(target)})
+
+    def _api_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
+        if not self.options.allow_network:
+            raise WorkflowError("API access requires explicit per-run network permission", a["id"], "network-permission-denied")
+        if self.options.api_connections_path is None:
+            raise WorkflowError("API connections are unavailable in this execution environment", a["id"], "api-connections-unavailable")
+        from . import api_connections
+        try:
+            profile=api_connections.get_profile(self.options.api_connections_path,str(a.get("connectionId","")))
+        except (OSError,ValueError) as exc:
+            raise WorkflowError(str(exc),a["id"],"api-connection-not-found") from exc
+        raw_path=str(interpolate(a.get("path",""),v))
+        parts=urlsplit(raw_path)
+        if parts.scheme or parts.netloc or parts.fragment or raw_path.startswith("//") or any(part==".." for part in unquote(parts.path).replace("\\","/").split("/")):
+            raise WorkflowError("API path must be relative to the selected connection and cannot change its host",a["id"],"api-path-invalid")
+        if len(raw_path)>8192:
+            raise WorkflowError("API path exceeds 8,192 characters",a["id"],"api-path-limit")
+        base=profile["baseUrl"].rstrip("/")+"/"
+        target=urljoin(base,raw_path.lstrip("/"))
+        base_parts=urlsplit(base);target_parts=urlsplit(target)
+        if (target_parts.scheme,target_parts.hostname,target_parts.port)!=(base_parts.scheme,base_parts.hostname,base_parts.port):
+            raise WorkflowError("API request path changed the connection origin",a["id"],"api-path-invalid")
+        query=a.get("query",{})
+        if not isinstance(query,dict) or len(query)>100:
+            raise WorkflowError("API query parameters must be an object with at most 100 entries",a["id"],"api-query-invalid")
+        query_items=parse_qsl(target_parts.query,keep_blank_values=True)
+        for key,value in query.items():
+            if not isinstance(key,str) or not key or len(key)>256:
+                raise WorkflowError("API query parameter names must contain 1–256 characters",a["id"],"api-query-invalid")
+            resolved=interpolate(value,v) if isinstance(value,str) else value
+            if isinstance(resolved,(dict,list,tuple)):
+                raise WorkflowError(f"API query parameter {key!r} must be scalar",a["id"],"api-query-invalid")
+            query_items.append((key,"" if resolved is None else str(resolved)))
+        url=urlunsplit((target_parts.scheme,target_parts.netloc,target_parts.path,urlencode(query_items,doseq=False),""))
+        method=str(a.get("method","GET")).upper()
+        if method not in {"GET","POST","PUT","PATCH"}:
+            raise WorkflowError("API Request supports GET, POST, PUT, and PATCH",a["id"],"api-method-invalid")
+        raw_headers=a.get("headers",{})
+        if not isinstance(raw_headers,dict) or len(raw_headers)>50:
+            raise WorkflowError("API request headers must be an object with at most 50 entries",a["id"],"api-headers-invalid")
+        headers=dict(profile["headers"])
+        for name,value in raw_headers.items():
+            if not isinstance(name,str) or not name or len(name)>128 or "\r" in name or "\n" in name:
+                raise WorkflowError("API request contains an invalid header name",a["id"],"api-headers-invalid")
+            if not isinstance(value,str) or len(value)>8192 or "\r" in value or "\n" in value:
+                raise WorkflowError(f"API request header {name!r} must be single-line text no longer than 8,192 characters",a["id"],"api-headers-invalid")
+            headers[name]=str(interpolate(value,v))
+        blocked_auth_headers={"authorization",profile["apiKeyHeader"].lower()}
+        if any(name.lower() in blocked_auth_headers for name in raw_headers):
+            raise WorkflowError("API Request authentication headers are managed by the saved connection",a["id"],"api-auth-header-managed")
+        secret=None
+        try:
+            if profile["authType"] in {"bearer","api_key_header"}:
+                secret=api_connections.read_secret(profile["id"])
+                self._secret_values.add(secret)
+                if profile["authType"]=="bearer":headers["Authorization"]="Bearer "+secret
+                else:headers[profile["apiKeyHeader"]]=secret
+            body=a.get("body")
+            if body is not None:body=str(interpolate(body,v)).encode("utf-8")
+            wait=max(0.0,profile["minIntervalSeconds"]-(time.monotonic()-self._api_last_request_at.get(profile["id"],0.0)))
+            until=time.monotonic()+wait
+            while time.monotonic()<until:
+                self._check_cancel();time.sleep(min(.05,until-time.monotonic()))
+            self._check_cancel()
+            self.options.audit("api.request",{"activityId":a["id"],"connectionId":profile["id"],"method":method,"host":target_parts.hostname})
+            response=restricted_http_request(url,method,headers,body,float(a.get("timeoutSeconds",20)),int(a.get("maxResponseBytes",5_000_000)))
+            self._api_last_request_at[profile["id"]]=time.monotonic()
+            v[a.get("result","response")]=response
+        except WorkflowError:
+            raise
+        except EgressDenied as exc:
+            raise WorkflowError(str(exc),a["id"],"http-egress-denied") from exc
+        except (OSError,TimeoutError,ValueError,RuntimeError) as exc:
+            code="http-timeout" if isinstance(exc,TimeoutError) else "http-error"
+            raise WorkflowError(f"API request failed: {exc}",a["id"],code) from exc
 
     def _browser_activity(self, a: dict[str, Any], v: dict[str, Any], logs: list[dict[str, Any]] | None = None) -> None:
         kind = a["type"]

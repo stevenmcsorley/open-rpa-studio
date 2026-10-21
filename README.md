@@ -4,7 +4,7 @@ Open RPA Studio is a local-first, open-source desktop environment for visually a
 
 This repository contains the editor, the versioned workflow format, a separate Python execution engine, optional automation adapters, and packaging/build scripts. The product is under active development. It is a capable early release, not yet a certified enterprise RPA platform or a complete UiPath replacement.
 
-The first API integration capability is available as a bounded, page-numbered JSON **Paginated API Read** activity. See [API activity documentation](docs/API-ACTIVITIES.md) for limits, permissions, and current protocol support. The broader visual connector builder with reusable OAuth-backed connections, cursor pagination, rate limits, and safe mapping remains on the [roadmap](docs/ROADMAP.md).
+API integrations include bounded **Paginated API Read** plus reusable HTTPS connection profiles and a visual **API Request** activity. Profiles support no authentication, bearer tokens, and API-key headers; secrets stay in the operating-system credential vault. The first connector builder increment supports GET/POST/PUT/PATCH, query parameters, shared headers, request bodies, response limits and per-connection pacing. OAuth 2.0 authorization flows and cursor/next-link pagination are not implemented yet. See [API activity documentation](docs/API-ACTIVITIES.md) for limits and permissions.
 
 ![Open RPA Studio browser preview showing the CSV workflow in the flowchart designer, with the selected node, properties inspector and graph minimap](docs/assets/studio-overview.png)
 
@@ -113,6 +113,7 @@ To build the frontend only, run `npm run build`. To build the desktop host witho
 - Create and open local projects, add workflows, save, validate, and inspect validation problems.
 - Search a categorized activity catalog, configure activity properties, reorder sequence actions, edit nested control-flow branches, and zoom sequence canvases from 50% to 150% with a reset control.
 - Read page-numbered JSON APIs through bounded **Paginated API Read** requests. The activity supports header expressions, JSON item paths, response and page limits, cancellation checks, audit events, and explicit network permission; see [API activity documentation](docs/API-ACTIVITIES.md).
+- Save reusable API connection profiles, keep bearer/API-key credentials in the OS vault, and configure relative API requests visually. Network permission remains explicit per run; endpoint profiles are HTTPS-only and use the restricted public egress client.
 - Search configured text across workflows, nested control-flow branches, flowcharts and state machines with Ctrl+Shift+F. Results show workflow context and navigate to the selected activity or graph element; search excludes credential-like fields and variable or argument defaults.
 - Collapse or reopen the Output pane to give the workflow designer more vertical room; the output tabs remain accessible while collapsed.
 - Author either a sequence or a flowchart. Flowcharts include Start, action, Decision, and End nodes; transitions, positions, and edits persist in the workflow file. Flowchart action nodes can contain editable nested If/Else, loop, Switch, and Try/Catch/Finally activities in the properties inspector.

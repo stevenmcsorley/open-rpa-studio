@@ -17,6 +17,7 @@ from .model import load_project, validate_workflow, validate_workflow_bindings
 from .history import RunHistory
 from . import ai_providers
 from . import ai_connections
+from . import api_connections
 from .debugger import DebugController
 from .browser_inspector import BrowserInspector
 from .activity_catalog import ACTIVITY_CATALOG
@@ -43,6 +44,9 @@ def _history_path() -> Path:
 
 def _ai_connections_path() -> Path:
     return _history_path().parent / "ai-connections.json"
+
+def _api_connections_path() -> Path:
+    return api_connections.default_store_path()
 
 history = RunHistory(_history_path())
 
@@ -255,7 +259,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 elif e.get("event") == "debug.variable-edited":
                     history.audit("debug.variable_edited", {"runId":run_id,"name":e.get("name"),"type":e.get("type")})
                 send({"event": "run.event", "data": {**e, "runId": run_id}})
-            options = RunOptions(allow_network=bool(params.get("allowNetwork", False)), allow_desktop=bool(params.get("allowDesktop", False)), cancel=cancel_event.is_set, event=record_event, audit=history.audit,debugger=debugger)
+            options = RunOptions(allow_network=bool(params.get("allowNetwork", False)), allow_desktop=bool(params.get("allowDesktop", False)), cancel=cancel_event.is_set, event=record_event, audit=history.audit,debugger=debugger,api_connections_path=_api_connections_path())
             def run_and_reply() -> None:
                 global active_run_id, active_debugger
                 try:
@@ -434,6 +438,50 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             ai_connections.delete_profile(_ai_connections_path(),profile_id)
             history.audit("ai.connection.delete",{"profileId":profile_id})
             result={"deleted":True,"profileId":profile_id}
+        elif method == "api.connections.list":
+            profiles=api_connections.list_profiles(_api_connections_path())
+            for profile in profiles:
+                profile["credentialStored"]=api_connections.has_secret(profile["id"]) if profile["authType"]!="none" else False
+            result={"profiles":profiles}
+        elif method == "api.connections.save":
+            store_path=_api_connections_path()
+            proposed=params.get("profile")
+            previous=None
+            if isinstance(proposed,dict) and proposed.get("id"):
+                try:previous=api_connections.get_profile(store_path,str(proposed["id"]))
+                except ValueError:pass
+            profile=api_connections.save_profile(store_path,proposed)
+            secret=params.get("secret")
+            if secret is not None:api_connections.store_secret(profile["id"],secret)
+            elif previous and previous["authType"] not in {"none",profile["authType"]}:
+                # Never reinterpret a bearer token as an API key (or vice versa).
+                api_connections.delete_secret(profile["id"])
+            history.audit("api.connection.save",{"profileId":profile["id"],"authType":profile["authType"],"credentialProvided":secret is not None})
+            result={"profile":profile,"credentialStored":api_connections.has_secret(profile["id"]) if profile["authType"]!="none" else False}
+        elif method == "api.connections.delete":
+            profile_id=params.get("profileId")
+            api_connections.delete_profile(_api_connections_path(),profile_id)
+            history.audit("api.connection.delete",{"profileId":profile_id})
+            result={"deleted":True,"profileId":profile_id}
+        elif method == "api.connections.test":
+            if params.get("allowNetwork") is not True:raise ValueError("Testing an API connection requires enabling Allow network")
+            profile=api_connections.get_profile(_api_connections_path(),str(params.get("profileId","")))
+            path=str(params.get("path","/")).strip()
+            from urllib.parse import urljoin,urlsplit
+            if not path.startswith("/") or path.startswith("//") or ".." in path.replace("\\","/").split("/"):
+                raise ValueError("Connection test path must start with / and remain inside the configured API host")
+            url=urljoin(profile["baseUrl"].rstrip("/")+"/",path.lstrip("/"))
+            parts=urlsplit(url);base=urlsplit(profile["baseUrl"])
+            if (parts.scheme,parts.hostname,parts.port)!=(base.scheme,base.hostname,base.port):raise ValueError("Connection test cannot change the API host")
+            headers=dict(profile["headers"])
+            if profile["authType"] in {"bearer","api_key_header"}:
+                secret=api_connections.read_secret(profile["id"])
+                if profile["authType"]=="bearer":headers["Authorization"]="Bearer "+secret
+                else:headers[profile["apiKeyHeader"]]=secret
+            from .network import request as restricted_http_request
+            response=restricted_http_request(url,"GET",headers,None,10,65536)
+            history.audit("api.connection.test",{"profileId":profile["id"],"host":parts.hostname,"status":response.get("status")})
+            result={"status":response.get("status"),"ok":200<=int(response.get("status",0))<300,"contentType":next((value for key,value in response.get("headers",{}).items() if key.lower()=="content-type"),"")[:200]}
         elif method == "credential.store":
             service=params.get("service")
             username=params.get("username")

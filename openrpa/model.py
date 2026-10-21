@@ -134,6 +134,33 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                         problems.append({"code":"api-result","message":f"Paginated API Read {field_name} must be a variable name" if not optional else "Paginated API Read metadataResult must be empty or a variable name","activityId":str(aid or "")})
                 if item.get("metadataResult","pagination") and item.get("metadataResult","pagination")==item.get("result","items"):
                     problems.append({"code":"api-result-conflict","message":"Paginated API Read result and metadataResult must use different variables","activityId":str(aid or "")})
+            if typ == "api_request":
+                connection_id=item.get("connectionId")
+                if not isinstance(connection_id,str) or not connection_id or len(connection_id)>64:
+                    problems.append({"code":"api-connection-id","message":"API Request requires a saved connection id","activityId":str(aid or "")})
+                method=item.get("method","GET")
+                if not isinstance(method,str) or method.upper() not in {"GET","POST","PUT","PATCH"}:
+                    problems.append({"code":"api-method","message":"API Request method must be GET, POST, PUT, or PATCH","activityId":str(aid or "")})
+                path=item.get("path","/")
+                if not isinstance(path,str) or len(path)>8192:
+                    problems.append({"code":"api-path","message":"API Request path must be text no longer than 8,192 characters","activityId":str(aid or "")})
+                query=item.get("query",{})
+                if not isinstance(query,dict) or len(query)>100 or any(not isinstance(key,str) or not key or len(key)>256 for key in query):
+                    problems.append({"code":"api-query","message":"API Request query must be an object with at most 100 named parameters","activityId":str(aid or "")})
+                headers=item.get("headers",{})
+                if not isinstance(headers,dict) or len(headers)>50 or any(not isinstance(key,str) or not key or len(key)>128 or "\r" in key or "\n" in key or not isinstance(value,str) or len(value)>8192 or "\r" in value or "\n" in value for key,value in headers.items()):
+                    problems.append({"code":"api-request-headers","message":"API Request headers must be an object of at most 50 bounded single-line text values","activityId":str(aid or "")})
+                elif any(key.lower() in {"host","content-length","transfer-encoding","connection","authorization","cookie","proxy-authorization"} for key in headers):
+                    problems.append({"code":"api-request-header-restricted","message":"API Request cannot override authentication or transport headers","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",20)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=60:
+                    problems.append({"code":"api-request-timeout","message":"API Request timeoutSeconds must be between 1 and 60","activityId":str(aid or "")})
+                max_bytes=item.get("maxResponseBytes",5_000_000)
+                if not isinstance(max_bytes,int) or isinstance(max_bytes,bool) or not 1<=max_bytes<=20_000_000:
+                    problems.append({"code":"api-request-size","message":"API Request maxResponseBytes must be from 1 to 20,000,000","activityId":str(aid or "")})
+                result=item.get("result","response")
+                if not isinstance(result,str) or not result.isidentifier():
+                    problems.append({"code":"api-request-result","message":"API Request result must be a variable name","activityId":str(aid or "")})
             if typ == "if":
                 if not isinstance(item.get("condition"), str):
                     problems.append({"code": "if-condition", "message": "If activity needs a condition expression", "activityId": str(aid or "")})
@@ -730,7 +757,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "image_ocr", "json_parse", "json_write",
-    "wait", "http_request", "http_paginate", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
+    "wait", "http_request", "http_paginate", "api_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_table_read", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",

@@ -1,4 +1,10 @@
 # Changelog
+## 0.1.33
+- Added a reusable API connection manager in Studio and native MCP discovery for saved connection metadata. Bearer tokens and API-key values remain in the OS credential vault; API workflow results and audit records do not include the stored secret.
+- Added a dedicated **API Request** activity editor and engine support for bounded GET/POST/PUT/PATCH calls, query parameters, request bodies, shared headers, host-bound relative paths, request-size/time limits, per-connection pacing, network permission checks, and audit events.
+- Added API connection persistence, validation, vault, bridge, workflow schema and MCP permission tests. Changing authentication modes clears the old vault credential rather than silently reusing it. Live MCP acceptance run `7c4de51f-ba01-4030-bc4b-ecc26ef5cf7d` fetched JSONPlaceholder `/todos/1` in 186 ms. Verification: 247 Python tests and 119 frontend tests pass; frontend production build, `cargo check --locked`, and `uv lock --check` pass. Windows NSIS installer: 69.12 MiB, SHA-256 `66ad7d2d0e88071b87e58da85986c2eb10602454c99a04674272003d1960690e`.
+- OAuth 2.0 flows, DELETE requests, cursor/next-link pagination, automatic retries and generated field mappings remain unsupported.
+
 ## 0.1.31
 - Added **Paginated API Read**, a native bounded GET activity for page-numbered JSON APIs. It maps a selected JSON array into records, reports page/count/byte/truncation metadata, observes cancellation between pages, limits pages/items/bytes, rejects unsafe headers, and requires the existing per-run network permission and restricted egress client. It can use OS-vault credentials from the existing Credential Get activity through header expressions without persisting secrets in the workflow.
 - Added API activity documentation, MCP network preflight, browser-preview catalog support and a public screenshot. Cursor/next-link pagination, OAuth, reusable connection profiles, pacing and advanced response mapping remain future work.
