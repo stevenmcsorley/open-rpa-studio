@@ -12,6 +12,7 @@ import hashlib
 import re
 import threading
 import tempfile
+import time
 from . import __version__
 from dataclasses import asdict
 from pathlib import Path
@@ -38,6 +39,13 @@ def _history_path(project_root: Path) -> Path:
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
     return base / "OpenRPAStudio" / f"mcp-run-history-{project_key}.sqlite3"
+
+
+def _live_draft_path(project_root: Path) -> Path:
+    root=project_root.resolve()
+    target=(root/".openrpa"/"mcp-live-draft.json").resolve()
+    target.relative_to(root)
+    return target
 
 
 def _api_connections_path() -> Path:
@@ -163,11 +171,63 @@ class ProjectMCPServer:
             {"name": "openrpa_list_run_history", "description": "List recent MCP workflow run statuses and identifiers from the durable local MCP run ledger; runtime variable values are excluded.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
         ]
         if self.allow_edit:
+            tools.append({"name": "openrpa_stage_workflow_draft", "description": "Publish a validated, unsaved workflow snapshot to the open Studio window. Call repeatedly as the workflow is constructed; Studio displays it as a live preview. This does not change the saved project. Requires --allow-edit.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 100}, "workflow": {"type": "object", "additionalProperties": True}}, "required": ["name", "workflow"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}})
+            tools.append({"name": "openrpa_clear_workflow_draft", "description": "Clear the current unsaved live workflow preview from Studio. Optionally include draftId to avoid clearing a newer preview. Requires --allow-edit.", "inputSchema": {"type": "object", "properties": {"draftId": {"type": "string"}}, "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}})
             tools.append({"name": "openrpa_create_workflow", "description": "Create a new reusable workflow after schema and project-binding validation. Requires the current project.json SHA-256 from openrpa_project_info; editing is unavailable unless enabled when the server starts.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 100}, "expectedProjectSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "workflow": {"type": "object", "additionalProperties": True}}, "required": ["name", "expectedProjectSha256", "workflow"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}})
             tools.append({"name": "openrpa_update_workflow", "description": "Replace one declared workflow after validating it. Requires the expected SHA-256 from openrpa_read_workflow; editing is unavailable unless enabled when the server starts.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "expectedSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "workflow": {"type": "object", "additionalProperties": True}}, "required": ["name", "expectedSha256", "workflow"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}})
         if self.allow_run:
             tools.append({"name": "openrpa_run_workflow", "description": "Execute a saved workflow in the fixed project. Network, desktop, credentials and destructive activities require separate startup opt-ins.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "inputs": {"type": "object", "additionalProperties": True}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True}})
         return tools
+
+    def _stage_workflow_draft(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.allow_edit:
+            raise PermissionError("Workflow editing is disabled. Restart the MCP server with --allow-edit after reviewing the project and client.")
+        name=args.get("name")
+        proposed=args.get("workflow")
+        name_problem=_workflow_name_problem(name)
+        if name_problem: raise ValueError(name_problem)
+        if not isinstance(proposed,dict): raise ValueError("workflow must be an object")
+        encoded=json.dumps(proposed,ensure_ascii=False,allow_nan=False,separators=(",",":"))
+        if len(encoded.encode("utf-8"))>10_000_000: raise ValueError("Workflow exceeds 10 MB")
+        current_project,current_root=load_project(self.project_path)
+        if current_root!=self.root: raise ValueError("Project root changed; restart the MCP server for the current project.")
+        existing=next((key for key in current_project["workflows"] if key.casefold()==name.casefold()),None)
+        if existing is not None and existing!=name: raise ValueError(f"Draft name {name!r} differs only by case from existing workflow {existing!r}.")
+        proposed=dict(proposed);proposed["name"]=name
+        known=set(current_project["workflows"])|{name}
+        problems=validate_workflow(proposed,known)
+        combined={}
+        for key,relative in current_project["workflows"].items():
+            path=(self.root/relative).resolve();path.relative_to(self.root)
+            combined[key]=json.loads(path.read_text(encoding="utf-8"))
+        combined[name]=proposed
+        problems.extend(validate_workflow_bindings(combined))
+        if problems: return {"staged":False,"problems":problems}
+        draft_id=hashlib.sha256((name+"\0"+encoded+str(time.time_ns())).encode("utf-8")).hexdigest()[:24]
+        payload={"format":"openrpa.live-workflow-draft","formatVersion":1,"draftId":draft_id,"name":name,"updatedAt":time.time(),"workflow":proposed}
+        target=_live_draft_path(self.root);target.parent.mkdir(parents=True,exist_ok=True)
+        descriptor,temporary=tempfile.mkstemp(prefix=".mcp-live-draft-",suffix=".tmp",dir=target.parent)
+        try:
+            with os.fdopen(descriptor,"w",encoding="utf-8",newline="\n") as stream:
+                json.dump(payload,stream,ensure_ascii=False,indent=2,allow_nan=False);stream.write("\n");stream.flush();os.fsync(stream.fileno())
+            os.replace(temporary,target)
+        finally:
+            if os.path.exists(temporary):os.unlink(temporary)
+        return {"staged":True,"name":name,"draftId":draft_id,"activityCount":len(proposed.get("activities",[]))}
+
+    def _clear_workflow_draft(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.allow_edit:
+            raise PermissionError("Workflow editing is disabled. Restart the MCP server with --allow-edit after reviewing the project and client.")
+        target=_live_draft_path(self.root)
+        try:
+            current=json.loads(target.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {"cleared":False,"reason":"no-live-draft"}
+        draft_id=args.get("draftId")
+        if draft_id is not None and draft_id!=current.get("draftId"):
+            return {"cleared":False,"reason":"draft-changed","draftId":current.get("draftId")}
+        target.unlink(missing_ok=True)
+        return {"cleared":True,"draftId":current.get("draftId")}
 
     def _validate_workflow_drafts(self, args: dict[str, Any]) -> dict[str, Any]:
         drafts=args.get("workflows")
@@ -298,6 +358,7 @@ class ProjectMCPServer:
             try: self._get_history().audit("workflow.created",{"workflow":name,"workflowSha256":workflow_digest,"source":"mcp"})
             except Exception as exc: history_warning=f"Workflow was created but its audit event could not be saved: {type(exc).__name__}: {exc}"[:512]
             result={"created":True,"workflow":name,"workflowPath":relative,"workflowSha256":workflow_digest,"projectSha256":manifest_digest,"validated":True}
+            self._remove_live_draft_for(name)
             if history_warning: result["historyWarning"]=history_warning
             return result
         except Exception:
@@ -353,9 +414,18 @@ class ProjectMCPServer:
                     os.unlink(temporary)
             digest = hashlib.sha256(data).hexdigest()
             self._get_history().audit("workflow.updated", {"workflow": workflow_name, "workflowSha256": digest, "source": "mcp"})
+            self._remove_live_draft_for(workflow_name)
             return {"updated": True, "workflow": workflow_name, "sha256": digest, "validated": True}
         finally:
             self._run_lock.release()
+
+    def _remove_live_draft_for(self, name: str) -> None:
+        try: target=_live_draft_path(self.root)
+        except (OSError,ValueError): return
+        try: current=json.loads(target.read_text(encoding="utf-8"))
+        except (OSError,ValueError): return
+        if current.get("name")==name:
+            target.unlink(missing_ok=True)
 
     def _run_workflow(self, args: dict[str, Any], cancel_event: threading.Event | None) -> dict[str, Any]:
         if not self.allow_run:
@@ -445,6 +515,10 @@ class ProjectMCPServer:
             return {"workflow": json.loads(raw.decode("utf-8")), "sha256": hashlib.sha256(raw).hexdigest()}
         if name == "openrpa_validate_workflow_drafts":
             return self._validate_workflow_drafts(args)
+        if name == "openrpa_stage_workflow_draft":
+            return self._stage_workflow_draft(args)
+        if name == "openrpa_clear_workflow_draft":
+            return self._clear_workflow_draft(args)
         if name == "openrpa_update_workflow":
             return self._update_workflow(args)
         if name == "openrpa_create_workflow":

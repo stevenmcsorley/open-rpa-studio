@@ -16,6 +16,7 @@ def test_native_bridge_exports_and_imports_verified_project_package(tmp_path, mo
     archive=tmp_path/"automation.orpa"
 
     bridge.handle({"id":1,"method":"project.create","params":{"path":str(source),"name":"Reusable approval"}})
+    transient=source/".openrpa";transient.mkdir();(transient/"mcp-live-draft.json").write_text('{"format":"openrpa.live-workflow-draft"}',encoding="utf-8")
     bridge.handle({"id":2,"method":"project.package.export","params":{"root":str(source),"destination":str(archive)}})
     exported=replies[-1]["result"]
     assert exported["files"]==2 and len(exported["sha256"])==64

@@ -1,4 +1,8 @@
 # Changelog
+## 0.1.37
+- Added validated MCP live workflow snapshots. With `--allow-edit`, an agent can stage each meaningful build step and Studio displays successive snapshots without changing the saved project. Users can insert a snapshot into the editor or dismiss it; a final MCP create/update clears the matching preview. Preview files are project-local, atomically replaced, validated before display and excluded from `.orpa` exports.
+- Added cross-layer MCP-to-Studio preview and commit regression coverage. Verification: 256 Python tests, all 127 frontend tests, production frontend build and `cargo check --locked` pass. The packaged bridge advertises the preview tools and successfully stages a workflow through real MCP stdio. Windows installer: 69.17 MiB, SHA-256 `28872c4e1a74a17fe5e26c24f5acefa245fbc1c4738561c8adb9263acac86054`.
+
 ## 0.1.36
 - Added local OpenAPI 3.0/3.1 JSON and YAML import to the API Request editor. It lists supported operations, applies path/query/header parameters and JSON request examples to the normal editable activity, and creates matching string variables for required parameters.
 - Import is bounded to 2 MB, resolves local references only, reports external references without fetching them, and executes no specification content. Verification: 125 frontend tests and production build pass; `npm audit --omit=dev` reports zero vulnerabilities. Windows NSIS installer: 69.16 MiB, SHA-256 `d34cd790ac0647ea45b2979dd7725c939d4da91f31accd416d3b72849059cd1f`.

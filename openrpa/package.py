@@ -41,6 +41,7 @@ def pack_project(project_path: str|Path, destination: str|Path) -> dict[str,Any]
         if any(part in SKIP_DIRS for part in path.relative_to(root).parts): continue
         if path.is_symlink() or not path.is_file(): continue
         rel=path.relative_to(root).as_posix()
+        if rel==".openrpa/mcp-live-draft.json": continue
         if path.name.lower() in SKIP_NAMES or path.suffix.lower() in SKIP_SUFFIXES: continue
         if "\\" in rel or "\x00" in rel or any(":" in part or part.endswith(("."," ")) for part in PurePosixPath(rel).parts):raise WorkflowError(f"Project contains a non-portable package path: {rel}",code="package-path")
         if path.stat().st_size>MAX_PACKAGE_FILE_BYTES:raise WorkflowError(f"Project file exceeds package limit: {rel}",code="package-size-limit")

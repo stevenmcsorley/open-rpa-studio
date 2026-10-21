@@ -13,6 +13,8 @@ The implementation supports MCP protocol versions `2025-11-25`, `2025-06-18`, `2
 | `openrpa_activity_catalog` | Native activity descriptions, configuration defaults and per-activity permission requirements | No |
 | `openrpa_read_workflow` | Read one workflow definition | No |
 | `openrpa_validate_workflow_drafts` | Validate one or more unsaved workflows and their cross-workflow references without writing | No |
+| `openrpa_stage_workflow_draft` | Publish a validated, unsaved snapshot to Studio as a live preview; call repeatedly as the workflow is constructed | Writes only a temporary preview file |
+| `openrpa_clear_workflow_draft` | Clear the current live preview, optionally guarded by its draft ID | Clears temporary preview only |
 | `openrpa_create_workflow` | Add a reusable workflow after schema and cross-workflow binding validation, if explicitly enabled | Yes |
 | `openrpa_update_workflow` | Replace a declared workflow after schema and binding validation, if explicitly enabled | Yes |
 | `openrpa_validate_project` | Validate saved workflows and bindings | No |
@@ -20,7 +22,7 @@ The implementation supports MCP protocol versions `2025-11-25`, `2025-06-18`, `2
 | `openrpa_list_run_history` | Read recent MCP run statuses from the local durable ledger | No |
 | `openrpa_run_workflow` | Execute one workflow using the local engine | Runs only; visibility and permission opt-ins required |
 
-The server binds to one project path supplied at process startup and never accepts an arbitrary path from a tool caller. Workflow creation and replacement are off by default. When enabled, creation requires the current `projectSha256` from `openrpa_project_info`; it writes a generated, project-relative workflow path and atomically updates the manifest only after validating the new workflow and project bindings. Replacement requires the SHA-256 returned by `openrpa_read_workflow`; the server checks it before and immediately before atomically replacing the declared workflow file. Both paths validate workflow schemas and cross-workflow bindings. Its static plan follows `invoke_workflow` references; runtime expressions may still change paths or destinations.
+The server binds to one project path supplied at process startup and never accepts an arbitrary path from a tool caller. Workflow creation, replacement and live preview are off by default. When enabled, creation requires the current `projectSha256` from `openrpa_project_info`; it writes a generated, project-relative workflow path and atomically updates the manifest only after validating the new workflow and project bindings. Replacement requires the SHA-256 returned by `openrpa_read_workflow`; the server checks it before and immediately before atomically replacing the declared workflow file. `openrpa_stage_workflow_draft` accepts only schema-valid snapshots and writes an atomic, project-local preview file; it never changes the saved workflow or project manifest. Studio reads that file while the same project is open and refreshes the preview dialog as new snapshots arrive. A final create or update clears the matching preview. Both saved workflow paths validate workflow schemas and cross-workflow bindings. Its static plan follows `invoke_workflow` references; runtime expressions may still change paths or destinations.
 
 ## Run from a Python development environment
 
@@ -37,7 +39,7 @@ By default, tools are read-only: the run tool is not advertised. Add `--allow-ru
 uv run openrpa mcp "C:\Users\you\Automation Projects\Invoice Review" --allow-run --allow-network
 ```
 
-Add `--allow-edit` only when the AI client should be able to create or update saved workflows. Studio checks the open project's content signature and refreshes stable external edits automatically when there are no unsaved local changes. If local edits are pending, Studio shows an explicit reload action so it does not silently discard them. Avoid editing the same workflow in both places before resolving that prompt. Use one MCP server process per project.
+Add `--allow-edit` when the AI client should stage previews and create or update saved workflows. The MCP client must call `openrpa_stage_workflow_draft` after each meaningful construction step to make progress visible; ordinary `validate_workflow_drafts` calls remain read-only and are not displayed. Studio polls for staged previews and shows each validated snapshot in its live preview dialog. **Insert into Studio** loads the preview into the editor as unsaved work; **Dismiss** clears the preview. A final MCP create/update saves atomically and clears its matching preview. Studio also checks the project's saved content signature and refreshes stable external edits automatically when there are no unsaved local changes. If local edits are pending, Studio shows an explicit reload action so it does not silently discard them. Use the same project folder in the MCP server and Studio, and use one MCP server process per project.
 
 ### Seeing MCP workflows in Studio
 

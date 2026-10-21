@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { BridgeResult, CatalogEntry, Project, RunResult, Workflow } from './types';
+import type { BridgeResult, CatalogEntry, LiveWorkflowDraft, Project, RunResult, Workflow } from './types';
 
 const inDesktop = () => '__TAURI_INTERNALS__' in window;
 export async function rpc(method: string, params: Record<string, unknown> = {}): Promise<any> {
@@ -24,6 +24,8 @@ function localRpc(method:string, params:Record<string,unknown>):Promise<any> {
 }
 export async function openProject(path:string):Promise<BridgeResult>{return rpc('project.open',{path});}
 export async function projectSignature(root:string):Promise<string>{const result=await rpc('project.signature',{root});return result.sha256;}
+export async function readLiveWorkflowDraft(root:string):Promise<LiveWorkflowDraft|null>{const result=await rpc('project.live_draft.read',{root});return result.draft??null;}
+export async function clearLiveWorkflowDraft(root:string,draftId:string):Promise<void>{await rpc('project.live_draft.clear',{root,draftId});}
 export async function createProject(path:string,name:string):Promise<BridgeResult>{return rpc('project.create',{path,name});}
 export async function saveProject(root:string,project:Project,workflows:Record<string,Workflow>):Promise<void>{await rpc('project.save',{root,project,workflows});}
 export async function exportProjectPackage(root:string,destination:string):Promise<{path:string;files:number;sha256:string}>{return rpc('project.package.export',{root,destination});}

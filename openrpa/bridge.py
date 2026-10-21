@@ -184,6 +184,41 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 digest.update(b"\0")
                 digest.update(workflow_path.read_bytes())
             result = {"sha256": digest.hexdigest()}
+        elif method == "project.live_draft.read":
+            root=Path(params["root"]).expanduser().resolve()
+            project_path=(root/"project.json").resolve();project_path.relative_to(root)
+            project,loaded_root=load_project(project_path)
+            if loaded_root!=root: raise ValueError("Project root changed while reading an MCP draft.")
+            draft_path=(root/".openrpa"/"mcp-live-draft.json").resolve();draft_path.relative_to(root)
+            try: raw=draft_path.read_bytes()
+            except FileNotFoundError: result={"draft":None}
+            else:
+                if len(raw)>10_000_000: raise ValueError("MCP live draft exceeds 10 MB.")
+                payload=json.loads(raw.decode("utf-8"))
+                if not isinstance(payload,dict) or payload.get("format")!="openrpa.live-workflow-draft" or payload.get("formatVersion")!=1 or not isinstance(payload.get("workflow"),dict):
+                    raise ValueError("MCP live draft has an unsupported format.")
+                name=payload.get("name")
+                if not isinstance(name,str) or not name or payload["workflow"].get("name")!=name:
+                    raise ValueError("MCP live draft has an invalid workflow identity.")
+                problems=validate_workflow(payload["workflow"],set(project["workflows"])|{name})
+                workflows={key:json.loads(project_file(root,relative).read_text(encoding="utf-8")) for key,relative in project["workflows"].items()}
+                workflows[name]=payload["workflow"]
+                problems.extend(validate_workflow_bindings(workflows))
+                if problems: raise ValueError(f"MCP live draft failed validation: {problems[0]['message']}")
+                result={"draft":payload}
+        elif method == "project.live_draft.clear":
+            root=Path(params["root"]).expanduser().resolve()
+            project_path=(root/"project.json").resolve();project_path.relative_to(root)
+            _,loaded_root=load_project(project_path)
+            if loaded_root!=root: raise ValueError("Project root changed while clearing an MCP draft.")
+            draft_path=(root/".openrpa"/"mcp-live-draft.json").resolve();draft_path.relative_to(root)
+            try: current=json.loads(draft_path.read_text(encoding="utf-8"))
+            except FileNotFoundError: result={"cleared":False}
+            else:
+                if params.get("draftId") is not None and params["draftId"]!=current.get("draftId"):
+                    result={"cleared":False,"reason":"draft-changed"}
+                else:
+                    draft_path.unlink(missing_ok=True);result={"cleared":True}
         elif method == "project.create":
             root = Path(params["path"]).expanduser().resolve()
             root.mkdir(parents=True, exist_ok=True)

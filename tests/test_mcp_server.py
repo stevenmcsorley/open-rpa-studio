@@ -41,6 +41,7 @@ def test_tools_are_project_scoped_and_execution_is_opt_in(tmp_path):
     assert "openrpa_run_workflow" not in {item["name"] for item in server._tools()}
     assert "openrpa_update_workflow" not in {item["name"] for item in server._tools()}
     assert "openrpa_create_workflow" not in {item["name"] for item in server._tools()}
+    assert "openrpa_stage_workflow_draft" not in {item["name"] for item in server._tools()}
     assert "openrpa_activity_catalog" in {item["name"] for item in server._tools()}
     assert call(server, "openrpa_validate_project")["structuredContent"]["valid"]
     assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["workflow"]["name"] == "Main"
@@ -135,6 +136,33 @@ def test_opt_in_edit_requires_current_digest_and_validation(tmp_path, monkeypatc
     assert rejected["structuredContent"]["updated"] is False
     assert "type" in json.dumps(rejected["structuredContent"]["problems"])
     assert call(server, "openrpa_read_workflow", {"name": "Main"})["structuredContent"]["sha256"] == saved["sha256"]
+
+
+def test_live_workflow_draft_is_validated_preview_and_does_not_modify_project(tmp_path):
+    make_project(tmp_path)
+    server=ProjectMCPServer(str(tmp_path),allow_edit=True)
+    names={tool["name"] for tool in server._tools()}
+    assert "openrpa_stage_workflow_draft" in names and "openrpa_clear_workflow_draft" in names
+    before=call(server,"openrpa_read_workflow",{"name":"Main"})["structuredContent"]["sha256"]
+    draft={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"first","type":"log","level":"info","message":"step one"}]}
+    staged_result=call(server,"openrpa_stage_workflow_draft",{"name":"Main","workflow":draft})
+    assert "structuredContent" in staged_result,staged_result
+    staged=staged_result["structuredContent"]
+    assert staged["staged"] is True and staged["activityCount"]==1
+    preview=json.loads((tmp_path/".openrpa"/"mcp-live-draft.json").read_text(encoding="utf-8"))
+    assert preview["draftId"]==staged["draftId"] and preview["workflow"]["activities"][0]["message"]=="step one"
+    assert call(server,"openrpa_read_workflow",{"name":"Main"})["structuredContent"]["sha256"]==before
+    draft["activities"].append({"id":"second","type":"log","level":"info","message":"step two"})
+    next_stage=call(server,"openrpa_stage_workflow_draft",{"name":"Main","workflow":draft})["structuredContent"]
+    assert next_stage["draftId"]!=staged["draftId"]
+    stale_clear=call(server,"openrpa_clear_workflow_draft",{"draftId":staged["draftId"]})["structuredContent"]
+    assert stale_clear["cleared"] is False and stale_clear["reason"]=="draft-changed"
+    invalid=copy.deepcopy(draft);invalid["activities"].append({"id":"broken","type":"missing"})
+    rejected=call(server,"openrpa_stage_workflow_draft",{"name":"Main","workflow":invalid})["structuredContent"]
+    assert rejected["staged"] is False and rejected["problems"]
+    assert len(json.loads((tmp_path/".openrpa"/"mcp-live-draft.json").read_text(encoding="utf-8"))["workflow"]["activities"])==2
+    cleared=call(server,"openrpa_clear_workflow_draft",{"draftId":next_stage["draftId"]})["structuredContent"]
+    assert cleared["cleared"] is True and not (tmp_path/".openrpa"/"mcp-live-draft.json").exists()
 
 
 def test_create_workflow_is_project_hash_guarded_and_validates_bindings(tmp_path, monkeypatch):

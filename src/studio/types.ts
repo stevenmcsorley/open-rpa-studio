@@ -6,6 +6,7 @@ export type MachineState = {id:string;label:string;final?:boolean;breakpoint?:bo
 export type MachineTransition = {from:string;to:string;condition?:string};
 export type StateMachine = {initial:string;states:MachineState[];transitions:MachineTransition[]};
 export type Workflow = { format: 'openrpa.workflow'; formatVersion: 1; name: string; variables: Variable[]; arguments: Argument[]; activities: Activity[]; executionModel?:'sequence'|'flowchart'|'state_machine'; flowchart?:Flowchart;stateMachine?:StateMachine };
+export type LiveWorkflowDraft = { format:'openrpa.live-workflow-draft';formatVersion:1;draftId:string;name:string;updatedAt:number;workflow:Workflow };
 export type Variable = { name: string; type: string; value: unknown };
 export type Argument = { name: string; type: string; direction: 'in'|'out'|'inout'; required?: boolean; default?: unknown; target?: string };
 export type Project = { format: 'openrpa.project'; formatVersion: 1; name: string; main: string; workflows: Record<string,string> };
