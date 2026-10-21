@@ -940,6 +940,32 @@ class WorkflowEngine:
                 selected=[row for index,(signature,row) in enumerate(selected) if last_indices[signature]==index]
             v[a.get("result","distinctRows")]=selected
             self._emit({"event":"data-distinct","activityId":a["id"],"inputRows":len(rows),"outputRows":len(selected),"duplicateRowsRemoved":len(rows)-len(selected),"keyCount":len(keys),"kept":keep},logs)
+        elif kind == "validate_rows":
+            rows=interpolate(a.get("rows","rows"),v)
+            if isinstance(rows,str):rows=evaluate(rows,v)
+            limit=a.get("maxRows",100_000);rules=a.get("rules",[])
+            if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:raise WorkflowError("Validate Rows maxRows must be an integer from 1 to 100,000",a["id"],"validate-limit")
+            if not isinstance(rows,list) or len(rows)>limit:raise WorkflowError("Validate Rows input must be a list within its configured row limit",a["id"],"validate-input")
+            if not isinstance(rules,list) or not 1<=len(rules)<=100:raise WorkflowError("Validate Rows needs 1–100 field rules",a["id"],"validate-rules")
+            valid=[];invalid=[]
+            for index,row in enumerate(rows):
+                if index%256==0:self._check_cancel()
+                if not isinstance(row,dict) or len(row)>2_000:raise WorkflowError(f"Validate Rows record {index+1} must be an object with at most 2,000 fields",a["id"],"validate-row-type")
+                errors=[]
+                for rule in rules:
+                    field=rule["field"];expected=rule["type"];present=field in row;value=row.get(field)
+                    if rule.get("required",False) and (not present or value is None):errors.append({"field":field,"code":"required","message":"Required value is missing"});continue
+                    if not present or value is None:continue
+                    safe_number=isinstance(value,int) and not isinstance(value,bool) and abs(value)<=9_007_199_254_740_991 or isinstance(value,float) and math.isfinite(value) and (not value.is_integer() or abs(value)<=9_007_199_254_740_991)
+                    type_ok=(expected=="text" and isinstance(value,str)) or (expected=="number" and safe_number) or (expected=="boolean" and isinstance(value,bool)) or (expected=="object" and isinstance(value,dict)) or (expected=="array" and isinstance(value,list))
+                    if not type_ok:errors.append({"field":field,"code":"type","message":f"Expected {expected}"});continue
+                    if rule.get("nonEmpty",False) and ((isinstance(value,str) and not value.strip()) or (isinstance(value,(dict,list)) and not value)):
+                        errors.append({"field":field,"code":"empty","message":"Value must not be empty"})
+                if errors:invalid.append({"row":row,"errors":errors})
+                else:valid.append(row)
+            valid_name=a.get("validResult","validRows");invalid_name=a.get("invalidResult","invalidRows")
+            v[valid_name]=valid;v[invalid_name]=invalid
+            self._emit({"event":"data-validated","activityId":a["id"],"inputRows":len(rows),"validRows":len(valid),"invalidRows":len(invalid),"ruleCount":len(rules)},logs)
         elif kind == "csv_read":
             path = self._path(a["path"], v)
             max_bytes = self._max_file_bytes

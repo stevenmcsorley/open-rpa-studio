@@ -184,6 +184,28 @@ def test_distinct_rows_keeps_first_or_last_with_typed_keys_and_stable_order(tmp_
     malformed={**workflow,"activities":[{**activity,"keys":["id","id"]}]}
     assert "distinct-key-duplicate" in {problem["code"] for problem in validate_workflow(malformed)}
 
+def test_validate_rows_splits_with_field_level_reasons_without_mutating_input(tmp_path: Path):
+    project={"format":"openrpa.project","formatVersion":1,"name":"Validate","main":"Main","workflows":{"Main":"main.json"}}
+    rows=[{"email":"ada@example.org","age":37},{"email":"","age":"old"},{"age":22},{"email":"grace@example.org","age":None},{"email":"huge@example.org","age":9_007_199_254_740_992},{"email":"huge-float@example.org","age":1e20}]
+    activity={"id":"validate","type":"validate_rows","rows":"rows","rules":[{"field":"email","type":"text","required":True,"nonEmpty":True},{"field":"age","type":"number","required":True}],"validResult":"accepted","invalidResult":"rejected"}
+    workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Validate","variables":[{"name":"rows","type":"array","value":rows}],"arguments":[],"activities":[activity]}
+    assert validate_workflow(workflow)==[]
+    (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")
+    events=[];result=run_project(project,tmp_path,options=RunOptions(event=events.append))
+    assert result.status=="succeeded",result.error
+    assert result.variables["accepted"]==[rows[0]]
+    assert result.variables["rejected"][0]=={"row":rows[1],"errors":[{"field":"email","code":"empty","message":"Value must not be empty"},{"field":"age","code":"type","message":"Expected number"}]}
+    assert result.variables["rejected"][1]["errors"][0]["code"]=="required"
+    assert result.variables["rejected"][2]["errors"][0]["code"]=="required"
+    assert result.variables["rejected"][3]["errors"][0]["code"]=="type"
+    assert result.variables["rejected"][4]["errors"][0]["code"]=="type"
+    assert result.variables["rows"]==rows
+    assert next(event for event in events if event.get("event")=="data-validated")=={"event":"data-validated","activityId":"validate","inputRows":6,"validRows":1,"invalidRows":5,"ruleCount":2}
+    malformed={**workflow,"activities":[{**activity,"validResult":"same","invalidResult":"same"}]}
+    assert "validate-result-duplicate" in {problem["code"] for problem in validate_workflow(malformed)}
+    malformed={**workflow,"activities":[{**activity,"rules":[{"field":"age","type":[]}] }]}
+    assert "validate-rule" in {problem["code"] for problem in validate_workflow(malformed)}
+
 def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Nested flowchart","main":"Main","workflows":{"Main":"main.json"}}
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Nested flowchart","executionModel":"flowchart","variables":[],"arguments":[],"activities":[],"flowchart":{

@@ -299,6 +299,25 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"distinct-limit","message":"Distinct Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
                 result=item.get("result","distinctRows")
                 if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"distinct-result","message":"Distinct Rows result must be a variable name","activityId":str(aid or "")})
+            elif typ == "validate_rows":
+                if not isinstance(item.get("rows","rows"),(str,list)):problems.append({"code":"validate-input","message":"Validate Rows rows must be a variable name, expression, or array","activityId":str(aid or "")})
+                rules=item.get("rules",[]);types={"text","number","boolean","object","array"}
+                if not isinstance(rules,list) or not 1<=len(rules)<=100:problems.append({"code":"validate-rules","message":"Validate Rows needs 1–100 field rules","activityId":str(aid or "")})
+                else:
+                    fields=set()
+                    for rule_index,rule in enumerate(rules):
+                        if not isinstance(rule,dict) or not isinstance(rule.get("field"),str) or not rule["field"].strip() or len(rule["field"])>256 or not isinstance(rule.get("type"),str) or rule["type"] not in types:
+                            problems.append({"code":"validate-rule","message":f"Validate Rows rule {rule_index+1} needs a field and supported type","activityId":str(aid or "")});continue
+                        if rule["field"] in fields:problems.append({"code":"validate-field-duplicate","message":f"Validate Rows field '{rule['field']}' is duplicated","activityId":str(aid or "")})
+                        fields.add(rule["field"])
+                        if "required" in rule and not isinstance(rule["required"],bool):problems.append({"code":"validate-required","message":f"Validate Rows rule {rule_index+1} required must be boolean","activityId":str(aid or "")})
+                        if "nonEmpty" in rule and not isinstance(rule["nonEmpty"],bool):problems.append({"code":"validate-non-empty","message":f"Validate Rows rule {rule_index+1} nonEmpty must be boolean","activityId":str(aid or "")})
+                for name,default in (("validResult","validRows"),("invalidResult","invalidRows")):
+                    value=item.get(name,default)
+                    if not isinstance(value,str) or not value.isidentifier():problems.append({"code":"validate-result","message":f"Validate Rows {name} must be a variable name","activityId":str(aid or "")})
+                if item.get("validResult","validRows")==item.get("invalidResult","invalidRows"):problems.append({"code":"validate-result-duplicate","message":"Validate Rows result variables must be different","activityId":str(aid or "")})
+                limit=item.get("maxRows",100_000)
+                if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100_000:problems.append({"code":"validate-limit","message":"Validate Rows maxRows must be an integer from 1 to 100,000","activityId":str(aid or "")})
             elif typ == "xlsx_read":
                 if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"spreadsheet-path","message":"Spreadsheet Read needs a non-empty path","activityId":str(aid or "")})
                 result=item.get("result","rows")
@@ -663,7 +682,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field", "filter_rows", "join_rows", "group_rows", "sort_rows", "map_rows", "distinct_rows", "validate_rows",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
