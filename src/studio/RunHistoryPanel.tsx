@@ -1,15 +1,33 @@
-import { AlertCircle, Clock3, Hash, LoaderCircle } from 'lucide-react';
+import { useState } from 'react';
+import { AlertCircle, Clock3, Hash, LoaderCircle, Search, X } from 'lucide-react';
 import type { RunHistoryDetail, RunHistorySummary } from './bridge';
+import './RunHistoryPanel.css';
 
 function date(value:string|null|undefined):string{return value?new Date(value).toLocaleString(): '—'}
 function statusClass(value:string):string{return value==='succeeded'?'success':value==='failed'?'failed':value==='interrupted'?'interrupted':value==='cancelled'?'cancelled':'neutral'}
 
+export function filterRunHistory(runs:RunHistorySummary[],query:string,status:string):RunHistorySummary[]{
+  const needle=query.trim().toLocaleLowerCase();
+  return runs.filter(run=>{
+    if(status!=='all'&&run.status!==status)return false;
+    if(!needle)return true;
+    const error=run.error&&typeof run.error==='object'?Object.values(run.error).join(' '):'';
+    return [run.projectName,run.workflow,run.runId,run.status,error].join(' ').toLocaleLowerCase().includes(needle);
+  });
+}
+
 export function RunHistoryPanel({runs,selectedId,detail,loading,onSelect}:{runs:RunHistorySummary[];selectedId:string;detail:RunHistoryDetail|null;loading:boolean;onSelect:(id:string)=>void}){
+  const [query,setQuery]=useState('');
+  const [status,setStatus]=useState('all');
+  const filteredRuns=filterRunHistory(runs,query,status);
   return <div className="run-history-view">
-    <aside className="run-history-list" aria-label="Saved workflow runs">
-      {runs.length?runs.map(item=><button key={item.runId} className={selectedId===item.runId?'selected':''} aria-pressed={selectedId===item.runId} onClick={()=>onSelect(item.runId)}>
+    <aside className="run-history-sidebar" aria-label="Run history browser">
+      <div className="run-history-toolbar"><div className="run-history-title"><strong>RUN HISTORY</strong><small>{filteredRuns.length} of {runs.length} runs</small></div><label className="run-history-search"><Search size={13}/><input aria-label="Search run history" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Workflow, run ID, error"/><button type="button" aria-label="Clear run history search" title="Clear search" disabled={!query} onClick={()=>setQuery('')}><X size={12}/></button></label><label className="run-history-status"><span>STATUS</span><select aria-label="Filter run history by status" value={status} onChange={event=>setStatus(event.target.value)}><option value="all">All statuses</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="interrupted">Interrupted</option><option value="cancelled">Cancelled</option><option value="running">Running</option></select></label></div>
+      <div className="run-history-list" aria-label="Saved workflow runs">
+      {filteredRuns.length?filteredRuns.map(item=><button key={item.runId} className={selectedId===item.runId?'selected':''} aria-pressed={selectedId===item.runId} onClick={()=>onSelect(item.runId)}>
         <span className={`run-status-dot ${statusClass(item.status)}`}/><span className="run-history-primary"><strong>{item.projectName} / {item.workflow}</strong><small>{date(item.startedAt)}</small></span><code>{item.runId.slice(0,8)}</code>
-      </button>):<div className="run-history-empty"><Clock3 size={15}/> No saved runs yet</div>}
+      </button>):<div className="run-history-empty"><Clock3 size={15}/>{runs.length?'No runs match these filters':'No saved runs yet'}</div>}
+      </div>
     </aside>
     <section className="run-history-detail" aria-label="Run details">
       {loading?<div className="run-history-empty"><LoaderCircle className="spin" size={16}/> Loading run record…</div>:!detail?<div className="run-history-empty"><Clock3 size={15}/> Select a run to inspect its saved evidence.</div>:<>

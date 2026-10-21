@@ -8,6 +8,10 @@ This repository contains the editor, the versioned workflow format, a separate P
 
 *The screenshot shows the isolated browser preview and the flowchart minimap. Desktop-only capabilities such as filesystem access and Windows UI Automation are available in the installed application, not in this preview.*
 
+![Open RPA Studio run history with workflow search, status filtering and a selected run's saved activity and event evidence](docs/assets/run-history-filters.png)
+
+*Run History includes searchable workflow, run-ID and error fields, status filters, and a read-only view of saved run evidence. This public screenshot uses illustrative sample records.*
+
 ![Open RPA Studio state-machine editor showing initial and final states, a directed transition overview and the selected state's activities](docs/assets/state-machine-overview.png)
 
 *State-machine overview nodes are generated from the executable state and transition definitions. Select a node to edit that state's activities and guards.*

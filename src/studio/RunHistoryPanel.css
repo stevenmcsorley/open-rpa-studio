@@ -1,0 +1,15 @@
+.run-history-sidebar{min-height:0;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid #303640}
+.run-history-toolbar{flex:none;display:flex;flex-direction:column;gap:7px;padding:9px;background:#191c22;border-bottom:1px solid #303640}
+.run-history-title{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.run-history-title strong{font-size:8px;letter-spacing:1px;color:#cbd0d9}
+.run-history-title small{font:8px 'DM Mono',monospace;color:#7e8794}
+.run-history-search{height:27px;display:flex;align-items:center;gap:6px;padding:0 7px;border:1px solid #303640;border-radius:4px;background:#111419;color:#89929e}
+.run-history-search:focus-within{border-color:#789d68}
+.run-history-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:#dfe3e8;font-size:9px}
+.run-history-search input::placeholder{color:#68717d}
+.run-history-search button{display:grid;place-items:center;width:18px;height:18px;padding:0;border:0;background:transparent;color:#9ca5b1}
+.run-history-search button:disabled{visibility:hidden}
+.run-history-status{display:flex;align-items:center;gap:7px;color:#858e9b;font-size:8px;letter-spacing:.5px}
+.run-history-status select{flex:1;min-width:0;height:25px;padding:0 6px;border:1px solid #303640;border-radius:3px;background:#171a20;color:#cbd0d9;font-size:9px}
+.run-history-list{min-height:0;flex:1;overflow:auto;border-right:0}
+.run-history-list .run-history-empty{padding:12px;text-align:center;line-height:1.5}
