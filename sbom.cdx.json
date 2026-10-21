@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:6022d859-b9ff-5c40-9628-c85078f61033",
+  "serialNumber": "urn:uuid:f6ab2778-1324-5b1b-a8e4-bb86ffe8a3cd",
   "version": 1,
   "metadata": {
     "component": {
       "type": "application",
       "name": "Open RPA Studio",
-      "version": "0.1.4",
-      "purl": "pkg:generic/open-rpa-studio@0.1.4"
+      "version": "0.1.27",
+      "purl": "pkg:generic/open-rpa-studio@0.1.27"
     },
     "properties": [
       {
@@ -12321,6 +12321,29 @@
     },
     {
       "type": "library",
+      "name": "comtypes",
+      "version": "1.4.17",
+      "purl": "pkg:pypi/comtypes@1.4.17",
+      "bom-ref": "pkg:pypi/comtypes@1.4.17",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3d9c1e92ad8daf7600d371e76ee16161a627a5fb70c3144f6e52e78af6034363"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "name": "coverage",
       "version": "7.16.2",
       "purl": "pkg:pypi/coverage@7.16.2",
@@ -12362,6 +12385,52 @@
         {
           "alg": "SHA-256",
           "content": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "purl": "pkg:pypi/defusedxml@0.7.1",
+      "bom-ref": "pkg:pypi/defusedxml@0.7.1",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "et-xmlfile",
+      "version": "2.0.0",
+      "purl": "pkg:pypi/et-xmlfile@2.0.0",
+      "bom-ref": "pkg:pypi/et-xmlfile@2.0.0",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54"
         }
       ]
     },
@@ -12621,9 +12690,9 @@
     {
       "type": "library",
       "name": "open-rpa-studio-engine",
-      "version": "0.1.4",
-      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.4",
-      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.4",
+      "version": "0.1.27",
+      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.27",
+      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.27",
       "properties": [
         {
           "name": "openrpa:licenseReview",
@@ -12632,6 +12701,29 @@
         {
           "name": "openrpa:ecosystem",
           "value": "python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "openpyxl",
+      "version": "3.1.5",
+      "purl": "pkg:pypi/openpyxl@3.1.5",
+      "bom-ref": "pkg:pypi/openpyxl@3.1.5",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050"
         }
       ]
     },
@@ -13028,6 +13120,29 @@
     },
     {
       "type": "library",
+      "name": "pypdf",
+      "version": "6.21.1",
+      "purl": "pkg:pypi/pypdf@6.21.1",
+      "bom-ref": "pkg:pypi/pypdf@6.21.1",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2d62c383acd6e0dff0a96322ba8b1135229343b084d73c6f6cfd947fd291afcb"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "name": "pyperclip",
       "version": "1.11.0",
       "purl": "pkg:pypi/pyperclip@1.11.0",
@@ -13212,6 +13327,52 @@
     },
     {
       "type": "library",
+      "name": "pywin32",
+      "version": "312",
+      "purl": "pkg:pypi/pywin32@312",
+      "bom-ref": "pkg:pypi/pywin32@312",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "17948aeadbdb091f0ced6ef0841620794e68327b94ee415571c1203594b7215c"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pywinauto",
+      "version": "0.6.9",
+      "purl": "pkg:pypi/pywinauto@0.6.9",
+      "bom-ref": "pkg:pypi/pywinauto@0.6.9",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "94d710bfa796df245250f952ffa65d97233d9807bcd42e052b71b81af469b6de"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "name": "regex",
       "version": "2026.9.29",
       "purl": "pkg:pypi/regex@2026.9.29",
@@ -13299,6 +13460,29 @@
         {
           "alg": "SHA-256",
           "content": "6f445ca2ce864605f81e223f262b4c94ffcb9a4a63473bae0ed7be5aab0291da"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "six",
+      "version": "1.17.0",
+      "purl": "pkg:pypi/six@1.17.0",
+      "bom-ref": "pkg:pypi/six@1.17.0",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"
         }
       ]
     },

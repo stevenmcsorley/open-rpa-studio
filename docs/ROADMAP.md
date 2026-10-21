@@ -19,6 +19,7 @@
 - Desktop toolbar import/export for deterministic, integrity-checked `.orpa` project packages, with export workflow validation and safe empty-folder extraction.
 - Reusable workflow argument mapping with per-call-site outputs and preflight validation.
 - Bounded text extraction from selectable PDF pages, with a page-count output, page boundaries, explicit file-read auditing, and documented no-OCR/encryption limits.
+- Local SQLite data integration through parameterized read-only queries with an SQLite authorizer allowlist, approved-root confinement, row/byte/time caps, cancellation, and audited attempt/result metadata.
 
 ## Next release gates
 

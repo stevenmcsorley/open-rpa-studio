@@ -46,6 +46,12 @@ describe('run impact plan', () => {
     expect(plan.actions).toEqual([expect.objectContaining({ id: 'pdf', label: 'Read PDF text', detail: 'invoices/current.pdf', risk: 'read' })]);
   });
 
+  it('shows SQLite queries as bounded local database reads', () => {
+    const plan = buildExecutionPlan({ ...base, activities: [{ id: 'query', type: 'sqlite_query', path: 'data/orders.sqlite', query: 'SELECT * FROM orders' }] });
+    expect(plan.actions).toEqual([expect.objectContaining({ id: 'query', label: 'Query SQLite database', detail: 'data/orders.sqlite', risk: 'read' })]);
+    expect(plan.needsNetwork).toBe(false);
+  });
+
   it('covers flowchart nodes and state-machine activities', () => {
     const flowchart = buildExecutionPlan({ ...base, executionModel: 'flowchart', flowchart: {
       start: 's', nodes: [{ id: 's', kind: 'start' }, { id: 'a', kind: 'action', activity: { id: 'web', type: 'browser_navigate', url: 'https://example.org' } }, { id: 'e', kind: 'end' }],

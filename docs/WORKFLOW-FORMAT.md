@@ -18,6 +18,10 @@ The desktop validator checks the call against the project's declared workflows b
 
 The xlsx_read and xlsx_write activities operate on local .xlsx files in the desktop engine. They use the normal project file-root permissions and audit trail. Limits, supported cell values, formula-cache behavior, and workbook-format constraints are documented in [Excel workbook activities](EXCEL-ACTIVITIES.md). The browser preview has no filesystem access and cannot execute them.
 
+## SQLite database query
+
+`sqlite_query` runs one parameter-bound read-only query against a local approved-root `.db`, `.sqlite`, or `.sqlite3` file. It returns row objects, applies result, size and execution-time caps, checks cancellation through SQLite's VM progress hook, and audits attempts/completions without SQL text or parameter values. Write/DDL, `PRAGMA`, `ATTACH`, and multi-statement statements are denied. See [SQLite Query activity](SQLITE-ACTIVITY.md).
+
 ## PDF text extraction
 
 `pdf_read_text` extracts selectable PDF text within the project file-size quota, respects cancellation between pages, preserves page boundaries with form-feed separators, and reports page count to a separate variable. It supports an optional bounded page limit and approximate layout mode. Encrypted PDFs and image-only OCR are not supported. See [PDF activity limits](PDF-ACTIVITIES.md).

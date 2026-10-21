@@ -10,6 +10,8 @@ import os
 import io
 import copy as copy_module
 import zipfile
+import sqlite3
+import base64
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -120,6 +122,14 @@ class WorkflowEngine:
             except ValueError:
                 continue
         raise WorkflowError(f"File path escapes approved roots: {target}", code="file-permission-denied")
+
+    def _audit_path(self, target: Path) -> str:
+        roots=(self.root,*(item.expanduser().resolve() for item in self.options.extra_file_roots))
+        for index,root in enumerate(roots):
+            try:relative=target.relative_to(root)
+            except ValueError:continue
+            return str(relative) if index==0 else str(Path(f"approved-root-{index}")/relative)
+        return "[outside-approved-roots]"
 
     def _path(self, raw: Any, variables: dict[str, Any], for_write: bool = False) -> Path:
         value = interpolate(raw, variables)
@@ -733,6 +743,67 @@ class WorkflowEngine:
                 v[a.get("pageCountResult","pageCount")]=page_count
             except WorkflowError:raise
             except Exception as exc:raise WorkflowError(f"Cannot extract text from PDF: {type(exc).__name__}: {exc}",a["id"],"pdf-read-error") from exc
+        elif kind == "sqlite_query":
+            path=self._path(a["path"],v)
+            if path.suffix.lower() not in {".db",".sqlite",".sqlite3"}:raise WorkflowError("SQLite Query supports .db, .sqlite, or .sqlite3 files only",a["id"],"sqlite-format")
+            parameters=interpolate(a.get("parameters",[]),v)
+            if not isinstance(parameters,(list,dict)):raise WorkflowError("SQLite Query parameters must resolve to a list or object",a["id"],"sqlite-parameters")
+            self.options.audit("database.query.attempt",{"activityId":a["id"],"path":self._audit_path(path),"parameterCount":len(parameters)})
+            if not path.is_file():raise WorkflowError("SQLite database file does not exist",a["id"],"sqlite-not-found")
+            if path.stat().st_size>self._max_file_bytes:raise WorkflowError("SQLite database exceeds configured read limit",a["id"],"file-size-limit")
+            query=interpolate(a["query"],v)
+            if not isinstance(query,str) or not query.strip() or len(query)>100_000:raise WorkflowError("SQLite Query needs a SQL statement no longer than 100,000 characters",a["id"],"sqlite-query")
+            bound_values=parameters.values() if isinstance(parameters,dict) else parameters
+            if len(parameters)>1000 or any(value is not None and not isinstance(value,(str,int,float,bool,bytes)) for value in bound_values):
+                raise WorkflowError("SQLite Query accepts at most 1,000 scalar parameters",a["id"],"sqlite-parameters")
+            timeout=float(a.get("timeoutSeconds",30));deadline=time.monotonic()+timeout;max_rows=int(a.get("maxRows",10_000))
+            connection=None
+            try:
+                connection=sqlite3.connect(path.as_uri()+"?mode=ro",uri=True,timeout=min(timeout,0.5),isolation_level=None)
+                connection.enable_load_extension(False)
+                connection.execute("PRAGMA query_only=ON")
+                connection.execute("PRAGMA trusted_schema=OFF")
+                connection.execute(f"PRAGMA busy_timeout={min(int(timeout*1000),500)}")
+                allowed={sqlite3.SQLITE_SELECT,sqlite3.SQLITE_READ,sqlite3.SQLITE_FUNCTION}
+                if hasattr(sqlite3,"SQLITE_RECURSIVE"):allowed.add(sqlite3.SQLITE_RECURSIVE)
+                def authorize(action:int,arg1:str|None,arg2:str|None,_database:str|None,_trigger:str|None)->int:
+                    if action==sqlite3.SQLITE_READ and _database!="main":return sqlite3.SQLITE_DENY
+                    return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+                connection.set_authorizer(authorize)
+                def progress()->int:
+                    return int(self.options.cancel() or time.monotonic()>deadline)
+                connection.set_progress_handler(progress,1000)
+                cursor=connection.execute(query,parameters)
+                columns=[str(item[0]) for item in (cursor.description or [])]
+                names=[];seen_names={}
+                for column in columns:
+                    seen_names[column]=seen_names.get(column,0)+1
+                    names.append(column if seen_names[column]==1 else f"{column}_{seen_names[column]}")
+                rows=[];result_bytes=0
+                while True:
+                    self._check_cancel()
+                    if time.monotonic()>deadline:raise WorkflowError("SQLite Query exceeded its time limit",a["id"],"sqlite-timeout")
+                    batch=cursor.fetchmany(min(128,max_rows-len(rows)+1))
+                    if not batch:break
+                    for raw in batch:
+                        if len(rows)>=max_rows:raise WorkflowError(f"SQLite Query exceeded its {max_rows}-row result limit",a["id"],"sqlite-row-limit")
+                        row={name:( {"$binaryBase64":base64.b64encode(value).decode("ascii")} if isinstance(value,bytes) else value) for name,value in zip(names,raw)}
+                        try:encoded=json.dumps(row,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode("utf-8")
+                        except (TypeError,ValueError) as exc:raise WorkflowError("SQLite Query returned a value that cannot be represented as JSON",a["id"],"sqlite-value") from exc
+                        result_bytes+=len(encoded)
+                        if result_bytes>self._max_file_bytes:raise WorkflowError("SQLite Query result exceeds configured data limit",a["id"],"file-size-limit")
+                        rows.append(row)
+                v[a.get("result","rows")]=rows
+                self.options.audit("database.query.completed",{"activityId":a["id"],"path":self._audit_path(path),"rowCount":len(rows),"parameterCount":len(parameters)})
+            except WorkflowError:raise
+            except sqlite3.Error as exc:
+                if self.options.cancel():raise RunCancelled() from exc
+                if time.monotonic()>deadline or "interrupted" in str(exc).lower():raise WorkflowError("SQLite Query exceeded its time limit",a["id"],"sqlite-timeout") from exc
+                message="SQLite Query was blocked by the read-only policy" if "not authorized" in str(exc).lower() else f"SQLite Query failed: {exc}"
+                code="sqlite-readonly-policy" if "not authorized" in str(exc).lower() else "sqlite-query-error"
+                raise WorkflowError(message,a["id"],code) from exc
+            finally:
+                if connection is not None:connection.close()
         elif kind == "xlsx_write":
             if Path(str(interpolate(a["path"],v))).suffix.lower()!='.xlsx':raise WorkflowError("Spreadsheet Write supports .xlsx output only",a["id"],"spreadsheet-format")
             rows=interpolate(a.get("rows","rows"),v)
@@ -814,22 +885,22 @@ class WorkflowEngine:
         else:
             raise WorkflowError(f"Unsupported activity: {kind}", a.get("id"), "activity-unsupported")
 
-        if kind in {"file_read_text","csv_read","xlsx_read","pdf_read_text","file_list"}:
+        if kind in {"file_read_text","csv_read","xlsx_read","pdf_read_text","sqlite_query","file_list"}:
             raw_path=a.get("path",a.get("directory",""))
             target=self._path(raw_path,v) if raw_path else self.root
-            self.options.audit("file.read", {"activityId":a["id"],"path":str(target.relative_to(self.root))})
+            self.options.audit("file.read", {"activityId":a["id"],"path":self._audit_path(target)})
         elif kind in {"file_write_text","csv_write","xlsx_write","json_write"}:
             raw_path=a.get("path")
             if raw_path:
                 target=self._path(raw_path,v)
-                self.options.audit("file.write", {"activityId":a["id"],"path":str(target.relative_to(self.root))})
+                self.options.audit("file.write", {"activityId":a["id"],"path":self._audit_path(target)})
         elif kind in {"file_copy","file_move"}:
             for field,action in (("source","file.read"),("destination","file.write")):
                 target=self._path(a[field],v)
-                self.options.audit(action,{"activityId":a["id"],"path":str(target.relative_to(self.root))})
+                self.options.audit(action,{"activityId":a["id"],"path":self._audit_path(target)})
         elif kind=="file_delete":
             target=self._path(a["path"],v)
-            self.options.audit("file.delete",{"activityId":a["id"],"path":str(target.relative_to(self.root))})
+            self.options.audit("file.delete",{"activityId":a["id"],"path":self._audit_path(target)})
 
     def _browser_activity(self, a: dict[str, Any], v: dict[str, Any]) -> None:
         kind = a["type"]

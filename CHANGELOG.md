@@ -1,4 +1,13 @@
 # Changelog
+## 0.1.27 — Bounded read-only SQLite integration
+
+- Added the native **Query SQLite Database** activity for approved local database files. Query parameters are bound through SQLite rather than inserted into SQL text.
+- Enforces `mode=ro`, `query_only`, `trusted_schema=OFF`, disabled extension loading and an authorizer allowlist. Write/DDL, `PRAGMA`, `ATTACH`, temp database reads and multiple statements are rejected.
+- Adds bounded row, input-file, output-size and query-time limits. SQLite VM progress callbacks enforce deadlines and cancellation; lock waits are capped at 500 ms.
+- Returns JSON-compatible rows, deterministically renames duplicate columns, and tags BLOB values as base64. Records query attempts and completion counts without recording SQL or parameter values. Audit paths now remain root-relative for explicitly approved external roots.
+- The browser preview validates this desktop-only activity and reports its filesystem-engine requirement.
+- Verification: 159 Python engine tests, 50 frontend tests across 8 files, production frontend build, offline Cargo check, `npm audit --audit-level=moderate` (zero vulnerabilities), and `git diff --check` passed. The 61.49 MiB unsigned Windows x64 installer was installed into a new isolated directory. Its frozen bridge executed a parameterized read from a local database, stored attempt/completion audit records without SQL text or values, and blocked a `DELETE` while confirming that the database remained unchanged. The installed app launched and its only child process was the expected `openrpa-bridge.exe`; no terminal process appeared. CycloneDX SBOM: 479 locked components. Installer SHA-256: `e909efa5221ea41515a101598062abfaacc82cb6673cac1c2f356e37d62552e9`.
+
 ## 0.1.26 — Bounded PDF text extraction
 
 - Added the native **Read PDF Text** activity for selectable text, form-feed page boundaries, a page-count output, optional layout-oriented extraction, cancellation between pages, and configured input/output size limits.

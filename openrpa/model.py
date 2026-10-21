@@ -230,6 +230,18 @@ def validate_workflow(workflow: dict[str, Any], known_workflows: set[str] | None
                 max_pages=item.get("maxPages",500)
                 if not isinstance(max_pages,int) or isinstance(max_pages,bool) or not 1<=max_pages<=5000:problems.append({"code":"pdf-page-limit","message":"PDF maximum pages must be between 1 and 5,000","activityId":str(aid or "")})
                 if "layoutMode" in item and not isinstance(item["layoutMode"],bool):problems.append({"code":"pdf-layout-mode","message":"PDF layoutMode must be a boolean","activityId":str(aid or "")})
+            elif typ == "sqlite_query":
+                if not isinstance(item.get("path"),str) or not item["path"].strip():problems.append({"code":"sqlite-path","message":"SQLite Query needs a non-empty database path","activityId":str(aid or "")})
+                query=item.get("query")
+                if not isinstance(query,str) or not query.strip() or len(query)>100_000:problems.append({"code":"sqlite-query","message":"SQLite Query needs a SQL statement no longer than 100,000 characters","activityId":str(aid or "")})
+                result=item.get("result","rows")
+                if not isinstance(result,str) or not result.isidentifier():problems.append({"code":"sqlite-result","message":"SQLite Query result must be a variable name","activityId":str(aid or "")})
+                parameters=item.get("parameters",[])
+                if not isinstance(parameters,(list,dict,str)):problems.append({"code":"sqlite-parameters","message":"SQLite Query parameters must be a list, object, or expression","activityId":str(aid or "")})
+                max_rows=item.get("maxRows",10000)
+                if not isinstance(max_rows,int) or isinstance(max_rows,bool) or not 1<=max_rows<=100_000:problems.append({"code":"sqlite-row-limit","message":"SQLite Query maxRows must be from 1 to 100,000","activityId":str(aid or "")})
+                timeout=item.get("timeoutSeconds",30)
+                if not isinstance(timeout,(int,float)) or isinstance(timeout,bool) or not math.isfinite(timeout) or not 1<=timeout<=120:problems.append({"code":"sqlite-timeout","message":"SQLite Query timeoutSeconds must be from 1 to 120","activityId":str(aid or "")})
             elif typ not in ACTIVITY_TYPES:
                 problems.append({"code": "activity-unsupported", "message": f"Unsupported activity type: {typ}", "activityId": str(aid or "")})
             if typ in {"browser_click","browser_fill","browser_select","browser_check","browser_uncheck","browser_text","browser_wait","browser_assert"}:
@@ -528,7 +540,7 @@ def _argument_value_matches(value: Any, declared: str) -> bool:
 ACTIVITY_TYPES = {
     "assign", "log", "credential_get", "file_read_text", "file_write_text", "file_copy", "file_list",
     "regex_replace", "regex_match", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "pdf_read_text", "json_parse", "json_write",
-    "wait", "http_request", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field",
+    "wait", "http_request", "sqlite_query", "invoke_workflow", "try", "while", "retry", "switch", "file_move", "file_delete", "transform_field",
     "browser_launch", "browser_close", "browser_navigate", "browser_click", "browser_fill", "browser_select", "browser_check", "browser_uncheck", "browser_text", "browser_wait", "browser_assert", "browser_screenshot",
     "desktop_click", "desktop_type", "desktop_hotkey", "desktop_press", "desktop_screenshot",
     "desktop_ui_click", "desktop_ui_fill", "desktop_ui_text", "desktop_ui_wait",
