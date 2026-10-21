@@ -16,7 +16,7 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The unsigned Windows development installer will be attached to the [Open RPA Studio v0.1.25 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.25). The package is for evaluation and is not code-signed.
+The unsigned Windows development installer is available from the [Open RPA Studio v0.1.25 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.25). The package is for evaluation and is not code-signed.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. The packaged Playwright adapter also needs a browser binary. Browser binaries are not included in this installer, so browser automation will report unavailable until Chromium is installed in a compatible Playwright environment. Runtime capability status is displayed by the app rather than inferred from package presence.
 

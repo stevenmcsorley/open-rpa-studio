@@ -4,7 +4,7 @@
 - Added an explicit endpoint check beside model selection. The native provider adapter now reports connection success, available model count and request duration, distinguishes an empty model catalogue, and presents provider errors as an accessible status alert.
 - Changing providers or saved profiles clears stale connection health so the UI never implies an untested endpoint is still connected.
 - Supports the existing Ollama, LM Studio, OpenAI, OpenAI Responses, Anthropic Claude, OpenRouter and compatible endpoint adapters; the check uses model discovery and does not submit a prompt.
-- Verification: 136 Python tests, 46 frontend tests, production frontend build, offline Cargo check and SBOM generation passed. The 60.78 MiB unsigned Windows x64 installer installed to a fresh directory; its frozen bridge passed credential-free model discovery (two local model IDs) and structured AI draft acceptance. Installer SHA-256: `1560e7deb150f7928101308e103797976ee06b8246335d7e0864e072bb764daa`. GitHub CI follows this commit.
+- Verification: 136 Python tests, 46 frontend tests, production frontend build, offline Cargo check and SBOM generation passed. The 60.78 MiB unsigned Windows x64 installer installed to a fresh directory; its frozen bridge passed credential-free model discovery (two local model IDs) and structured AI draft acceptance. Installer SHA-256: `1560e7deb150f7928101308e103797976ee06b8246335d7e0864e072bb764daa`. GitHub CI passed (run 39529520042).
 
 ## 0.1.24 — Provider message contract and prompt separation
 
