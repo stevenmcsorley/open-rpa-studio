@@ -4,7 +4,7 @@
 - Fixed the Claude Messages API request to include the required user `messages` payload alongside its system policy and forced structured-output tool.
 - Separated user task text from system instructions across Claude, OpenAI Chat Completions, OpenAI Responses, OpenAI-compatible and Ollama adapters. Task text is JSON encoded and remains untrusted input.
 - Added installed-bridge acceptance against a local OpenAI-compatible contract server; no external provider or credential is required for the test.
-- Verification: 136 Python tests, 44 frontend tests, production Vite build, offline Cargo check, `npm audit` with zero vulnerabilities, and installed Windows acceptance for provider request message separation, validated draft output, credential-free local endpoint, debugger watches and conditional breakpoints, spreadsheet processing and saved provider profiles. GitHub CI pending.
+- Verification: 136 Python tests, 44 frontend tests, production Vite build, offline Cargo check, `npm audit` with zero vulnerabilities, and installed Windows acceptance for provider request message separation, validated draft output, credential-free local endpoint, debugger watches and conditional breakpoints, spreadsheet processing and saved provider profiles. GitHub CI passed (run 39527704827).
 
 ## 0.1.23 — Conditional activity breakpoints
 
