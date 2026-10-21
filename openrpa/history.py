@@ -5,6 +5,8 @@ import json
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
+from typing import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -92,12 +94,20 @@ class RunHistory:
             raise RuntimeError(f"No run history migration is defined from schema {version}")
         self._create_schema(db)
 
-    def _db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _db(self) -> Iterator[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=10)
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA synchronous=FULL")
-        db.execute("PRAGMA foreign_keys=ON")
-        return db
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("PRAGMA foreign_keys=ON")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def recover_interrupted(self) -> int:
         with self._db() as db:

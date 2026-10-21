@@ -468,6 +468,17 @@ def test_run_history_survives_restart_and_marks_interrupted_without_replay(tmp_p
     assert "recordedAt" in record["events"][0] and "T" in record["events"][0]["recordedAt"]
     assert reopened.list_runs()[0]["runId"] == run_id
 
+def test_run_history_database_scopes_close_connections(tmp_path: Path):
+    import sqlite3
+    from openrpa.history import RunHistory
+
+    store = RunHistory(tmp_path / "history.sqlite3")
+    with store._db() as db:
+        db.execute("INSERT INTO audit_events(created_at,action,details_json) VALUES('now','test','{}')")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        db.execute("SELECT 1")
+    assert store.list_audit(1)[0]["action"] == "test"
+
 def test_history_persists_completed_failed_result(tmp_path: Path):
     from openrpa.history import RunHistory
     store = RunHistory(tmp_path / "history.sqlite3")

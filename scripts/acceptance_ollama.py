@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from openrpa.ai_providers import draft, models
 from openrpa.engine import run_project
 from openrpa.model import validate_workflow
 
@@ -28,71 +27,79 @@ def main() -> int:
     parser.add_argument("--model", default=os.environ.get("OPENRPA_OLLAMA_TEST_MODEL", "qwen35-4b:latest"))
     args = parser.parse_args()
 
-    installed = models("ollama")
-    if args.model not in installed:
-        print(f"Ollama model {args.model!r} is unavailable. Installed models: {', '.join(installed) or '(none)'}", file=sys.stderr)
-        return 2
-
-    activity_types = ["log"]
     results: list[dict[str, Any]] = []
-    for execution_model in ("sequence", "flowchart", "state_machine"):
-        started = time.perf_counter()
-        warnings: list[str] = []
-        payload = draft(
-            "ollama", args.model,
-            "Create a workflow that writes exactly one log entry containing the text hello.",
-            activity_types,
-            execution_model=execution_model,
-            on_compatibility_fallback=warnings.append,
-        )
-        workflow: dict[str, Any] = {
-            "format": "openrpa.workflow",
-            "formatVersion": 1,
-            "name": "Local Ollama acceptance",
-            "variables": [],
-            "arguments": [],
-            "activities": payload.get("activities", []) if execution_model == "sequence" else [],
-        }
-        if execution_model != "sequence":
-            key = "flowchart" if execution_model == "flowchart" else "stateMachine"
-            workflow["executionModel"] = execution_model
-            workflow[key] = payload.get(key)
+    old_data_dir = os.environ.get("OPENRPA_DATA_DIR")
+    with tempfile.TemporaryDirectory(prefix="openrpa-ollama-acceptance-") as temporary:
+        root = Path(temporary)
+        os.environ["OPENRPA_DATA_DIR"] = str(root / "application-data")
+        from openrpa import bridge
 
-        problems = validate_workflow(workflow, {"Main"})
-        if problems:
-            raise RuntimeError(f"{execution_model} draft failed local validation: {problems[0]['code']}")
-        activities = _activities_for(workflow, execution_model)
-        if len(activities) != 1 or activities[0].get("type") != "log":
-            raise RuntimeError(f"{execution_model} draft was not a single log activity; execution was skipped")
+        original_send = bridge.send
+        replies: list[dict[str, Any]] = []
+        bridge.send = replies.append
+        try:
+            installed = bridge.ai_providers.models("ollama")
+            if args.model not in installed:
+                print(f"Ollama model {args.model!r} is unavailable. Installed models: {', '.join(installed) or '(none)'}", file=sys.stderr)
+                return 2
+            for index, execution_model in enumerate(("sequence", "flowchart", "state_machine"), start=1):
+                started = time.perf_counter()
+                bridge.handle({
+                    "id": index,
+                    "method": "ai.draft",
+                    "params": {
+                        "provider": "ollama",
+                        "model": args.model,
+                        "prompt": "Create a workflow that writes exactly one log entry containing the text hello.",
+                        "executionModel": execution_model,
+                        "workflows": ["Main"],
+                    },
+                })
+                response = replies.pop()
+                if "error" in response:
+                    raise RuntimeError(f"{execution_model} bridge request failed: {response['error'].get('type', 'error')}")
+                draft_result = response["result"]
+                workflow = draft_result["workflow"]
+                problems = validate_workflow(workflow, {"Main"})
+                if not draft_result.get("valid") or problems:
+                    code = problems[0]["code"] if problems else "bridge-validation-failed"
+                    raise RuntimeError(f"{execution_model} draft failed local validation: {code}")
+                activities = _activities_for(workflow, execution_model)
+                if len(activities) != 1 or activities[0].get("type") != "log":
+                    raise RuntimeError(f"{execution_model} draft was not a single log activity; execution was skipped")
 
-        with tempfile.TemporaryDirectory(prefix="openrpa-ollama-acceptance-") as temporary:
-            root = Path(temporary)
-            relative = "workflows/main.workflow.json"
-            path = root / relative
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps(workflow, ensure_ascii=False), encoding="utf-8")
-            project = {
-                "format": "openrpa.project",
-                "formatVersion": 1,
-                "name": "Local Ollama acceptance",
-                "main": "Main",
-                "workflows": {"Main": relative},
-            }
-            result = run_project(project, root, "Main")
-
-        log_events = [event for event in result.logs if event.get("event") == "log"]
-        if result.status != "succeeded" or len(log_events) != 1 or "hello" not in str(log_events[0].get("message", "")).lower():
-            raise RuntimeError(f"{execution_model} execution did not produce exactly one expected log entry")
-        results.append({
-            "provider": "ollama",
-            "model": args.model,
-            "structure": execution_model,
-            "validated": True,
-            "runStatus": result.status,
-            "logEventCount": len(log_events),
-            "compatibilityFallbackUsed": bool(warnings),
-            "elapsedSeconds": round(time.perf_counter() - started, 3),
-        })
+                run_root = root / f"execution-{execution_model}"
+                relative = "workflows/main.workflow.json"
+                path = run_root / relative
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps(workflow, ensure_ascii=False), encoding="utf-8")
+                project = {
+                    "format": "openrpa.project",
+                    "formatVersion": 1,
+                    "name": "Local Ollama acceptance",
+                    "main": "Main",
+                    "workflows": {"Main": relative},
+                }
+                result = run_project(project, run_root, "Main")
+                log_events = [event for event in result.logs if event.get("event") == "log"]
+                if result.status != "succeeded" or len(log_events) != 1 or "hello" not in str(log_events[0].get("message", "")).lower():
+                    raise RuntimeError(f"{execution_model} execution did not produce exactly one expected log entry")
+                results.append({
+                    "provider": "ollama",
+                    "model": args.model,
+                    "structure": execution_model,
+                    "validated": True,
+                    "runStatus": result.status,
+                    "logEventCount": len(log_events),
+                    "compatibilityFallbackUsed": bool(draft_result.get("warnings")),
+                    "elapsedSeconds": round(time.perf_counter() - started, 3),
+                })
+        finally:
+            bridge.send = original_send
+            if old_data_dir is None:
+                os.environ.pop("OPENRPA_DATA_DIR", None)
+            else:
+                os.environ["OPENRPA_DATA_DIR"] = old_data_dir
 
     print(json.dumps({"status": "passed", "results": results}, ensure_ascii=False, indent=2))
     return 0
