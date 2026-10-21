@@ -78,3 +78,13 @@
 .draft-impact-badges .draft-impact-danger{background:#482b2c;color:#ffaaa5}
 .draft-impact-actions{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
 .draft-impact .run-action{margin:0}
+
+/* Match scrollbars to Studio's dark graphite and leaf-green surfaces. */
+*{scrollbar-color:#566b4f #171a1f;scrollbar-width:thin}
+*::-webkit-scrollbar{width:11px;height:11px}
+*::-webkit-scrollbar-track{background:#171a1f;border-radius:999px}
+*::-webkit-scrollbar-thumb{min-height:28px;background:linear-gradient(135deg,#66795c,#3c4937);border:3px solid #171a1f;border-radius:999px}
+*::-webkit-scrollbar-thumb:hover{background:linear-gradient(135deg,#a4d58d,#6f995d)}
+*::-webkit-scrollbar-thumb:active{background:#b2e29b}
+*::-webkit-scrollbar-corner{background:#171a1f}
+*::-webkit-scrollbar-button{display:none;width:0;height:0}

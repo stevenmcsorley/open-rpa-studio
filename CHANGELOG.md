@@ -1,3 +1,7 @@
+## 0.1.112
+- Replaced platform-default scrollbars with slim graphite tracks, rounded green-gray thumbs, and a restrained green hover/active treatment across the Studio UI. Firefox and Chromium/WebView use matching dimensions and palette.
+- Verification: frontend suite 179 passed; production Vite build and frozen MCP acceptance passed during installer packaging. The scrollbar treatment was visually checked in the browser preview. Windows x64 NSIS installer: `release/Open-RPA-Studio-Setup-0.1.112-x64.exe` (72,987,802 bytes; SHA-256 `c364b4a87f638c95607de8f3655693967693d081b140050922b1480826877eff`).
+
 ## 0.1.111
 - AI workflow drafting now displays normalized token counts reported by Ollama, OpenAI Chat Completions/Responses, Anthropic, Gemini, and compatible OpenAI endpoints. Counts are bounded, model-supplied usage metadata is discarded, and monetary costs are not estimated. Reported counts are recorded in the local audit history without prompt or response content.
 - Verification: Python suite 497 passed; frontend suite 179 passed; production Vite build and frozen MCP acceptance passed. Real local Ollama acceptance (`qwen35-4b:latest`) produced, validated, and executed sequence, flowchart, and state-machine drafts; all three returned reported input/output/total token counts (9.446 s, 6.188 s, and 5.271 s). Windows x64 NSIS installer: `release/Open-RPA-Studio-Setup-0.1.111-x64.exe` (72,983,599 bytes; SHA-256 `82187cb902456f5196252d0b0a13b298e974d7d3e78a021df9b257f9d5f1edca`).

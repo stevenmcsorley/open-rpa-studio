@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.112
+- Studio scrollbars now use the application graphite/green palette with slim rounded thumbs and consistent Chromium/WebView and Firefox styling.
+- Verification: frontend suite 179 passed; production build and frozen MCP packaging acceptance passed.
+- Windows NSIS: `release/Open-RPA-Studio-Setup-0.1.112-x64.exe` (72,987,802 bytes; SHA-256 `c364b4a87f638c95607de8f3655693967693d081b140050922b1480826877eff`).
+
+## 0.1.111
+- AI draft preview shows provider-reported token usage for supported local and remote providers; no price estimates are inferred.
+- Verification: Python suite 497 passed; frontend suite 179 passed; production build and frozen MCP acceptance passed. Live Ollama sequence, flowchart, and state-machine drafts validated and executed with reported usage counts.
+- Windows NSIS: `release/Open-RPA-Studio-Setup-0.1.111-x64.exe` (72,983,599 bytes; SHA-256 `82187cb902456f5196252d0b0a13b298e974d7d3e78a021df9b257f9d5f1edca`).
+
 ## 0.1.101
 - Browser JSON schema discovery distinguishes fields present in every sampled item from optional sample fields and preserves mixed scalar types without returning API values. Responses without `Content-Length` remain rejected before body reads because Playwright buffers response data.
 - Verification: Python 464 passed; frontend 170 passed; production build and frozen MCP acceptance passed. Installed bridge acceptance passed; Studio upgraded and launched responsive.
