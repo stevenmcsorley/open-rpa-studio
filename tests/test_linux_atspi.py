@@ -125,11 +125,27 @@ def test_status_and_window_discovery_use_live_accessibility_bus(monkeypatch):
     assert linux_atspi.list_windows()==[{"title":"Procurement","processId":42,"controlType":"Frame"}]
 
 
+def test_scroll_into_view_uses_atspi_component_for_named_control(monkeypatch):
+    window,*_=fixture(monkeypatch)
+    item=Accessible("Archive","list item",attrs={"id":"archive"},states=(1,))
+    item.parent=window;window.children.append(item);item.visible=False
+    class Component:
+        def scrollTo(self,mode):
+            assert mode==0
+            item.visible=True
+            return True
+    item.queryComponent=lambda:Component()
+    api=sys.modules["pyatspi"];api.SCROLL_ANYWHERE=0
+    monkeypatch.setattr(linux_atspi,"_visible",lambda control:getattr(control,"visible",True))
+    linux_atspi.scroll_into_view("Procurement","Archive","archive","List Item",42)
+    assert item.visible is True
+
+
 def test_control_inspection_excludes_passwords_and_values(monkeypatch):
     fixture(monkeypatch)
     controls=linux_atspi.list_controls("Procurement",42)
     assert [row["name"] for row in controls]==["Organisation","Save","Status"]
-    assert controls[0]=={"name":"Organisation","automationId":"org-name","controlType":"Entry","matchCount":1,"enabled":True,"actions":["fill","text","wait"]}
+    assert controls[0]=={"name":"Organisation","automationId":"org-name","controlType":"Entry","visible":True,"matchCount":1,"enabled":True,"actions":["fill","text","wait"]}
     assert "secret" not in str(controls)
 
 

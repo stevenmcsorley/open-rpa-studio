@@ -174,6 +174,30 @@ def test_desktop_click_hit_test_returns_only_unique_safe_ui_selectors(monkeypatc
         assert "120" not in str(result) and "240" not in str(result)
 
 
+def test_scroll_into_view_uses_native_pattern_for_offscreen_control(monkeypatch):
+    control=Control("Archive","archive","TreeItem")
+    control.visible=False
+    control.iface_scroll_item=SimpleNamespace(ScrollIntoView=lambda:setattr(control,"visible",True))
+    control.is_visible=lambda:control.visible
+    window=Window(controls=[control])
+    monkeypatch.setattr(windows_uia,"_window",lambda *_args:window)
+    calls=[]
+    monkeypatch.setattr(windows_uia,"_find_controls",lambda _window,criteria,**kwargs:(calls.append((criteria,kwargs)) or [control]))
+    windows_uia.scroll_into_view("Research Editor","Archive","archive","TreeItem",73)
+    assert calls==[({"title":"Archive","auto_id":"archive","control_type":"TreeItem"},{"visible_only":False})]
+    assert control.visible is True
+
+
+def test_inspection_exposes_offscreen_control_when_native_scroll_pattern_exists(monkeypatch):
+    control=Control("Archive","archive","TreeItem")
+    control.element_info.element.CurrentIsOffscreen=True
+    control.is_visible=lambda:False
+    control.iface_scroll_item=object()
+    monkeypatch.setattr(windows_uia,"_desktop",lambda:Desktop([Window(controls=[control])]))
+    row=windows_uia.list_controls("Research Editor",73)[0]
+    assert row["visible"] is False and "scroll_into_view" in row["actions"]
+
+
 def test_recorded_drag_resolution_requires_two_distinct_unique_controls(monkeypatch):
     source=Control("Source","source","ListItem")
     target=Control("Target","target","ListItem")
@@ -371,7 +395,7 @@ def test_uia_inspection_excludes_password_controls_and_never_returns_values(monk
     controls=[Control("Customer name","name","Edit"),Control("Password","password","Edit",password=True)]
     monkeypatch.setattr(windows_uia,"_desktop",lambda:Desktop([Window(controls=controls)]))
     rows=windows_uia.list_controls("Research Editor",73)
-    assert rows==[{"name":"Customer name","automationId":"name","controlType":"Edit","matchCount":1,"enabled":True,"actions":["wait","fill","text"]}]
+    assert rows==[{"name":"Customer name","automationId":"name","controlType":"Edit","visible":True,"matchCount":1,"enabled":True,"actions":["wait","fill","text"]}]
     assert "live-value" not in json.dumps(rows)
 
 
@@ -476,6 +500,7 @@ def test_uia_activity_schema_requires_bounded_exact_selector():
     list_selection={**base,"activities":[{"id":"select-many","type":"desktop_ui_select_many","windowTitle":"Editor","automationId":"queue","controlType":"List","values":["Ready","Queued"],"mode":"replace","result":"selectedItems"}]}
     selected_wait={**base,"activities":[{"id":"wait-selected","type":"desktop_ui_wait","windowTitle":"Editor","automationId":"queue-item","controlType":"ListItem","state":"selected"}]}
     tree_select={**base,"activities":[{"id":"select-tree","type":"desktop_ui_select","windowTitle":"Editor","automationId":"folder","controlType":"Tree Item","value":"Documents"}]}
+    scroll={**base,"activities":[{"id":"scroll","type":"desktop_ui_scroll_into_view","windowTitle":"Editor","automationId":"archive","controlType":"TreeItem"}]}
     check_box={**base,"activities":[{"id":"check","type":"desktop_ui_check","windowTitle":"Editor","automationId":"terms","controlType":"Check Box"}]}
     invoke={**base,"activities":[{"id":"invoke","type":"desktop_ui_invoke","windowTitle":"Editor","automationId":"save","controlType":"Button"}]}
     window_wait={**base,"activities":[{"id":"wait-window","type":"desktop_window_wait","processId":73,"state":"exists","timeoutSeconds":5}]}
@@ -486,6 +511,7 @@ def test_uia_activity_schema_requires_bounded_exact_selector():
     selected_wait["activities"][0]["controlType"]="Button"
     assert "desktop-uia-selected-state-type" in {problem["code"] for problem in validate_workflow(selected_wait)}
     assert validate_workflow(invoke)==[] and validate_workflow(window_wait)==[] and validate_workflow(close_window)==[]
+    assert validate_workflow(scroll)==[]
     range_value={**base,"activities":[{"id":"range","type":"desktop_ui_set_range_value","windowTitle":"Editor","automationId":"zoom","controlType":"Slider","value":7.5,"timeoutSeconds":10}]}
     assert validate_workflow(range_value)==[]
     range_value["activities"][0]["value"]=float("nan")
@@ -555,6 +581,7 @@ def test_desktop_inspector_rpc_returns_metadata_and_audits_counts(monkeypatch):
 
 @pytest.mark.parametrize("activity,expected_call",[
     ({"id":"click","type":"desktop_ui_click","windowTitle":"Editor","name":"Save","controlType":"Button"},("click",)),
+    ({"id":"scroll","type":"desktop_ui_scroll_into_view","windowTitle":"Editor","automationId":"archive","controlType":"TreeItem"},("scroll_into_view",)),
     ({"id":"invoke","type":"desktop_ui_invoke","windowTitle":"Editor","name":"Save","controlType":"Button"},("invoke",)),
     ({"id":"drag","type":"desktop_ui_drag","windowTitle":"Editor","sourceAutomationId":"row-a","sourceControlType":"ListItem","targetAutomationId":"row-b","targetControlType":"ListItem","durationMilliseconds":500},("drag",)),
     ({"id":"grid-read","type":"desktop_ui_grid_read","windowTitle":"Editor","automationId":"orders","controlType":"DataGrid","result":"records","metadataResult":"gridMetadata","maxRows":100,"maxColumns":30,"maxOutputChars":50000},("grid_read",)),
@@ -585,6 +612,7 @@ def test_uia_activities_execute_only_with_permission(monkeypatch,tmp_path,activi
     monkeypatch.setattr(windows_uia,"status",lambda:{"available":True,"reason":None})
     monkeypatch.setattr(windows_uia,"control_state",lambda *_args:{"exists":True,"visible":True,"enabled":True,**({"expanded":activity["type"]=="desktop_ui_expand"} if activity["type"] in {"desktop_ui_expand","desktop_ui_collapse"} else {}),**({"selected":activity.get("state")=="selected"} if activity["type"]=="desktop_ui_wait" and activity.get("state") in {"selected","unselected"} else {})})
     monkeypatch.setattr(windows_uia,"click",lambda *_args:calls.append(("click",)))
+    monkeypatch.setattr(windows_uia,"scroll_into_view",lambda *_args:calls.append(("scroll_into_view",)))
     monkeypatch.setattr(windows_uia,"drag",lambda *_args:calls.append(("drag",)))
     monkeypatch.setattr(windows_uia,"read_grid",lambda *args,**_kwargs:(calls.append(("grid_read",)) or ([{"order":"O-1"}],{"rowsRead":1})))
     monkeypatch.setattr(windows_uia,"invoke",lambda *_args:calls.append(("invoke",)))

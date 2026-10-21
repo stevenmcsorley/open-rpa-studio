@@ -1,3 +1,7 @@
+## 0.1.114
+- Added native Scroll Control Into View for uniquely identified off-screen controls through Windows UIA ScrollItem and Linux AT-SPI Component patterns. Desktop inspection exposes off-screen Windows UIA controls when they advertise the scroll pattern, and marks visibility in the inspector. No coordinate fallback is used.
+- Verification: full Python suite 507 passed; frontend suite 179 passed; production Vite build and frozen MCP acceptance passed. Windows x64 NSIS installer: `release/Open-RPA-Studio-Setup-0.1.114-x64.exe` (73,023,543 bytes; SHA-256 `b49ea9027b66883de4b08e14b7fca1f8f6c83251e4f5f55d1396bb275a4da3ca`).
+
 ## 0.1.112
 - Replaced platform-default scrollbars with slim graphite tracks, rounded green-gray thumbs, and a restrained green hover/active treatment across the Studio UI. Firefox and Chromium/WebView use matching dimensions and palette.
 - Verification: frontend suite 179 passed; production Vite build and frozen MCP acceptance passed during installer packaging. The scrollbar treatment was visually checked in the browser preview. Windows x64 NSIS installer: `release/Open-RPA-Studio-Setup-0.1.112-x64.exe` (72,987,802 bytes; SHA-256 `c364b4a87f638c95607de8f3655693967693d081b140050922b1480826877eff`).

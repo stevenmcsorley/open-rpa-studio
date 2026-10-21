@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:1b3d1546-0a53-5b0e-aa21-608e9563fcac",
+  "serialNumber": "urn:uuid:6b59cd56-37cf-539b-baf1-175be55414d5",
   "version": 1,
   "metadata": {
     "component": {
       "type": "application",
       "name": "Open RPA Studio",
-      "version": "0.1.39",
-      "purl": "pkg:generic/open-rpa-studio@0.1.39"
+      "version": "0.1.114",
+      "purl": "pkg:generic/open-rpa-studio@0.1.114"
     },
     "properties": [
       {
@@ -12690,9 +12690,9 @@
     {
       "type": "library",
       "name": "open-rpa-studio-engine",
-      "version": "0.1.39",
-      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.39",
-      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.39",
+      "version": "0.1.113",
+      "purl": "pkg:pypi/open-rpa-studio-engine@0.1.113",
+      "bom-ref": "pkg:pypi/open-rpa-studio-engine@0.1.113",
       "properties": [
         {
           "name": "openrpa:licenseReview",
@@ -13253,6 +13253,29 @@
         {
           "alg": "SHA-256",
           "content": "86c0d0b93306b961d58d62a4db4879f27fe25513d4b969df351abdddb3c30e01"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "python-xlib",
+      "version": "0.33",
+      "purl": "pkg:pypi/python-xlib@0.33",
+      "bom-ref": "pkg:pypi/python-xlib@0.33",
+      "properties": [
+        {
+          "name": "openrpa:licenseReview",
+          "value": "Not present in the dependency lockfile; verify upstream metadata before redistribution."
+        },
+        {
+          "name": "openrpa:ecosystem",
+          "value": "python"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "55af7906a2c75ce6cb280a584776080602444f75815a7aff4d287bb2d7018b32"
         }
       ]
     },

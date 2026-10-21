@@ -360,7 +360,7 @@ def close_window(window_title: str | None = None, process_id: int | None = None)
     _window_action(window_title,process_id,{"close","close window"},"close")
 
 
-def _controls(window: Any, name: str | None, automation_id: str | None, control_type: str | None) -> list[Any]:
+def _controls(window: Any, name: str | None, automation_id: str | None, control_type: str | None, *, include_invisible: bool = False) -> list[Any]:
     if not (isinstance(name, str) and name.strip()) and not (isinstance(automation_id, str) and automation_id.strip()):
         raise ATSPIError("Specify an accessible name or AT-SPI id attribute to identify the control")
     if isinstance(name, str) and len(name) > 512 or isinstance(automation_id, str) and len(automation_id) > 512:
@@ -378,7 +378,7 @@ def _controls(window: Any, name: str | None, automation_id: str | None, control_
         if wanted_type and _control_type(control).lower() != wanted_type:
             continue
         try:
-            if not _visible(control):
+            if not include_invisible and not _visible(control):
                 continue
             if _protected(_module(), control):
                 continue
@@ -425,9 +425,43 @@ def list_controls(window_title: str, process_id: int | None = None, limit: int =
             objects.append((control, key))
         grouped[key] = grouped.get(key, 0) + 1
     maximum = max(1, min(int(limit), 300))
-    return [{"name": key[1], "automationId": key[2], "controlType": key[0],
-             "matchCount": grouped[key], "enabled": _enabled(control), "actions": _actions(control)}
-            for control, key in objects[:maximum]]
+    rows=[]
+    for control,key in objects[:maximum]:
+        actions=_actions(control)
+        try:
+            control.queryComponent()
+            actions.insert(0,"scroll_into_view")
+        except Exception:
+            pass
+        rows.append({"name": key[1], "automationId": key[2], "controlType": key[0],
+             "visible":_visible(control),"matchCount": grouped[key], "enabled": _enabled(control), "actions": actions})
+    return rows
+
+
+def scroll_into_view(window_title: str, name: str | None, automation_id: str | None,
+                     control_type: str | None, process_id: int | None = None) -> None:
+    """Use an AT-SPI Component scroll request; never estimate screen coordinates."""
+    api, _, window = _window(window_title, process_id)
+    matches=_controls(window,name,automation_id,control_type,include_invisible=True)
+    if not matches:
+        raise ATSPIError(f"No accessible control matched name={name!r}, id={automation_id!r}, type={control_type!r}")
+    if len(matches)!=1:
+        raise ATSPIError(f"Control selector is ambiguous: {len(matches)} matches; add an AT-SPI id or role")
+    control=matches[0]
+    try:
+        component=control.queryComponent()
+        mode=getattr(api,"SCROLL_ANYWHERE",None)
+        if mode is None:
+            raise ATSPIError("The AT-SPI runtime does not expose SCROLL_ANYWHERE")
+        accepted=component.scrollTo(mode)
+        if accepted is False:
+            raise ATSPIError("The target application rejected the AT-SPI scroll request")
+        if not _visible(control):
+            raise ATSPIError("AT-SPI scroll completed but the control is still not visible")
+    except ATSPIError:
+        raise
+    except Exception as exc:
+        raise ATSPIError(f"The selected control does not support AT-SPI Component scrolling: {type(exc).__name__}: {exc}") from exc
 
 
 def click(window_title: str, name: str | None, automation_id: str | None,

@@ -55,6 +55,14 @@ def click(window_title: str, name: str | None, automation_id: str | None,
     _adapter().click(window_title, name, automation_id, control_type, process_id)
 
 
+def scroll_into_view(window_title: str, name: str | None, automation_id: str | None,
+                     control_type: str | None, process_id: int | None = None) -> None:
+    action=getattr(_adapter(),"scroll_into_view",None)
+    if action is None:
+        raise RuntimeError(f"Accessible scroll-into-view is not implemented by the {sys.platform} adapter")
+    action(window_title,name,automation_id,control_type,process_id)
+
+
 def drag(window_title: str, source_name: str | None, source_automation_id: str | None,
          source_control_type: str | None, target_name: str | None,
          target_automation_id: str | None, target_control_type: str | None,

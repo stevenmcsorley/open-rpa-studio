@@ -2715,6 +2715,10 @@ class WorkflowEngine:
                 control_type=a.get("controlType")
                 process_id=a.get("processId")
                 timeout=min(max(float(a.get("timeoutSeconds",10)),1),120)
+                if kind=="desktop_ui_scroll_into_view":
+                    self._check_cancel()
+                    desktop_accessibility.scroll_into_view(title,name,automation_id,control_type,process_id)
+                    return
                 def state() -> dict[str,bool] | None:
                     self._check_cancel()
                     return desktop_accessibility.control_state(title,name,automation_id,control_type,process_id)

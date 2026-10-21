@@ -286,10 +286,10 @@ def _criteria(name: str | None, automation_id: str | None, control_type: str | N
     return criteria
 
 
-def _find_controls(window: Any, criteria: dict[str, str]) -> list[Any]:
+def _find_controls(window: Any, criteria: dict[str, str], *, visible_only: bool = True) -> list[Any]:
     """Use pywinauto's UIA-aware Automation ID filter (UIA descendants omit it)."""
     from pywinauto.findwindows import find_elements
-    elements = find_elements(parent=window, top_level_only=False, visible_only=True,
+    elements = find_elements(parent=window, top_level_only=False, visible_only=visible_only,
                              backend="uia", **criteria)
     return [window.backend.generic_wrapper_class(element) for element in elements]
 
@@ -345,7 +345,11 @@ def list_controls(window_title: str, process_id: int | None = None, limit: int =
             visible=bool(control.is_visible())
         except Exception:
             visible=False
-        if not visible or control_type not in allowed or _is_password(control):
+        try:
+            offscreen=bool(control.element_info.element.CurrentIsOffscreen)
+        except Exception:
+            offscreen=False
+        if (not visible and not offscreen) or control_type not in allowed or _is_password(control):
             continue
         name = str(getattr(info, "name", "") or "").strip()[:512]
         automation_id = str(getattr(info, "automation_id", "") or "").strip()[:512]
@@ -379,6 +383,11 @@ def list_controls(window_title: str, process_id: int | None = None, limit: int =
                     actions.insert(0, "set_range_value")
             except Exception:
                 pass
+        try:
+            control.iface_scroll_item
+            actions.insert(0, "scroll_into_view")
+        except Exception:
+            pass
         if control_type=="Edit": actions.extend(["fill","text"])
         elif control_type=="Text": actions.append("text")
         elif control_type=="ComboBox": actions.insert(0,"select")
@@ -405,6 +414,7 @@ def list_controls(window_title: str, process_id: int | None = None, limit: int =
         elif control_type not in {"Edit","Text","TreeItem"}: actions.insert(0,"click")
         if control_type in {"Button","Hyperlink","MenuItem","SplitButton"}:actions.insert(0,"invoke")
         result.append({"name":signature[1],"automationId":signature[2],"controlType":control_type,
+                       "visible":bool(control.is_visible()),
                        "matchCount":grouped[signature],"enabled":bool(getattr(control,"is_enabled",lambda:False)()),
                        "actions":actions})
     return result
@@ -518,6 +528,28 @@ def key_activity_for_focused_control(window_title: str, process_id: int, key: st
 def click(window_title: str, name: str | None, automation_id: str | None,
           control_type: str | None, process_id: int | None = None) -> None:
     _control(window_title, name, automation_id, control_type, process_id).click_input()
+
+
+def scroll_into_view(window_title: str, name: str | None, automation_id: str | None,
+                     control_type: str | None, process_id: int | None = None) -> None:
+    """Ask the target's native UIA ScrollItem pattern to reveal one control."""
+    window=_window(window_title,process_id)
+    criteria=_criteria(name,automation_id,control_type)
+    try:
+        matches=_find_controls(window,criteria,visible_only=False)
+    except Exception as exc:
+        raise UIAutomationError(f"Could not inspect the off-screen UIA control: {type(exc).__name__}: {exc}") from exc
+    if len(matches)!=1:
+        raise UIAutomationError(f"Scroll selector matched {len(matches)} controls; use a unique accessible name and Automation ID")
+    control=matches[0]
+    try:
+        control.iface_scroll_item.ScrollIntoView()
+        if not control.is_visible():
+            raise UIAutomationError("UIA ScrollItem completed but the control is still not visible")
+    except UIAutomationError:
+        raise
+    except Exception as exc:
+        raise UIAutomationError(f"The selected control does not support UIA ScrollItem: {type(exc).__name__}: {exc}") from exc
 
 
 def drag(window_title: str, source_name: str | None, source_automation_id: str | None,
