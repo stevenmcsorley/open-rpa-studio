@@ -130,6 +130,49 @@ def _schema(execution_model: str="sequence") -> dict[str,Any]:
     return {"type":"object","additionalProperties":False,"required":required,"properties":common}
 
 
+def _parse_chat_completion_draft(response: dict[str,Any]) -> dict[str,Any]:
+    choices=response.get("choices")
+    if not isinstance(choices,list) or not choices or not isinstance(choices[0],dict):
+        raise ValueError("AI provider returned no chat completion choice")
+    choice=choices[0]
+    if choice.get("finish_reason") in ("length","max_tokens"):
+        raise ValueError("AI provider truncated the structured draft at its output limit")
+    message=choice.get("message")
+    if not isinstance(message,dict):
+        raise ValueError("AI provider returned no chat completion message")
+    refusal=message.get("refusal")
+    if isinstance(refusal,str) and refusal.strip():
+        raise ValueError("AI provider refused to draft this workflow")
+    content=message.get("content")
+    if isinstance(content,str):
+        text=content.strip()
+    elif isinstance(content,list):
+        parts=[]
+        for item in content:
+            if not isinstance(item,dict): continue
+            if item.get("type")=="refusal":
+                raise ValueError("AI provider refused to draft this workflow")
+            if item.get("type") in ("text","output_text") and isinstance(item.get("text"),str):
+                parts.append(item["text"])
+        text="".join(parts).strip()
+    else:
+        text=""
+    if not text:
+        raise ValueError("AI provider returned no structured text; tool-only responses are unsupported")
+    if text.startswith("```"):
+        lines=text.splitlines()
+        if len(lines)<3 or lines[0].strip().lower() not in {"```","```json"} or lines[-1].strip()!="```":
+            raise ValueError("AI provider returned malformed structured output")
+        text="\n".join(lines[1:-1]).strip()
+    try:
+        draft=json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("AI provider returned malformed structured output") from exc
+    if not isinstance(draft,dict):
+        raise ValueError("AI provider returned structured output that is not an object")
+    return draft
+
+
 def draft(provider: str, model: str, prompt: str, activity_types: list[str], base_url: str|None=None,
           credential_service: str|None=None, credential_username: str|None=None, execution_model: str="sequence",
           cancel: threading.Event | None=None) -> dict[str,Any]:
@@ -185,6 +228,5 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
     endpoint,local=_endpoint(provider,base_url,"/chat/completions")
     response=_call(endpoint,local,"POST",body={"model":model,"temperature":0,"messages":[{"role":"system","content":instructions},{"role":"user","content":task_payload}],
         "response_format":{"type":"json_schema","json_schema":{"name":"open_rpa_workflow","strict":False,"schema":schema}}},timeout=180,secret=secret,provider=provider,cancel=cancel)
-    try: return json.loads(response["choices"][0]["message"]["content"])
-    except (KeyError,IndexError,TypeError,json.JSONDecodeError) as exc: raise ValueError("AI provider returned malformed structured output") from exc
+    return _parse_chat_completion_draft(response)
 

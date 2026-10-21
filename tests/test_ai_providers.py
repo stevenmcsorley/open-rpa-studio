@@ -54,6 +54,35 @@ def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
     assert "make a log" not in messages[0]["content"]
 
 
+@pytest.mark.parametrize("provider,base_url",[
+    ("lm_studio","http://127.0.0.1:1234/v1"),
+    ("local_openai_compatible","http://127.0.0.1:8000/v1"),
+    ("openrouter","https://openrouter.ai/api/v1"),
+])
+def test_openai_compatible_adapters_accept_text_blocks_with_fenced_json(monkeypatch,provider,base_url):
+    if provider=="openrouter": monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    body="```json\n"+json.dumps(draft)+"\n```"
+    monkeypatch.setattr(ai,"_call",lambda *a,**k:{"choices":[{"message":{"content":[{"type":"text","text":body}]}}]})
+    result=ai.draft(provider,"model-x","make a log",["log"],base_url,
+        credential_service="s" if provider=="openrouter" else None,
+        credential_username="u" if provider=="openrouter" else None)
+    assert result==draft
+
+
+@pytest.mark.parametrize("response,message",[
+    ({"choices":[{"finish_reason":"length","message":{"content":"{}"}}]},"truncated"),
+    ({"choices":[{"message":{"refusal":"not allowed","content":None}}]},"refused"),
+    ({"choices":[{"message":{"content":[{"type":"refusal","refusal":"not allowed"}]}}]},"refused"),
+    ({"choices":[{"message":{"content":None,"tool_calls":[{}]}}]},"tool-only"),
+    ({"choices":[{"message":{"content":"```python\\nprint('unsafe')\\n```"}}]},"malformed"),
+])
+def test_openai_compatible_adapter_reports_unsafe_or_incomplete_outputs(monkeypatch,response,message):
+    monkeypatch.setattr(ai,"_call",lambda *a,**k:response)
+    with pytest.raises(ValueError,match=message):
+        ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1")
+
+
 def test_openai_responses_draft_uses_responses_schema_and_extracts_text(monkeypatch):
     monkeypatch.setattr(ai,"_credential",lambda *_:"secret-token")
     seen={}

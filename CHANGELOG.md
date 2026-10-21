@@ -1,6 +1,8 @@
 # Changelog
 ## Unreleased
 
+- Improved OpenAI-compatible draft parsing across LM Studio, OpenRouter and compatible endpoints: accepts text content blocks and a complete `json` fence, and reports refusal, truncation, tool-only and malformed output explicitly.
+- Verification: 25 provider tests and the full 178-test Python suite pass, including response-shape cases for LM Studio, OpenRouter and local/remote compatible endpoints. CI verification pending.
 - Made the Output pane collapsible and resizable by pointer or keyboard. Its size is bounded by the available viewport so the minimum designer height remains visible; Home/End set bounds and Escape restores the default. Updated public screenshots.
 - Verification: all 72 frontend tests pass; TypeScript and production Vite build pass. Playwright verified drag resizing, ArrowUp, Home, End, Escape reset, and automatic clamping on a 650 px viewport; browser console reports zero errors.
 - Added a scoped, navigable activity outline for the selected flowchart action. It exposes nested branch paths, selects nested activities in the existing inspector, and keeps the containing graph action highlighted. Added a public browser-preview screenshot.
