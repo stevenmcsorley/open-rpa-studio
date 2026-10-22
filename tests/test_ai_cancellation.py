@@ -8,6 +8,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from openrpa import ai_providers
+from openrpa.network import request_loopback_stream
 
 
 class _SlowLocalModel(BaseHTTPRequestHandler):
@@ -47,6 +48,28 @@ class _ImmediateLocalModel(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+class _ChunkedStream(BaseHTTPRequestHandler):
+    def log_message(self,*_args):pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length","0")))
+        self.send_response(200);self.send_header("Content-Type","text/event-stream");self.send_header("Transfer-Encoding","chunked");self.end_headers()
+        for piece in (b"data: first",b"-event\r\n\r\ndata: second\n\n"):
+            self.wfile.write(f"{len(piece):x}\r\n".encode()+piece+b"\r\n");self.wfile.flush();time.sleep(.02)
+        self.wfile.write(b"0\r\n\r\n");self.wfile.flush()
+
+
+class _SlowChunkedStream(BaseHTTPRequestHandler):
+    sent=threading.Event();release=threading.Event()
+    def log_message(self,*_args):pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length","0")))
+        self.send_response(200);self.send_header("Content-Type","text/event-stream");self.send_header("Transfer-Encoding","chunked");self.end_headers()
+        chunk=b"data: first\n\n";self.wfile.write(f"{len(chunk):x}\r\n".encode()+chunk+b"\r\n");self.wfile.flush();type(self).sent.set()
+        type(self).release.wait(5)
+        try:self.wfile.write(b"0\r\n\r\n");self.wfile.flush()
+        except OSError:pass
+
+
 def test_native_cancellable_transport_returns_a_valid_model_response():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _ImmediateLocalModel)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -60,6 +83,36 @@ def test_native_cancellable_transport_returns_a_valid_model_response():
         server.shutdown()
         server.server_close()
         server_thread.join(timeout=2)
+
+
+def test_loopback_stream_transport_delivers_decoded_http_chunks_incrementally():
+    server=ThreadingHTTPServer(("127.0.0.1",0),_ChunkedStream)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();received=[]
+    try:
+        result=request_loopback_stream(f"http://127.0.0.1:{server.server_port}/v1/chat/completions","POST",
+            {"Content-Type":"application/json"},b"{}",5,100000,received.append,threading.Event())
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=2)
+    assert result["status"]==200
+    assert b"".join(received)==b"data: first-event\r\n\r\ndata: second\n\n"
+
+
+def test_loopback_stream_cancellation_closes_waiting_provider_socket():
+    _SlowChunkedStream.sent=threading.Event();_SlowChunkedStream.release=threading.Event()
+    server=ThreadingHTTPServer(("127.0.0.1",0),_SlowChunkedStream)
+    server_thread=threading.Thread(target=server.serve_forever,daemon=True);server_thread.start()
+    cancellation=threading.Event();errors=[]
+    def request():
+        try:request_loopback_stream(f"http://127.0.0.1:{server.server_port}/v1/chat/completions","POST",{},b"{}",5,100000,lambda _chunk:None,cancellation)
+        except BaseException as exc:errors.append(exc)
+    client=threading.Thread(target=request,daemon=True);client.start()
+    try:
+        assert _SlowChunkedStream.sent.wait(2)
+        cancellation.set();client.join(2)
+        assert not client.is_alive()
+        assert len(errors)==1 and isinstance(errors[0],ai_providers.RequestCancelled)
+    finally:
+        _SlowChunkedStream.release.set();server.shutdown();server.server_close();server_thread.join(timeout=2)
 
 
 def test_native_bridge_cancels_local_model_transport(tmp_path):
@@ -134,7 +187,8 @@ def test_native_bridge_cancels_local_model_transport(tmp_path):
                 raw=[]
                 while not raw_responses.empty(): raw.append(raw_responses.get_nowait())
                 raise AssertionError(f"Timed out waiting for bridge replies; child poll={bridge.poll()}; stdout={raw}; stderr={''.join(details)}") from exc
-            frames[frame["id"]] = frame
+            if "id" in frame:
+                frames[frame["id"]] = frame
         assert time.monotonic() - started < 2, "Cancellation waited for the slow provider response"
         assert frames[2]["result"]["cancelled"] is True
         assert "cancelled" in frames[1]["error"]["message"].lower()

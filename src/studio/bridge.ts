@@ -87,8 +87,13 @@ export async function cancelApiConnectionAuthorization(profileId:string):Promise
 export async function fetchOpenApiSpec(url:string,allowNetwork:boolean):Promise<string>{if(!inDesktop())throw new Error('Fetching OpenAPI documents from a URL requires the installed desktop app.');const result=await rpc('openapi.fetch',{url,allowNetwork});return result.text;}
 export async function listAiModels(config:AiConfig):Promise<string[]>{const result=await rpc('ai.models',{...config});return result.models??[];}
 export type AiTokenUsage={inputTokens?:number;outputTokens?:number;totalTokens?:number};
-export async function draftWithAi(config:AiConfig,model:string,prompt:string,workflows:string[],executionModel:'sequence'|'flowchart'|'state_machine'='sequence',draftId=crypto.randomUUID()):Promise<{explanation:string;workflow:Workflow;valid:boolean;problems:{code:string;message:string;activityId?:string}[];warnings?:string[];usage?:AiTokenUsage|null}>{return rpc('ai.draft',{...config,model,prompt,workflows,executionModel,draftId});}
+export type AiDraftEvent={requestId:string;type:string;timestamp:number;phase:string;metadata:Record<string,unknown>};
+export async function draftWithAi(config:AiConfig,model:string,prompt:string,workflows:string[],executionModel:'sequence'|'flowchart'|'state_machine'='sequence',draftId=crypto.randomUUID()):Promise<{explanation:string;workflow:Workflow;valid:boolean;problems:{code:string;message:string;activityId?:string}[];warnings?:string[];usage?:AiTokenUsage|null;capabilities?:Record<string,unknown>}>{return rpc('ai.draft',{...config,model,prompt,workflows,executionModel,draftId});}
 export async function cancelAiDraft(draftId:string):Promise<boolean>{const result=await rpc('ai.cancel',{draftId});return result.cancelled===true;}
+export async function listenAiDraftEvents(handler:(event:AiDraftEvent)=>void):Promise<()=>void>{
+  if ('__TAURI_INTERNALS__' in window) return listen('ai-draft-event',e=>handler(e.payload as AiDraftEvent));
+  const fn=(e:Event)=>handler((e as CustomEvent<AiDraftEvent>).detail);window.addEventListener('openrpa-ai-draft-event',fn);return()=>window.removeEventListener('openrpa-ai-draft-event',fn);
+}
 /** @deprecated Ollama alias retained for callers using the previous bridge API. */
 export async function listLocalModels():Promise<string[]>{return listAiModels({provider:'ollama'});}
 /** @deprecated Ollama alias retained for callers using the previous bridge API. */

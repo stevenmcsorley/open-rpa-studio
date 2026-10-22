@@ -9,7 +9,7 @@ from openrpa import ai_providers as ai
 
 def test_provider_catalog_includes_local_and_remote_families():
     ids={item["id"] for item in ai.catalog()}
-    assert {"ollama","lm_studio","local_openai_compatible","openai","openai_responses","claude","openrouter","gemini","openai_compatible"} <= ids
+    assert {"ollama","lm_studio","local_openai_compatible","openai","openai_responses","claude","openrouter","deepseek","gemini","openai_compatible"} <= ids
 
 
 @pytest.mark.parametrize("provider,response,expected",[
@@ -18,6 +18,7 @@ def test_provider_catalog_includes_local_and_remote_families():
     ("openai_responses",{"usage":{"input_tokens":120,"output_tokens":40,"total_tokens":160}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
     ("claude",{"usage":{"input_tokens":120,"output_tokens":40}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
     ("gemini",{"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":40,"totalTokenCount":160}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
+    ("deepseek",{"usage":{"prompt_tokens":120,"completion_tokens":40,"total_tokens":160}},{"inputTokens":120,"outputTokens":40,"totalTokens":160}),
 ])
 def test_provider_usage_normalizes_reported_token_counts(provider,response,expected):
     assert ai._usage(response,provider)==expected
@@ -48,6 +49,44 @@ def test_gemini_draft_uses_native_generate_content_schema_and_key_header(monkeyp
     assert json.loads(seen["body"]["contents"][0]["parts"][0]["text"])=={"task_description":"make a log"}
 
 
+def test_gemini_retries_schema_rejection_once_with_json_mime_and_local_validation(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"gemini-secret")
+    calls=[];warnings=[]
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    def call(url,local,method="GET",**kwargs):
+        calls.append(kwargs["body"])
+        if len(calls)==1:raise ai.ProviderHttpError(400,'{"error":{"message":"responseSchema JSON Schema is not supported by this model"}}')
+        return {"candidates":[{"content":{"parts":[{"text":json.dumps(draft)}]}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("gemini","gemini-test","make a log",["log"],credential_service="svc",credential_username="key",on_compatibility_fallback=warnings.append)
+    assert result==draft and len(calls)==2
+    assert "responseSchema" in calls[0]["generationConfig"]
+    assert calls[1]["generationConfig"]=={"temperature":0,"responseMimeType":"application/json"}
+    assert len(warnings)==1 and "Gemini rejected" in warnings[0]
+
+
+def test_gemini_discovers_model_limits_and_streams_complete_sequence_activities(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"gemini-secret")
+    ai._capability_cache.clear();events=[];text=[]
+    draft={"explanation":"safe","activities":[{"id":"greet","type":"log","message":"hello"}]}
+    def call(url,local,method="GET",**kwargs):
+        if method=="GET":return {"supportedGenerationMethods":["generateContent","streamGenerateContent"],"inputTokenLimit":32000,"outputTokenLimit":8192}
+        assert url.endswith(":streamGenerateContent?alt=sse") and kwargs["stream"]
+        kwargs["on_headers"](200,{"content-type":"text/event-stream"})
+        output=json.dumps(draft,separators=(",",":"))
+        for frame in (
+            "data: "+json.dumps({"candidates":[{"content":{"parts":[{"text":output}]}}]})+"\n\n",
+            "data: "+json.dumps({"candidates":[{"finishReason":"STOP","content":{"parts":[]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}})+"\n\n"):
+            kwargs["on_chunk"](frame.encode())
+        return {"status":200,"body":""}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("gemini","gemini-2.5-flash","write log",["log"],credential_service="svc",credential_username="u",
+        on_capabilities=events.append,on_stream_text=text.append)
+    assert result=={**draft,"_openrpa_usage":{"inputTokens":10,"outputTokens":5,"totalTokens":15}}
+    assert events[0]["streaming"]=="supported" and events[0]["contextLength"]==32000
+    assert "".join(text)==json.dumps(draft,separators=(",",":"))
+
+
 def test_gemini_schema_rewrites_const_and_drops_unsupported_string_length_constraints():
     assert ai._gemini_schema({"type":"string","const":"start","minLength":1})=={"type":"string","enum":["start"]}
 
@@ -61,6 +100,71 @@ def test_gemini_schema_rewrites_const_and_drops_unsupported_string_length_constr
 def test_gemini_reports_blocked_truncated_refused_and_malformed_drafts(response,message):
     with pytest.raises(ValueError,match=message):
         ai._gemini_text(response)
+
+
+def test_sse_decoder_handles_fragmented_events_keepalives_and_usage():
+    text=[]
+    stream=ai._OpenAIChatStream(text.append)
+    content=json.dumps({"explanation":"ok","activities":[{"id":"a","type":"log","message":"hi"}]},separators=(",",":"))
+    first=json.dumps({"choices":[{"delta":{"content":content}}]})
+    usage=json.dumps({"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}})
+    wire=(": keepalive\r\ndata: "+first+"\r\n\r\ndata: "+usage+"\r\n\r\ndata: [DONE]\r\n\r\n").encode()
+    for index in range(0,len(wire),7):stream.feed(wire[index:index+7])
+    result,usage=stream.finish()
+    assert result=={"explanation":"ok","activities":[{"id":"a","type":"log","message":"hi"}]}
+    assert usage=={"inputTokens":4,"outputTokens":5,"totalTokens":9}
+    assert "".join(text)==content
+
+
+def test_incremental_activity_scanner_emits_only_complete_activity_objects():
+    found=[];scanner=ai._IncrementalActivityScanner(found.append)
+    raw='{"explanation":"a string mentioning \\"activities\\": not a field","activities":[{"id":"one","type":"log","message":"hello"},{"id":"two","type":"wait","seconds":1}]}'
+    for index in range(0,len(raw),5):scanner.feed(raw[index:index+5])
+    assert [item["id"] for item in found]==["one","two"]
+    partial=[];scanner=ai._IncrementalActivityScanner(partial.append)
+    scanner.feed('{"explanation":"x","activities":[{"id":"unfinished","type":"log","message":"')
+    assert partial==[]
+
+
+def test_openai_native_chat_adapter_streams_only_content_and_reports_real_text_deltas(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret")
+    fragments=[]
+    result={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    content=json.dumps(result,separators=(",",":"))
+    chunks=[("data: "+json.dumps({"choices":[{"delta":{"content":content}}]})+"\n\n").encode(),
+        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',b"data: [DONE]\n\n"]
+    def call(url,local,method="GET",**kwargs):
+        assert kwargs["stream"] is True and kwargs["body"]["stream"] is True
+        for chunk in chunks:kwargs["on_chunk"](chunk)
+        return {"status":200,"body":""}
+    monkeypatch.setattr(ai,"_call",call)
+    draft=ai.draft("openai","gpt-test","make a log",["log"],credential_service="s",credential_username="u",on_stream_text=fragments.append)
+    assert draft==result
+    assert "".join(fragments)==json.dumps(result,separators=(",",":"))
+
+
+def test_deepseek_provider_discovers_models_and_uses_json_object_streaming(monkeypatch):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"deepseek-secret")
+    seen={};content=json.dumps({"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]},separators=(",",":"))
+    def call(url,local,method="GET",**kwargs):
+        if method=="GET":
+            seen["models_url"]=url
+            return {"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"}]}
+        seen.update(url=url,body=kwargs["body"],secret=kwargs["secret"])
+        for frame in ("data: "+json.dumps({"choices":[{"delta":{"content":content}}]})+"\n\n",'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":17,"total_tokens":28}}\n\n',"data: [DONE]\n\n"):
+            kwargs["on_chunk"](frame.encode())
+        return {"status":200,"body":""}
+    monkeypatch.setattr(ai,"_call",call)
+    assert ai.models("deepseek",credential_service="svc",credential_username="key")==["deepseek-chat","deepseek-reasoner"]
+    result=ai.draft("deepseek","deepseek-chat","write a log",["log"],credential_service="svc",credential_username="key")
+    assert result["activities"][0]["type"]=="log"
+    assert result["_openrpa_usage"]=={"inputTokens":11,"outputTokens":17,"totalTokens":28}
+    assert seen["models_url"]=="https://api.deepseek.com/models"
+    assert seen["url"]=="https://api.deepseek.com/chat/completions"
+    assert seen["body"]["response_format"]=={"type":"json_object"} and seen["body"]["stream"] is True
+    assert seen["secret"]=="deepseek-secret"
+    assert seen["body"]["stream"] is True
+    assert seen["body"]["stream_options"]=={"include_usage":True}
 
 
 @pytest.mark.parametrize("provider,url",[
@@ -89,17 +193,13 @@ def test_provider_http_error_classifies_unsupported_schema_without_exposing_resp
     assert "customer prompt secret" not in str(failure.value)
 
 
-def test_local_openai_compatible_server_acceptance_retries_and_returns_schema_guided_json():
+def test_local_openai_compatible_uses_schema_guided_json_without_optimistic_format_mode():
     draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
     requests=[]
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body=json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))))
             requests.append(body)
-            if "response_format" in body:
-                self.send_response(400);self.send_header("Content-Type","application/json");self.end_headers()
-                self.wfile.write(b'{"error":{"message":"response_format json_schema is not supported"}}')
-                return
             payload={"choices":[{"message":{"content":json.dumps(draft)}}]}
             encoded=json.dumps(payload).encode()
             self.send_response(200);self.send_header("Content-Type","application/json");self.send_header("Content-Length",str(len(encoded)));self.end_headers()
@@ -112,8 +212,9 @@ def test_local_openai_compatible_server_acceptance_retries_and_returns_schema_gu
     finally:
         server.shutdown();thread.join(timeout=2);server.server_close()
     assert result==draft
-    assert len(requests)==2
-    assert "response_format" in requests[0] and "response_format" not in requests[1]
+    assert len(requests)==1
+    assert "response_format" not in requests[0]
+    assert "JSON Schema:" in requests[0]["messages"][0]["content"]
 
 
 def test_models_calls_openai_compatible_endpoint(monkeypatch):
@@ -213,7 +314,7 @@ def test_gemini_key_is_sent_only_in_its_dedicated_header(monkeypatch):
     assert "private-key" not in seen["url"]
 
 
-def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
+def test_generic_openai_compatible_uses_schema_guidance_when_model_support_is_unknown(monkeypatch):
     seen={}
     def call(url,local,method="GET",**kwargs):
         seen.update(url=url,method=method,body=kwargs["body"])
@@ -224,45 +325,42 @@ def test_openai_draft_is_json_parsed_and_uses_schema(monkeypatch):
             {"type":"file_delete","title":"Delete File","category":"Files","description":"not allowed for this draft","defaults":{"path":"x"}}])
     assert result["activities"][0]["type"]=="log"
     assert seen["url"].endswith("/chat/completions") and seen["method"]=="POST"
-    assert seen["body"]["response_format"]["type"]=="json_schema"
+    assert "response_format" not in seen["body"]
     messages=seen["body"]["messages"]
     assert len(messages)==2 and messages[0]["role"]=="system" and messages[1]["role"]=="user"
     assert "Canonical native activity reference" in messages[0]["content"]
+    assert "JSON Schema:" in messages[0]["content"]
     assert '"type":"log"' in messages[0]["content"] and '"message":""' in messages[0]["content"]
     assert '"type":"file_delete"' not in messages[0]["content"] and "must-not-send" not in messages[0]["content"]
     assert json.loads(messages[1]["content"])=={"task_description":"make a log"}
     assert "make a log" not in messages[0]["content"]
 
 
-def test_openai_compatible_retries_once_without_vendor_json_schema_when_explicitly_unsupported(monkeypatch):
+def test_openai_compatible_unknown_capability_does_not_send_known_unsupported_format(monkeypatch):
     draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]};warnings=[]
     calls=[]
     def call(url,local,method="GET",**kwargs):
         calls.append(kwargs["body"])
-        if len(calls)==1:
-            raise ai.ProviderHttpError(400,'{"error":{"message":"response_format json_schema is not supported"}}')
         return {"choices":[{"message":{"content":json.dumps(draft)}}]}
     monkeypatch.setattr(ai,"_call",call)
     result=ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1",on_compatibility_fallback=warnings.append)
     assert result==draft
-    assert len(calls)==2
-    assert calls[0]["response_format"]["type"]=="json_schema"
-    assert "response_format" not in calls[1]
-    assert "JSON Schema:" in calls[1]["messages"][0]["content"]
-    assert json.loads(calls[1]["messages"][1]["content"])=={"task_description":"make a log"}
-    assert len(warnings)==1 and "retried once" in warnings[0]
+    assert len(calls)==1
+    assert "response_format" not in calls[0]
+    assert "JSON Schema:" in calls[0]["messages"][0]["content"]
+    assert json.loads(calls[0]["messages"][1]["content"])=={"task_description":"make a log"}
+    assert warnings==[]
 
 
 def test_openai_compatible_fallback_still_rejects_malformed_json_without_another_retry(monkeypatch):
     calls=[]
     def call(*args,**kwargs):
         calls.append(kwargs["body"])
-        if len(calls)==1:raise ai.ProviderHttpError(400,'{"error":{"message":"response_format is not supported"}}')
         return {"choices":[{"message":{"content":"not-json"}}]}
     monkeypatch.setattr(ai,"_call",call)
     with pytest.raises(ValueError,match="malformed structured output"):
         ai.draft("openai_compatible","model-x","make a log",["log"],"https://api.example/v1")
-    assert len(calls)==2
+    assert len(calls)==1
 
 
 def test_ollama_retries_once_with_json_mode_when_schema_format_is_rejected(monkeypatch):
@@ -359,6 +457,38 @@ def test_openai_compatible_adapters_accept_text_blocks_with_fenced_json(monkeypa
     assert result==draft
 
 
+@pytest.mark.parametrize("model,parameters,mode",[
+    ("nvidia/nemotron-3-ultra-550b-a55b:free",["tools","streaming"],"schema_instructions"),
+    ("minimax/minimax-m3.1-flash:free",["tools","streaming","response_format"],"json_object"),
+])
+def test_openrouter_uses_discovered_endpoint_parameters_not_model_name(monkeypatch,model,parameters,mode):
+    monkeypatch.setattr(ai,"_credential",lambda *_:"openrouter-test-secret")
+    ai._capability_cache.clear()
+    seen=[]
+    draft={"explanation":"safe","activities":[{"id":"x","type":"log","message":"hello"}]}
+    def call(url,local,method="GET",**kwargs):
+        if url.endswith("/endpoints"):
+            return {"data":{"context_length":8192,"max_completion_tokens":1024,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+                "endpoints":[{"supported_parameters":parameters}]}}
+        seen.append(kwargs["body"])
+        if kwargs.get("stream"):
+            frames=["data: "+json.dumps({"choices":[{"delta":{"content":json.dumps(draft,separators=(",",":"))}}]})+"\n\n",
+                'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',"data: [DONE]\n\n"]
+            for frame in frames:kwargs["on_chunk"](frame.encode())
+            return {"status":200,"body":""}
+        return {"choices":[{"message":{"content":json.dumps(draft)}}]}
+    monkeypatch.setattr(ai,"_call",call)
+    result=ai.draft("openrouter",model,"make a log",["log"],credential_service="svc",credential_username="key")
+    assert result==draft and len(seen)==1
+    if mode=="schema_instructions":
+        assert "response_format" not in seen[0]
+        assert "JSON Schema:" in seen[0]["messages"][0]["content"]
+    else:
+        assert seen[0]["response_format"]["type"]=="json_object"
+        assert seen[0]["provider"]=={"require_parameters":True}
+    assert ai._openrouter_capabilities(model,None,"openrouter-test-secret")["contextLength"]==8192
+
+
 @pytest.mark.parametrize("response,message",[
     ({"choices":[{"finish_reason":"length","message":{"content":"{}"}}]},"truncated"),
     ({"choices":[{"message":{"refusal":"not allowed","content":None}}]},"refused"),
@@ -405,13 +535,18 @@ def test_openai_draft_uses_selected_workflow_structure_schema(monkeypatch,execut
     seen={}
     payload={"start":"start","nodes":[{"id":"start","kind":"start"},{"id":"end","kind":"end"}],"transitions":[{"from":"start","to":"end"}]} if execution_model=="flowchart" else {"initial":"begin","states":[{"id":"begin","activities":[]},{"id":"done","final":True,"activities":[]}],"transitions":[{"from":"begin","to":"done"}]}
     def call(url,local,method="GET",**kwargs):
-        seen["schema"]=kwargs["body"]["response_format"]["json_schema"]["schema"]
-        return {"choices":[{"message":{"content":json.dumps({"explanation":"graph draft",payload_key:payload})}}]}
+        expected={"explanation":"graph draft",payload_key:payload}
+        seen["body"]=kwargs["body"]
+        for frame in ("data: "+json.dumps({"choices":[{"delta":{"content":json.dumps(expected,separators=(",",":"))}}]})+"\n\n",'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',"data: [DONE]\n\n"):
+            kwargs["on_chunk"](frame.encode())
+        return {"status":200,"body":""}
     monkeypatch.setattr(ai,"_call",call)
-    result=ai.draft("openai_compatible","model-x","route a task",["log"],"https://api.example/v1",execution_model=execution_model)
+    monkeypatch.setattr(ai,"_credential",lambda *_:"secret")
+    result=ai.draft("openai","model-x","route a task",["log"],execution_model=execution_model,credential_service="s",credential_username="u")
     assert payload_key in result
-    assert payload_key in seen["schema"]["required"]
-    assert seen["schema"]["additionalProperties"] is False
+    assert "response_format" not in seen["body"]
+    instructions=seen["body"]["messages"][0]["content"]
+    assert '"'+payload_key+'"' in instructions and '"required"' in instructions
 
 
 def test_claude_draft_uses_tool_schema(monkeypatch):

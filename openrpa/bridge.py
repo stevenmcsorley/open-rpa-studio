@@ -10,6 +10,7 @@ import importlib.util
 import shutil
 import subprocess
 import atexit
+import time
 from pathlib import Path
 from typing import Any
 from .engine import RunOptions, run_project
@@ -814,18 +815,49 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             ai_api_profiles=[{key:profile[key] for key in ("id","name","baseUrl","authType")}
                 for profile in saved_api_profiles]
             execution_model=str(params.get("executionModel","sequence"))
+            draft_id=str(params.get("draftId",""))
+            def ai_event(event_type:str,phase:str,metadata:dict[str,Any]|None=None)->None:
+                send({"event":"ai.draft.event","data":{"requestId":draft_id,"type":event_type,
+                    "timestamp":int(time.time()*1000),"phase":phase,"metadata":metadata or {}}})
+            ai_event("request.preparing","preparing",{"provider":provider,"model":model[:200],"executionModel":execution_model})
             history.audit("ai.draft",{"provider":provider,"model":model[:200],"workflowModel":execution_model,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})
             compatibility_warnings=[]
+            capability_results=[]
+            streamed_chars=0
             def record_ai_compatibility_fallback(message: str) -> None:
                 compatibility_warnings.append(message)
                 history.audit("ai.structured_output_fallback",{"provider":provider,"model":model[:200]})
+                ai_event("generation.fallback","generating",{"message":message})
+            def record_ai_stream_text(chunk:str)->None:
+                nonlocal streamed_chars
+                streamed_chars+=len(chunk)
+                ai_event("generation.output_received","generating",{"text":chunk[:4096],"chunkCharacters":len(chunk),"outputCharacters":streamed_chars})
+            def record_ai_activity(activity:dict[str,Any])->None:
+                activity_id=str(activity.get("id",""))[:128]
+                ai_event("workflow.activity_discovered","validating",{"activityId":activity_id,"activityType":str(activity.get("type",""))[:100]})
+                preview_workflow={"format":"openrpa.workflow","formatVersion":1,"name":"AI Draft Preview","variables":[],"arguments":[],"activities":[activity]}
+                unit_problems=validate_workflow(preview_workflow,set(params.get("workflows",["Main"])))
+                if unit_problems:
+                    ai_event("workflow.validation_failed","validating",{"activityId":activity_id,"activityType":str(activity.get("type",""))[:100],
+                        "problems":[{"code":str(item.get("code",""))[:100],"message":str(item.get("message",""))[:500]} for item in unit_problems[:20]]})
+                else:
+                    ai_event("workflow.activity_validated","validating",{"activityId":activity_id,"activityType":str(activity.get("type",""))[:100],"activity":activity})
+            def record_ai_response(status:int)->None:
+                if 200<=status<300:ai_event("provider.connected","connected",{"httpStatus":status,"streaming":True})
+            ai_event("provider.connecting","connecting",{"provider":provider})
+            ai_event("generation.started","generating",{"model":model[:200]})
             draft=ai_providers.draft(provider,model,params.get("prompt",""),types,params.get("baseUrl"),
                 params.get("credentialService"),params.get("credentialUsername"),execution_model,ai_cancel,
                 on_compatibility_fallback=record_ai_compatibility_fallback,
                 api_connections=ai_api_profiles,credential_mode=params.get("credentialMode","bearer"),
-                credential_header=params.get("credentialHeader","api-key"),activity_catalog=ACTIVITY_CATALOG)
+                credential_header=params.get("credentialHeader","api-key"),activity_catalog=ACTIVITY_CATALOG,
+                on_capabilities=lambda data:(capability_results.append(data),ai_event("model.capabilities_checked","generating",data)),
+                on_stream_text=record_ai_stream_text,on_activity=record_ai_activity,on_response=record_ai_response)
             if ai_cancel is not None and ai_cancel.is_set():
                 raise ai_providers.RequestCancelled("Provider request was cancelled")
+            capabilities=capability_results[-1] if capability_results else None
+            ai_event("generation.completed","parsing",{"outputMode":capabilities.get("outputMode") if capabilities else "provider-native","streamedCharacters":streamed_chars})
+            ai_event("workflow.parsing","validating")
             usage=draft.pop("_openrpa_usage",None) if isinstance(draft,dict) else None
             payload_key={"sequence":"activities","flowchart":"flowchart","state_machine":"stateMachine"}.get(execution_model)
             if payload_key is None:raise ValueError("AI workflow model must be sequence, flowchart, or state_machine")
@@ -855,13 +887,22 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             if execution_model!="sequence":workflow["executionModel"]=execution_model;workflow["flowchart" if execution_model=="flowchart" else "stateMachine"]=payload
             problems=validate_workflow(workflow,set(params.get("workflows",["Main"])))
             problems.extend(_api_request_connection_problems(workflow,saved_api_profiles))
+            if problems:
+                ai_event("workflow.validation_failed","validation",{"problemCount":len(problems),"problems":[{"code":str(item.get("code",""))[:100],"message":str(item.get("message",""))[:500],"activityId":str(item.get("activityId",""))[:128]} for item in problems[:50]]})
+            else:
+                ai_event("workflow.completed","complete",{"activityCount":len(activities) if isinstance(activities,list) else sum(len(items) for items in activity_lists),"valid":True})
             if isinstance(usage,dict):
                 history.audit("ai.draft.usage",{"provider":provider,"model":model[:200],**usage})
-            result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider,"warnings":compatibility_warnings,"usage":usage}
+            result={"explanation":str(draft.get("explanation",""))[:4000],"workflow":workflow,"valid":not problems,"problems":problems,"model":model,"provider":provider,"warnings":compatibility_warnings,"usage":usage,"capabilities":capabilities}
         else:
             raise ValueError(f"Unknown bridge method: {method}")
         send({"id": request.get("id"), "result": result})
     except Exception as exc:
+        if request.get("method")=="ai.draft":
+            draft_id=request.get("params",{}).get("draftId")
+            if isinstance(draft_id,str) and draft_id:
+                event_type="draft.cancelled" if isinstance(exc,ai_providers.RequestCancelled) else "draft.failed"
+                send({"event":"ai.draft.event","data":{"requestId":draft_id,"type":event_type,"timestamp":int(time.time()*1000),"phase":"cancelled" if event_type=="draft.cancelled" else "failed","metadata":{"message":str(exc)[:1000],"errorType":type(exc).__name__}}})
         send({"id": request.get("id"), "error": {"message": str(exc), "type": type(exc).__name__}})
 
 

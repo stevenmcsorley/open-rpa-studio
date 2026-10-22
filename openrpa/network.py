@@ -308,10 +308,99 @@ def _decode_response(raw: bytes, max_bytes: int) -> dict[str, object]:
             "redirectBlocked": 300 <= status < 400}
 
 
+class _SocketReader:
+    """Bounded, cancellable response reader for incremental HTTP/SSE bodies."""
+    def __init__(self,sock:socket.socket,cancel:threading.Event,deadline:float,max_bytes:int,on_chunk):
+        self.sock=sock;self.cancel=cancel;self.deadline=deadline;self.max_bytes=max_bytes
+        self.on_chunk=on_chunk;self.buffer=bytearray();self.total=0;self.body=bytearray()
+
+    def _more(self)->bool:
+        while True:
+            _wait_socket(self.sock,read=True,write=False,cancel=self.cancel,deadline=self.deadline)
+            try:chunk=self.sock.recv(65536)
+            except (BlockingIOError,ssl.SSLWantReadError):continue
+            except ssl.SSLWantWriteError:
+                _wait_socket(self.sock,read=False,write=True,cancel=self.cancel,deadline=self.deadline);continue
+            if not chunk:return False
+            self.buffer.extend(chunk);return True
+
+    def line(self,limit:int=65536)->bytes:
+        while True:
+            index=self.buffer.find(b"\r\n")
+            if index>=0:
+                line=bytes(self.buffer[:index]);del self.buffer[:index+2];return line
+            if len(self.buffer)>limit:raise EgressDenied("Provider returned an oversized HTTP line")
+            if not self._more():raise EgressDenied("Provider returned a truncated HTTP response")
+
+    def exact(self,count:int)->bytes:
+        if count<0 or count>self.max_bytes+65536:raise EgressDenied("Provider response exceeded the configured size limit")
+        while len(self.buffer)<count:
+            if not self._more():raise EgressDenied("Provider returned a truncated HTTP response")
+        value=bytes(self.buffer[:count]);del self.buffer[:count];return value
+
+    def emit(self,value:bytes)->None:
+        if not value:return
+        self.total+=len(value)
+        if self.total>self.max_bytes:raise EgressDenied("Provider response exceeded the configured size limit")
+        self.body.extend(value);self.on_chunk(value)
+
+    def to_close(self)->None:
+        while True:
+            if self.buffer:self.emit(bytes(self.buffer));self.buffer.clear()
+            _wait_socket(self.sock,read=True,write=False,cancel=self.cancel,deadline=self.deadline)
+            try:chunk=self.sock.recv(65536)
+            except (BlockingIOError,ssl.SSLWantReadError):continue
+            except ssl.SSLWantWriteError:
+                _wait_socket(self.sock,read=False,write=True,cancel=self.cancel,deadline=self.deadline);continue
+            if not chunk:return
+            self.emit(chunk)
+
+
+def _decode_stream_response(sock:socket.socket,cancel:threading.Event,deadline:float,max_bytes:int,on_chunk,on_headers=None):
+    reader=_SocketReader(sock,cancel,deadline,max_bytes,on_chunk)
+    status_line=reader.line().decode("iso-8859-1",errors="replace")
+    try:
+        version,status_text,*_=status_line.split(" ",2);status=int(status_text)
+        if not version.startswith("HTTP/"):raise ValueError
+    except (ValueError,IndexError):raise EgressDenied("Provider returned an invalid HTTP status line") from None
+    response_headers={}
+    header_bytes=0
+    while True:
+        line=reader.line();header_bytes+=len(line)+2
+        if header_bytes>65536:raise EgressDenied("Provider returned oversized HTTP headers")
+        if not line:break
+        if b":" not in line:continue
+        name,value=line.split(b":",1);key=name.decode("ascii","ignore").strip().lower()
+        if key:response_headers[key]=value.decode("iso-8859-1").strip()
+    if on_headers:on_headers(status,response_headers)
+    transfer=response_headers.get("transfer-encoding","").lower()
+    if "chunked" in transfer:
+        while True:
+            size_line=reader.line(8192).split(b";",1)[0].strip()
+            try:size=int(size_line,16)
+            except ValueError:raise EgressDenied("Provider returned an invalid chunked response") from None
+            if size==0:
+                while reader.line():pass
+                break
+            if reader.total+size>max_bytes:raise EgressDenied("Provider response exceeded the configured size limit")
+            reader.emit(reader.exact(size))
+            if reader.exact(2)!=b"\r\n":raise EgressDenied("Provider returned a malformed chunked response")
+    elif "content-length" in response_headers:
+        try:length=int(response_headers["content-length"])
+        except ValueError:raise EgressDenied("Provider returned invalid Content-Length") from None
+        if length<0 or length>max_bytes:raise EgressDenied("Provider response exceeded the configured size limit")
+        remaining=length
+        while remaining:
+            chunk=reader.exact(min(65536,remaining));reader.emit(chunk);remaining-=len(chunk)
+    else:reader.to_close()
+    return {"status":status,"headers":response_headers,"body":bytes(reader.body).decode("utf-8",errors="replace"),
+        "redirectBlocked":300<=status<400}
+
+
 def _request_cancellable(scheme: str, host: str, port: int, address: str, target: str,
                          method: str, headers: dict[str, str], body: bytes | None,
                          timeout: float, max_bytes: int,
-                         cancel: threading.Event) -> dict[str, object]:
+                         cancel: threading.Event,on_chunk=None,on_headers=None) -> dict[str, object]:
     timeout = min(max(float(timeout), 1.0), 180.0)
     max_bytes = min(max(int(max_bytes), 1), 5_000_000)
     if not method or any(character in method for character in " \r\n\t"):
@@ -349,6 +438,7 @@ def _request_cancellable(scheme: str, host: str, port: int, address: str, target
         head = [f"{method.upper()} {target} HTTP/1.1"]
         head.extend(f"{key}: {value}" for key, value in request_headers.items())
         _send_cancellable(sock, ("\r\n".join(head) + "\r\n\r\n").encode("iso-8859-1") + payload, cancel, deadline)
+        if on_chunk is not None:return _decode_stream_response(sock,cancel,deadline,max_bytes,on_chunk,on_headers)
         raw = _receive_cancellable(sock, cancel, deadline, max_bytes)
         return _decode_response(raw, max_bytes)
     except RequestCancelled:
@@ -362,6 +452,28 @@ def _request_cancellable(scheme: str, host: str, port: int, address: str, target
             sock.close()
         except OSError:
             pass
+
+
+def request_stream(url:str,method:str,headers:dict[str,str],body:bytes|None,timeout:float,max_bytes:int,
+                  on_chunk,cancel:threading.Event|None=None,on_headers=None)->dict[str,object]:
+    """Make a public pinned request and deliver decoded response chunks as received."""
+    scheme,port,host,target=_target(url);address=_resolve_public(host,port)
+    cancellation=cancel or threading.Event()
+    return _request_cancellable(scheme,host,port,address,target,method,headers,body,timeout,max_bytes,cancellation,on_chunk,on_headers)
+
+
+def request_loopback_stream(url:str,method:str,headers:dict[str,str],body:bytes|None,timeout:float,max_bytes:int,
+                            on_chunk,cancel:threading.Event|None=None,on_headers=None)->dict[str,object]:
+    """Stream only from an explicitly configured loopback model endpoint."""
+    try:
+        parsed=urlsplit(url);host=(parsed.hostname or "").lower()
+        if (parsed.scheme!="http" or host not in {"127.0.0.1","::1","localhost"}
+                or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
+            raise EgressDenied("Local model requests must use plain HTTP on a loopback host")
+        port=parsed.port or 80;target=parsed.path or "/"
+    except ValueError as exc:raise EgressDenied("Invalid local model URL") from exc
+    cancellation=cancel or threading.Event()
+    return _request_cancellable("http",host,port,host,target,method,headers,body,timeout,max_bytes,cancellation,on_chunk,on_headers)
 
 
 def assert_public_url(url: str) -> None:

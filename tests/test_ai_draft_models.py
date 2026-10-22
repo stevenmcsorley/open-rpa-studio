@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from openrpa import bridge
+from openrpa.engine import RunOptions
 
 
 @pytest.mark.parametrize("execution_model,draft,expected",[
@@ -114,17 +115,13 @@ def test_bridge_forwards_custom_auth_header_to_model_catalog_and_drafting(monkey
     assert "vault-secret" not in str(replies)
 
 
-def test_bridge_end_to_end_local_provider_fallback_is_validated_and_disclosed(monkeypatch):
+def test_bridge_end_to_end_unknown_local_format_uses_schema_guidance_and_validates(monkeypatch):
     replies=[];audits=[];requests=[]
     payload={"explanation":"Write a log entry.","activities":[{"id":"message","type":"log","message":"hello"}]}
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body=json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))))
             requests.append(body)
-            if "response_format" in body:
-                self.send_response(400);self.send_header("Content-Type","application/json");self.end_headers()
-                self.wfile.write(b'{"error":{"message":"response_format json_schema is not supported"}}')
-                return
             encoded=json.dumps({"choices":[{"message":{"content":json.dumps(payload)}}]}).encode()
             self.send_response(200);self.send_header("Content-Type","application/json");self.send_header("Content-Length",str(len(encoded)));self.end_headers()
             self.wfile.write(encoded)
@@ -139,5 +136,38 @@ def test_bridge_end_to_end_local_provider_fallback_is_validated_and_disclosed(mo
         server.shutdown();thread.join(timeout=2);server.server_close()
     result=replies[-1]["result"]
     assert result["valid"] is True and result["workflow"]["activities"]==payload["activities"]
-    assert len(result["warnings"])==1 and len(requests)==2
-    assert ("ai.structured_output_fallback",{"provider":"local_openai_compatible","model":"test-model"}) in audits
+    assert result["warnings"]==[] and len(requests)==1
+    assert result["capabilities"]["outputMode"]=="schema_instructions"
+    assert "response_format" not in requests[0]
+    assert any(frame.get("event")=="ai.draft.event" for frame in replies)
+
+
+def test_streamed_ai_generation_progresses_through_preview_validation_acceptance_and_execution(tmp_path,monkeypatch):
+    frames=[];monkeypatch.setattr(bridge,"send",frames.append)
+    monkeypatch.setattr(bridge.history,"audit",lambda *_args,**_kwargs:None)
+    monkeypatch.setattr(bridge.api_connections,"list_profiles",lambda *_args,**_kwargs:[])
+    monkeypatch.setattr(bridge.ai_providers,"_credential",lambda *_args:"test-key")
+    payload={"explanation":"Three safe log steps.","activities":[
+        {"id":"one","type":"log","message":"one"},{"id":"two","type":"log","message":"two"},{"id":"three","type":"log","message":"three"}]}
+    content=json.dumps(payload,separators=(",",":"))
+    def fake_call(_url,_local,method="GET",**kwargs):
+        assert kwargs["stream"] is True
+        kwargs["on_headers"](200,{"content-type":"text/event-stream"})
+        wire=("data: "+json.dumps({"choices":[{"delta":{"content":content}}]})+"\n\n"
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'"data: [DONE]\n\n").encode()
+        for index in range(0,len(wire),19):kwargs["on_chunk"](wire[index:index+19])
+        return {"status":200,"body":""}
+    monkeypatch.setattr(bridge.ai_providers,"_call",fake_call)
+    bridge.handle({"id":101,"method":"ai.draft","params":{"draftId":"e2e-request","provider":"openai","model":"test-model",
+        "credentialService":"test","credentialUsername":"key","prompt":"Create three log activities","workflows":["Main"],"executionModel":"sequence"}})
+    result=next(frame["result"] for frame in reversed(frames) if frame.get("id")==101)
+    event_types=[frame["data"]["type"] for frame in frames if frame.get("event")=="ai.draft.event"]
+    assert result["valid"] is True
+    assert event_types.count("workflow.activity_validated")==3
+    assert {"provider.connected","generation.output_received","generation.completed","workflow.completed"}<=set(event_types)
+    workflow_path=tmp_path/"workflows"/"main.workflow.json";workflow_path.parent.mkdir()
+    workflow_path.write_text(json.dumps(result["workflow"]),encoding="utf-8")
+    project={"format":"openrpa.project","formatVersion":1,"name":"AI acceptance","main":"AI Draft","workflows":{"AI Draft":"workflows/main.workflow.json"}}
+    executed=bridge.run_project(project,tmp_path,"AI Draft",options=RunOptions())
+    assert executed.status=="succeeded"
+    assert [entry["message"] for entry in executed.logs if entry.get("event")=="log"]==["one","two","three"]

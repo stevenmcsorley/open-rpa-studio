@@ -49,7 +49,10 @@ impl Bridge {
         std::thread::Builder::new().name("openrpa-bridge-reader".into()).spawn(move || {
             for line in BufReader::new(stdout).lines().flatten() {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if value.get("event").and_then(Value::as_str) == Some("run.event") { let _ = handle.emit("run-event", value["data"].clone()); continue; }
+                    if let Some(event) = value.get("event").and_then(Value::as_str) {
+                        let channel = match event { "run.event" => Some("run-event"), "ai.draft.event" => Some("ai-draft-event"), _ => None };
+                        if let Some(channel) = channel { let _ = handle.emit(channel, value["data"].clone()); continue; }
+                    }
                     if let Some(id) = value.get("id").and_then(|v| v.as_u64()) { if let Some(tx) = p.lock().unwrap().remove(&id) { let _ = tx.send(value); } }
                 }
             }

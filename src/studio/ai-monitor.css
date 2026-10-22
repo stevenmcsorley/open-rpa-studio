@@ -1,0 +1,43 @@
+.ai-modal{width:min(1120px,96vw);max-height:94vh}
+.ai-activity-monitor{background:#12161b;border:1px solid #343c46;border-radius:8px;margin:12px 0;overflow:hidden;color:#dfe4ea}
+.ai-activity-monitor>header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #2c333c;background:#171c22}
+.ai-activity-monitor>header>div{display:flex;align-items:center;gap:10px}
+.ai-activity-monitor>header strong,.ai-activity-monitor h4{font-size:9px;letter-spacing:.9px;color:#9daa98}
+.ai-activity-monitor>header span{font-size:11px;font-weight:650;color:#e3e8ed}
+.ai-activity-monitor>header small{font-size:10px;color:#929ba6}
+.ai-monitor-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:#2b313a;border-bottom:1px solid #2b313a}
+.ai-monitor-stats>div{background:#15191f;padding:10px 12px;min-width:0}
+.ai-monitor-stats small{display:block;font-size:8px;color:#858e9b;letter-spacing:.6px;margin-bottom:4px}
+.ai-monitor-stats strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:600;color:#e0e5eb}
+.ai-monitor-indeterminate{height:32px;display:flex;align-items:center;gap:9px;padding:0 13px;font-size:9px;color:#a3acb7;border-bottom:1px solid #292f37}
+.ai-monitor-indeterminate span{width:14px;height:14px;border:2px solid #485347;border-top-color:#b4d69d;border-radius:50%;animation:ai-monitor-spin .85s linear infinite}
+@keyframes ai-monitor-spin{to{transform:rotate(360deg)}}
+.ai-monitor-layout{display:grid;grid-template-columns:minmax(240px,.78fr) minmax(330px,1.22fr);min-height:190px;max-height:360px}
+.ai-monitor-layout>div{padding:12px 14px;overflow:auto}
+.ai-monitor-layout>div+div{border-left:1px solid #2c333c}
+.ai-monitor-layout h4{margin:0 0 9px;display:flex;justify-content:space-between}
+.ai-monitor-layout h4 small{font-size:8px;letter-spacing:0;color:#828c97;font-weight:400}
+.ai-event-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.ai-event-list li{position:relative;padding:6px 8px 6px 12px;border-left:2px solid #434b56;background:#171c22;border-radius:0 4px 4px 0;font-size:9px;color:#cbd2da}
+.ai-event-list li.event-complete{border-color:#80b36c}
+.ai-event-list li.event-failed,.ai-event-list li.event-cancelled{border-color:#cc7772}
+.ai-event-list li time{float:right;font-size:8px;color:#808a96}
+.ai-event-list li small{display:block;margin-top:4px;color:#d5a890;line-height:1.4}
+.ai-monitor-empty{margin:0;padding:12px;border:1px dashed #3b424c;border-radius:5px;color:#8f99a4;font-size:9px;line-height:1.5}
+.ai-live-sequence{display:flex;flex-direction:column;align-items:stretch}
+.ai-live-node-wrap{display:flex;flex-direction:column;align-items:center}
+.ai-live-node{position:relative;display:grid;grid-template-columns:24px 1fr 16px;align-items:center;gap:7px;width:min(100%,440px);padding:8px 10px;background:#1c2421;border:1px solid #52634e;border-radius:6px}
+.ai-live-node>div{min-width:0}
+.ai-live-node>div strong,.ai-live-node>div small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-live-node>div strong{font-size:10px;color:#e0eadc}
+.ai-live-node>div small{font:8px 'DM Mono',monospace;color:#929e90;margin-top:3px}
+.ai-live-node>svg{color:#9fc48f}
+.ai-node-index{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:#344331;color:#c2ddb5;font-size:9px}
+.ai-live-node>details{grid-column:1/-1;border-top:1px solid #344034;padding-top:6px;font-size:8px;color:#a8b3a2}
+.ai-live-node>details pre,.ai-output-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;color:#c7d0c1;font:8px 'DM Mono',monospace}
+.ai-live-node-wrap>i{display:block;height:14px;width:1px;background:#667560}
+.ai-output-details{margin-top:10px;padding:8px;background:#171c22;border-radius:5px;color:#a4adb7;font-size:9px}
+.ai-output-details pre{color:#b9c2cc;max-height:140px}
+.ai-modal>footer{position:sticky;bottom:-18px;background:#191d24;padding-bottom:2px;z-index:1}
+.ai-modal>label textarea{min-height:95px}
+@media(max-width:760px){.ai-modal{width:96vw;max-height:96vh;padding:13px}.ai-monitor-layout{grid-template-columns:1fr;max-height:none}.ai-monitor-layout>div+div{border-left:0;border-top:1px solid #2c333c}.ai-monitor-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.ai-activity-monitor>header{align-items:flex-start;gap:8px;flex-direction:column}}
