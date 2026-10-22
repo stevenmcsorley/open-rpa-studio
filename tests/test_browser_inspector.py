@@ -25,6 +25,12 @@ def test_browser_inspector_builds_accessible_editable_action_descriptors():
     ]
 
 
+def test_browser_inspector_offers_select_many_for_accessible_aria_listbox():
+    controls=build_control_descriptors([{"role":"listbox","name":"Topics","tag":"div","ariaMultiselectable":True,"matchCount":1}])
+    assert controls[0]["actions"][0]=="select_many"
+    assert controls[0]["ariaMultiselectable"] is True
+
+
 def test_browser_inspector_caps_candidates_to_three_hundred():
     controls=build_control_descriptors([{"role":"button","name":f"Button {i}","tag":"button"} for i in range(500)])
     assert len(controls)==300
@@ -36,16 +42,20 @@ def test_live_browser_multiple_select_is_discovered_verified_and_value_free():
         try:browser=runtime.chromium.launch(headless=True)
         except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
         page=browser.new_page()
-        page.set_content('<label for="categories">Categories</label><select id="categories" multiple><option value="books">Books</option><option value="music">Music</option><option value="synths">Synths</option></select><label for="single">Country</label><select id="single"><option value="gb">UK</option><option value="us">US</option></select>')
+        page.set_content('''<label for="categories">Categories</label><select id="categories" multiple><option value="books">Books</option><option value="music">Music</option><option value="synths">Synths</option></select><label for="single">Country</label><select id="single"><option value="gb">UK</option><option value="us">US</option></select><div role="listbox" aria-label="Topics" aria-multiselectable="true"><div role="option" aria-selected="false">Research</div><div role="option" aria-selected="false">Engineering</div></div><script>document.querySelectorAll('[role=option]').forEach(option=>option.addEventListener('click',()=>option.setAttribute('aria-selected',option.getAttribute('aria-selected')==='true'?'false':'true')))</script>''')
         inspector=BrowserInspector();inspector.page=page
         controls={item["name"]:item for item in inspector.controls()["controls"]}
         assert "select_many" in controls["Categories"]["actions"] and controls["Categories"]["multiple"] is True
+        assert "select_many" in controls["Topics"]["actions"] and controls["Topics"]["ariaMultiselectable"] is True
         assert "select_many" not in controls["Country"]["actions"]
         result=inspector.act("select_many",selector_kind="role",selector="listbox:Categories",values=["books","synths"])
         assert result["selectedCount"]==2
         assert page.locator("#categories option:checked").evaluate_all("items => items.map(item => item.value)")==["books","synths"]
+        topics=inspector.act("select_many",selector_kind="role",selector="listbox:Topics",values=["Research","Engineering"])
+        assert topics["selectedCount"]==2
+        assert page.get_by_role("option").evaluate_all("items => items.filter(item=>item.getAttribute('aria-selected')==='true').map(item=>item.innerText)")==["Research","Engineering"]
         assert "books" not in str(result) and "synths" not in str(result)
-        with pytest.raises(RuntimeError,match="multiple enabled"):
+        with pytest.raises(RuntimeError,match="accessible ARIA listbox"):
             inspector.act("select_many",selector_kind="label",selector="Country",values=["us"])
         with pytest.raises(ValueError,match="unique"):
             inspector.act("select_many",selector_kind="label",selector="Categories",values=["books","books"])
@@ -72,7 +82,7 @@ def test_browser_select_many_activity_executes_and_validates_returned_values():
         except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
         page=browser.new_page()
         page.set_content('<label for="categories">Categories</label><select id="categories" multiple><option value="books">Books</option><option value="music">Music</option><option value="synths">Synths</option></select><label for="country">Country</label><select id="country"><option value="gb">UK</option></select>')
-        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine._secret_values=set();engine.options=RunOptions()
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine._secret_values=set();engine.options=RunOptions();engine._run_started=time.monotonic();engine._max_run_seconds=300
         activity={"id":"select","type":"browser_select_many","selectorKind":"label","selector":"Categories","values":["{{ requested }}","synths"],"result":"chosen"}
         values={"requested":"books"};logs=[]
         engine._browser_activity(activity,values,logs)
@@ -81,8 +91,33 @@ def test_browser_select_many_activity_executes_and_validates_returned_values():
         assert values["chosen"]==["books","synths"]
         assert page.locator("#categories option:checked").evaluate_all("items => items.map(item => item.value)")==["books","synths"]
         assert logs[-1]=={"event":"browser-select-many-complete","activityId":"select","selectedCount":2}
-        with pytest.raises(Exception,match="native HTML select element with multiple enabled"):
+        with pytest.raises(Exception,match="accessible ARIA listbox"):
             engine._browser_activity({**activity,"selector":"Country","selectorKind":"label","values":["gb"]}, {"requested":"books"})
+        browser.close()
+
+
+def test_browser_select_many_activity_supports_custom_aria_listbox_and_replaces_selection():
+    playwright=pytest.importorskip("playwright.sync_api")
+    from openrpa.engine import RunOptions,WorkflowEngine
+    with playwright.sync_playwright() as runtime:
+        try:browser=runtime.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Chromium runtime is unavailable: {exc}")
+        page=browser.new_page()
+        page.set_content('''<div role="listbox" aria-label="Topics" aria-multiselectable="true">
+          <div role="option" aria-selected="true">Books</div>
+          <div role="option" aria-selected="false">Music</div>
+          <div role="option" aria-selected="false" aria-label="Synths">Synth collection</div>
+        </div><script>
+          document.querySelectorAll('[role=option]').forEach(option=>option.addEventListener('click',()=>option.setAttribute('aria-selected',option.getAttribute('aria-selected')==='true'?'false':'true')));
+        </script>''')
+        engine=object.__new__(WorkflowEngine);engine._browser_page=page;engine._secret_values=set();engine.options=RunOptions();engine._run_started=time.monotonic();engine._max_run_seconds=300
+        activity={"id":"select-aria","type":"browser_select_many","selectorKind":"role","selector":"listbox:Topics","values":["Music","Synths"],"result":"chosen"}
+        values={};logs=[]
+        engine._browser_activity(activity,values,logs)
+        selected=page.get_by_role("option").evaluate_all("items => items.filter(item=>item.getAttribute('aria-selected')==='true').map(item=>item.getAttribute('aria-label')||item.innerText)")
+        assert set(selected)=={"Music","Synths"}
+        assert set(values["chosen"])=={"Music","Synths"}
+        assert logs[-1]=={"event":"browser-select-many-complete","activityId":"select-aria","selectedCount":2}
         browser.close()
 
 

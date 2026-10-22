@@ -1,3 +1,7 @@
+## 0.1.119
+- Browser Select Multiple now supports custom accessible ARIA listboxes in addition to native HTML multiple-select controls. Custom listboxes must expose `role=listbox`, `aria-multiselectable=true`, and unique accessible option names. The engine replaces the selected set, verifies it, limits inspection to 500 options, checks cancellation during custom selection, and returns selected names without logging them. The live browser inspector detects and configures the same control type.
+- Verification: focused browser inspection suite 57 passed; full Python suite 525 passed; frontend suite 198 passed; production frontend build, frozen MCP acceptance, and Windows x64 NSIS installer build passed. Installer: `release/Open-RPA-Studio-Setup-0.1.119-x64.exe` (SHA-256 `30e15c73a9800e9713f58d2ce984081d9e27d80e35e3671321d088e3172f6616`). CI verification pending.
+
 ## 0.1.118
 - OpenAPI import now substitutes valid server-variable defaults using the operation, path-item, then document precedence. Missing defaults, invalid enum choices, and resolved URLs incompatible with saved API connections are warned and left unset so authors can configure the base URL manually.
 - Verification: frontend suite 198 passed; production Vite build, frozen MCP acceptance, and Windows x64 NSIS installer build passed locally. Installer: `release/Open-RPA-Studio-Setup-0.1.118-x64.exe` (73,058,428 bytes; SHA-256 `c4e4051b3b08ca02e4fd58d4b603f6b1eebcd977d88138832e43d94375cd23aa`).

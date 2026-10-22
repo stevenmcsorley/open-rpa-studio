@@ -2056,10 +2056,9 @@ class WorkflowEngine:
             if len(set(values))!=len(values):raise WorkflowError("Select Multiple option values must be unique",a["id"],"browser-option-values-duplicate")
             locator=self._locator(a,logs)
             try:
-                is_multiple=locator.evaluate("el => el.tagName.toLowerCase() === 'select' && el.multiple")
-                if not is_multiple:raise WorkflowError("Select Multiple requires a native HTML select element with multiple enabled",a["id"],"browser-select-not-multiple")
-                selected=locator.select_option(value=values,timeout=timeout)
-                if set(selected)!=set(values):raise WorkflowError("Browser did not retain all requested selected values",a["id"],"browser-select-many-verification")
+                from .browser_selection import select_multiple_options
+                selected=select_multiple_options(locator,values,int(timeout*1000),self._check_cancel)
+            except RunCancelled:raise
             except WorkflowError:raise
             except Exception as exc:raise WorkflowError(f"Could not select multiple browser options ({type(exc).__name__}): {str(exc)[:500]}",a["id"],"browser-select-many") from exc
             v[a.get("result","selectedValues")]=selected

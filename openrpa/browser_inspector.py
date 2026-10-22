@@ -33,7 +33,7 @@ def build_control_descriptors(raw: list[dict[str,Any]]) -> list[dict[str,Any]]:
         if role=="checkbox": actions.insert(0,"check");actions.insert(1,"uncheck")
         elif role=="radio": actions.insert(0,"check")
         elif role=="combobox" and tag=="select": actions.insert(0,"select")
-        elif role=="listbox" and tag=="select" and item.get("multiple") is True: actions.insert(0,"select_many")
+        elif role=="listbox" and (item.get("multiple") is True or item.get("ariaMultiselectable") is True): actions.insert(0,"select_many")
         elif role in {"button","link","switch","menuitem","tab"} or tag in {"button","a"}:
             actions.insert(0,"click")
             actions.insert(1,"hover")
@@ -48,6 +48,7 @@ def build_control_descriptors(raw: list[dict[str,Any]]) -> list[dict[str,Any]]:
             "matchCount":max(0,min(match_count,10_000)),"actions":actions,
         }
         if item.get("multiple") is True:descriptor["multiple"]=True
+        if item.get("ariaMultiselectable") is True:descriptor["ariaMultiselectable"]=True
         controls.append(descriptor)
     return controls
 
@@ -207,10 +208,9 @@ class BrowserInspector:
             elif action=="select_many":
                 if not isinstance(values,list) or not 1<=len(values)<=100 or any(not isinstance(item,str) or not item or len(item)>1_000 for item in values):raise ValueError("select_many values must contain 1–100 non-empty strings, each no longer than 1,000 characters")
                 if len(set(values))!=len(values):raise ValueError("select_many values must be unique")
-                if not locator.evaluate("el => el.tagName.toLowerCase() === 'select' && el.multiple"):
-                    raise RuntimeError("Browser select_many requires a native HTML select element with multiple enabled")
-                selected=locator.select_option(value=values,timeout=timeout)
-                if set(selected)!=set(values):raise RuntimeError("Browser did not retain all requested selected values")
+                from .browser_selection import select_multiple_options
+                try:selected=select_multiple_options(locator,values,timeout)
+                except Exception as exc:raise RuntimeError(f"Browser select_many could not verify selection ({type(exc).__name__}): {str(exc)[:400]}") from exc
             elif action=="check":locator.check(timeout=timeout)
             elif action=="uncheck":locator.uncheck(timeout=timeout)
             elif action=="press":
@@ -325,7 +325,7 @@ _CONTROL_SNAPSHOT=r"""() => {
     const name = (el.getAttribute('aria-label') || labelled || el.getAttribute('alt') || el.innerText || el.value || el.textContent || el.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0,180);
     const placeholder = (el.getAttribute('placeholder') || '').trim().slice(0,180);
     const testId = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || '';
-    return {role,name,placeholder,testId,tag,inputType:type,multiple:el.tagName.toLowerCase()==='select'&&el.multiple};
+  return {role,name,placeholder,testId,tag,inputType:type,multiple:el.tagName.toLowerCase()==='select'&&el.multiple,ariaMultiselectable:el.getAttribute('role')==='listbox'&&el.getAttribute('aria-multiselectable')==='true'};
   });
   const byRole = new Map(), byTestId = new Map(), byPlaceholder = new Map();
   for (const entry of entries) if (entry.role && entry.name) { const key = entry.role + '\0' + entry.name; byRole.set(key,(byRole.get(key)||0)+1); }
