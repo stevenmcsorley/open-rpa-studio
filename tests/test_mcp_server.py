@@ -304,6 +304,22 @@ def test_api_connections_are_discoverable_and_credentials_are_planned_and_gated(
     assert denied["isError"] is True and "--allow-credentials" in denied["content"][0]["text"]
 
 
+def test_mcp_lists_credential_references_only_when_credential_grant_is_enabled(tmp_path,monkeypatch):
+    from openrpa import credentials
+    make_project(tmp_path)
+    denied=ProjectMCPServer(str(tmp_path),allow_credentials=False)
+    assert "openrpa_list_credentials" not in {tool["name"] for tool in denied._tools()}
+    class Vault:
+        def get_password(self,service,username):
+            return "secret-value"
+    monkeypatch.setattr(credentials,"get_safe_keyring",lambda:Vault())
+    monkeypatch.setattr(credentials,"list_credentials",lambda:[{"label":"Publisher login","service":"site","username":"editor"}])
+    allowed=ProjectMCPServer(str(tmp_path),allow_credentials=True)
+    result=call(allowed,"openrpa_list_credentials")["structuredContent"]["credentials"]
+    assert result==[{"label":"Publisher login","service":"site","username":"editor","stored":True}]
+    assert "secret-value" not in str(result)
+
+
 def test_mcp_activity_catalog_is_native_and_labels_required_permissions(tmp_path):
     from openrpa.activity_catalog import ACTIVITY_CATALOG
 
@@ -422,6 +438,21 @@ def test_create_workflow_is_project_hash_guarded_and_validates_bindings(tmp_path
     assert call(server, "openrpa_list_workflows")["structuredContent"]["workflows"][-1]["name"] == "Shared Helper"
 
 
+def test_mcp_delete_workflow_is_guarded_and_retains_recovery_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
+    make_project(tmp_path)
+    server=ProjectMCPServer(str(tmp_path),allow_edit=True,allow_destructive=True)
+    info=call(server,"openrpa_project_info")["structuredContent"]
+    payload={"format":"openrpa.workflow","formatVersion":1,"name":"Temporary","variables":[],"arguments":[],"activities":[{"id":"log","type":"log","level":"info","message":"safe"}]}
+    created=call(server,"openrpa_create_workflow",{"name":"Temporary","expectedProjectSha256":info["projectSha256"],"workflow":payload})["structuredContent"]
+    deletion=call(server,"openrpa_delete_workflow",{"name":"Temporary","expectedProjectSha256":created["projectSha256"],"expectedSha256":created["workflowSha256"]})
+    assert deletion["structuredContent"]["deleted"] is True
+    assert deletion["structuredContent"]["workflowFileRetained"] is True
+    assert "Temporary" not in call(server,"openrpa_project_info")["structuredContent"]["workflowNames"]
+    assert (tmp_path/"workflows/temporary.workflow.json").exists()
+    main=call(server,"openrpa_read_workflow",{"name":"Main"})["structuredContent"]
+    rejected=call(server,"openrpa_delete_workflow",{"name":"Main","expectedProjectSha256":deletion["structuredContent"]["projectSha256"],"expectedSha256":main["sha256"]})
+    assert rejected["isError"] is True and "Main workflow cannot be deleted" in rejected["content"][0]["text"]
 def test_create_workflow_rejects_unresolved_invocations_without_writing(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENRPA_DATA_DIR", str(tmp_path / "data"))
     make_project(tmp_path)

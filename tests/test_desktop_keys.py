@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from openrpa.desktop_keys import normalize_key, recordable_key_from_event, send_key
+from openrpa.desktop_keys import normalize_key, recordable_key_from_event, recordable_text_from_event, send_key
 from openrpa.model import validate_workflow
 
 
@@ -41,6 +41,11 @@ def test_sends_only_the_normalized_key_or_allowlisted_chord():
 def test_recorder_filters_printable_and_disallowed_keyboard_events(name,pressed,event_type,expected):
     event=SimpleNamespace(current_key=name,pressed_key=pressed,event_type=event_type)
     assert recordable_key_from_event(event)==expected
+
+
+@pytest.mark.parametrize(("name","pressed","expected"),[("h",["h"],"h"),("A",["Lshift","A"],"A"),("1",["Lshift","1"],"!"),("Space",["Space"]," "),("A",["Lcontrol","A"],None),("F4",["Lalt","F4"],None),("Return",["Return"],None)])
+def test_opt_in_text_capture_extracts_only_bounded_printable_characters(name,pressed,expected):
+    assert recordable_text_from_event(SimpleNamespace(current_key=name,pressed_key=pressed,event_type="key down"))==expected
 
 
 def test_disabling_keyboard_capture_disables_the_recordable_event_set(monkeypatch):

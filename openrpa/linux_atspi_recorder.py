@@ -49,7 +49,9 @@ class LinuxATSPIDesktopRecorder:
         return {"available": available, "reason": reason, "mode": "atspi-x11",
                 "keyboardCapture": available}
 
-    def start(self, window_title: str, process_id: int, record_keyboard: bool = False) -> dict[str, Any]:
+    def start(self, window_title: str, process_id: int, record_keyboard: bool = False, record_text: bool = False) -> dict[str, Any]:
+        if record_text:
+            raise RuntimeError("Typed-text recording is currently supported only by the Windows UIA recorder.")
         if not sys.platform.startswith("linux"):
             raise RuntimeError(self.status()["reason"])
         if not isinstance(window_title, str) or not window_title.strip() or len(window_title) > 512:

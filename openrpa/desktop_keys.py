@@ -84,3 +84,30 @@ def recordable_key_from_event(event: Any) -> str | None:
         except ValueError:
             return None
     return None
+
+
+def recordable_text_from_event(event: Any) -> str | None:
+    """Return one bounded printable ASCII character; never record modifiers/chords."""
+    if getattr(event,"event_type",None)!="key down":
+        return None
+    pressed=getattr(event,"pressed_key",())
+    if isinstance(pressed,str):pressed=(pressed,)
+    elif not isinstance(pressed,(list,tuple,set)):pressed=()
+    modifiers={str(value).casefold() for value in pressed}
+    if modifiers & {"lcontrol","rcontrol","control","ctrl","lmenu","rmenu","menu","alt"}:
+        return None
+    key=str(getattr(event,"current_key","") or "")
+    aliases={"Space":" ","space":" ","OemPeriod":".","Oemcomma":",","OemComma":",",
+             "OemMinus":"-","OemPlus":"=","OemQuestion":"/","Oem1":";","Oem7":"'",
+             "OemOpenBrackets":"[","Oem6":"]","Oem5":"\\","Oem3":"`"}
+    value=aliases.get(key)
+    if value is None and len(key)==1 and key.isascii() and (key.isalnum() or key in " .,;:/\\-_=[]'`"):
+        value=key
+    if value is None:
+        return None
+    shifted=bool(modifiers & {"lshift","rshift","shift"})
+    if value.isalpha():
+        value=value.upper() if shifted else value.lower()
+    elif shifted:
+        value={"1":"!","2":"@","3":"#","4":"$","5":"%","6":"^","7":"&","8":"*","9":"(","0":")","=":"+","-":"_","/":"?",";":":","'":'"',"[":"{","]":"}","`":"~",".":">",",":"<"}.get(value,value)
+    return value if len(value)==1 and value.isprintable() else None

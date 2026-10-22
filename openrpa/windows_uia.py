@@ -525,6 +525,37 @@ def key_activity_for_focused_control(window_title: str, process_id: int, key: st
             "key":canonical,"timeoutSeconds":10}
 
 
+def text_activity_for_focused_control(window_title: str, process_id: int, text: str) -> dict[str, Any] | None:
+    """Resolve typed text only to one focused, uniquely addressable, non-password edit."""
+    if not isinstance(text,str) or not 1<=len(text)<=200 or any(not char.isprintable() for char in text):
+        return None
+    window=_window(window_title,process_id)
+    focused=[]
+    try:
+        for control in window.descendants():
+            try:
+                if control.is_visible() and control.has_keyboard_focus():focused.append(control)
+            except Exception:
+                continue
+    except Exception:
+        return None
+    if len(focused)!=1:return None
+    control=focused[0]
+    if _is_password(control):return None
+    info=control.element_info
+    name=str(getattr(info,"name","") or "").strip()
+    automation_id=str(getattr(info,"automation_id","") or "").strip()
+    control_type=str(getattr(info,"control_type","") or "").strip()
+    if control_type not in {"Edit","Document"} or (not name and not automation_id):return None
+    try:
+        if len(_find_controls(window,_criteria(name,automation_id,control_type)))!=1:return None
+    except Exception:
+        return None
+    return {"type":"desktop_recorded_text","windowTitle":window_title,"processId":process_id,
+            "name":name,"automationId":automation_id,"controlType":control_type,
+            "value":text}
+
+
 def click(window_title: str, name: str | None, automation_id: str | None,
           control_type: str | None, process_id: int | None = None) -> None:
     _control(window_title, name, automation_id, control_type, process_id).click_input()

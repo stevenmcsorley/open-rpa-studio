@@ -17,6 +17,7 @@ def test_bridge_stores_api_key_in_approved_vault_and_audits_only_reference(monke
     monkeypatch.setattr(bridge,"send",replies.append)
     monkeypatch.setattr(bridge.history,"audit",lambda action,details:audits.append((action,details)))
     monkeypatch.setattr(credentials,"get_safe_keyring",lambda:Vault())
+    monkeypatch.setattr(credentials,"update_credential_index",lambda *_args,**_kwargs:None)
     bridge.handle({"id":1,"method":"credential.store","params":{"service":" openrpa-openai ","username":" production ","secret":"sk-test-sensitive"}})
 
     assert stored==[("openrpa-openai","production","sk-test-sensitive")]
@@ -60,3 +61,34 @@ def test_bridge_does_not_return_keyring_storage_exception_details(monkeypatch):
     assert "secret-value" not in message
     assert "secret-value sentinel" not in message
     assert "RuntimeError" in message
+
+
+def test_managed_credential_index_contains_labels_and_references_but_no_secret(tmp_path,monkeypatch):
+    index=tmp_path/"credentials-index.json"
+    monkeypatch.setattr(credentials,"_index_path",lambda:index)
+    credentials.update_credential_index("site-login","editor","Publishing account")
+    assert credentials.list_credentials()==[{"service":"site-login","username":"editor","label":"Publishing account"}]
+    assert "password" not in index.read_text(encoding="utf-8")
+    credentials.update_credential_index("site-login","editor",remove=True)
+    assert credentials.list_credentials()==[]
+
+
+def test_credential_manager_rpc_store_list_delete_never_returns_secret(tmp_path,monkeypatch):
+    index=tmp_path/"credentials-index.json"
+    monkeypatch.setattr(credentials,"_index_path",lambda:index)
+    replies=[]
+    secrets={}
+    class Vault:
+        def set_password(self,service,username,secret):secrets[(service,username)]=secret
+        def get_password(self,service,username):return secrets.get((service,username))
+        def delete_password(self,service,username):del secrets[(service,username)]
+    monkeypatch.setattr(bridge,"send",replies.append)
+    monkeypatch.setattr(credentials,"get_safe_keyring",lambda:Vault())
+    monkeypatch.setattr(bridge.history,"audit",lambda *_args,**_kwargs:None)
+    bridge.handle({"id":10,"method":"credential.store","params":{"label":"Publisher","service":"website","username":"editor","secret":"private-secret"}})
+    bridge.handle({"id":11,"method":"credential.list","params":{}})
+    assert replies[-1]["result"]["credentials"]==[{"label":"Publisher","service":"website","username":"editor","stored":True}]
+    assert "private-secret" not in str(replies)
+    bridge.handle({"id":12,"method":"credential.delete","params":{"service":"website","username":"editor"}})
+    assert replies[-1]["result"]["deleted"] is True
+    assert secrets=={} and credentials.list_credentials()==[]

@@ -52,9 +52,11 @@ export type DesktopRecordedEvent=
   | {type:'desktop_ui_click';windowTitle:string;processId:number;name:string;automationId:string;controlType:string;timeoutSeconds:number}
   | {type:'desktop_ui_invoke'|'desktop_ui_check'|'desktop_ui_uncheck';windowTitle:string;processId:number;name:string;automationId:string;controlType:string;timeoutSeconds:number}
   | {type:'desktop_ui_press';windowTitle:string;processId:number;name:string;automationId:string;controlType:string;timeoutSeconds:number;key:string}
+  | {type:'desktop_ui_fill';windowTitle:string;processId:number;name:string;automationId:string;controlType:string;timeoutSeconds:number;value:string}
+  | {type:'desktop_recorded_text';windowTitle:string;processId:number;name:string;automationId:string;controlType:string;value:string}
   | {type:'desktop_ui_set_range_value';windowTitle:string;processId:number;name:string;automationId:string;controlType:'Slider'|'Spinner';timeoutSeconds:number;value:number}
   | {type:'desktop_ui_drag';windowTitle:string;processId:number;sourceName:string;sourceAutomationId:string;sourceControlType:string;targetName:string;targetAutomationId:string;targetControlType:string;durationMilliseconds:number;timeoutSeconds:number};
-export async function startDesktopRecording(windowTitle:string,processId:number,allowDesktop:boolean,recordKeyboard=true):Promise<{recording:boolean;windowTitle:string;processId:number;recordKeyboard:boolean}>{return rpc('desktop.inspect.record.start',{windowTitle,processId,allowDesktop,recordKeyboard});}
+export async function startDesktopRecording(windowTitle:string,processId:number,allowDesktop:boolean,recordKeyboard=true,recordText=false):Promise<{recording:boolean;windowTitle:string;processId:number;recordKeyboard:boolean;recordText:boolean}>{return rpc('desktop.inspect.record.start',{windowTitle,processId,allowDesktop,recordKeyboard,recordText});}
 export async function stopDesktopRecording():Promise<{recording:boolean;windowTitle:string;processId:number;events:DesktopRecordedEvent[];truncated:boolean;ignoredClicks:number;ignoredKeys:number}>{return rpc('desktop.inspect.record.stop');}
 export type RunHistorySummary={runId:string;projectPath:string;projectName:string;workflow:string;workflowSha256:string;status:string;startedAt:string;endedAt:string|null;error:Record<string,unknown>|null;recoveryNote:string|null;source?:'Studio'|'MCP'};
 export type RunHistoryDetail=RunHistorySummary&{result:{status?:string;activities?:Record<string,{status:string;type:string;durationMs?:number;error?:string}>;error?:Record<string,unknown>}|null;events:Record<string,unknown>[]};
@@ -69,7 +71,10 @@ export async function getAuditHistory(limit=200):Promise<any[]>{const value=awai
 export type AiConfig={provider:string;baseUrl?:string;credentialService?:string;credentialUsername?:string;credentialMode?:'bearer'|'api_key_header';credentialHeader?:string};
 export type AiConnectionProfile={id:string;name:string;provider:string;baseUrl:string;model:string;credentialService:string;credentialUsername:string;credentialMode?:'bearer'|'api_key_header';credentialHeader?:string};
 export async function listAiProviders():Promise<{id:string;name:string;local:boolean;defaultBaseUrl:string;requiresCredential:boolean}[]>{return (await rpc('ai.providers')).providers??[];}
-export async function storeAiCredential(service:string,username:string,secret:string):Promise<void>{if(!inDesktop())throw new Error('Credential storage is available only in the installed desktop app.');await rpc('credential.store',{service,username,secret});}
+export type ManagedCredential={service:string;username:string;label:string;stored:boolean};
+export async function storeAiCredential(service:string,username:string,secret:string,label?:string):Promise<void>{if(!inDesktop())throw new Error('Credential storage is available only in the installed desktop app.');await rpc('credential.store',{service,username,secret,label});}
+export async function listManagedCredentials():Promise<ManagedCredential[]>{if(!inDesktop())throw new Error('Credential management is available only in the installed desktop app.');return (await rpc('credential.list')).credentials??[];}
+export async function deleteManagedCredential(service:string,username:string):Promise<void>{if(!inDesktop())throw new Error('Credential management is available only in the installed desktop app.');await rpc('credential.delete',{service,username});}
 export async function listAiConnections():Promise<AiConnectionProfile[]>{if(!inDesktop())return [];return (await rpc('ai.connections.list')).profiles??[];}
 export async function saveAiConnection(profile:Partial<AiConnectionProfile>):Promise<AiConnectionProfile>{return (await rpc('ai.connections.save',{profile})).profile;}
 export async function deleteAiConnection(profileId:string):Promise<void>{await rpc('ai.connections.delete',{profileId});}

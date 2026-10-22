@@ -68,7 +68,7 @@ def test_windows_click_recorder_scopes_controls_and_never_records_coordinates(mo
     foreground = [("Target App", 42)]
     recorder = DesktopClickRecorder(hook_factory=lambda: hook, resolver=resolve,keyboard_resolver=resolve_key,foreground=lambda: foreground[0])
     started = recorder.start("Target App", 42)
-    assert started == {"recording": True, "windowTitle": "Target App", "processId": 42,"recordKeyboard":True,"mode":"windows-uia"}
+    assert started == {"recording": True, "windowTitle": "Target App", "processId": 42,"recordKeyboard":True,"recordText":False,"mode":"windows-uia"}
     assert hook.started.wait(1)
     assert hook.keyboard_enabled is True and hook.mouse_enabled is True
     hook.click(200, 300)
@@ -93,6 +93,29 @@ def test_windows_click_recorder_scopes_controls_and_never_records_coordinates(mo
     assert "200" not in str(result) and "300" not in str(result) and "900" not in str(result)
     assert all(event.get("key")!="A" for event in result["events"])
     assert len(resolved) == 2
+
+
+def test_text_capture_requires_opt_in_and_coalesces_only_same_safe_control(monkeypatch):
+    monkeypatch.setattr(recorder_module.sys,"platform","win32")
+    from openrpa import windows_uia
+    monkeypatch.setattr(windows_uia,"_window",lambda *_args:object())
+    hook=FakeHook()
+    def resolve_text(title,pid,text):
+        return {"type":"desktop_recorded_text","windowTitle":title,"processId":pid,"name":"Command","automationId":"cmd","controlType":"Document","value":text}
+    def resolve_key(title,pid,key):
+        return {"type":"desktop_ui_press","windowTitle":title,"processId":pid,"name":"Command","automationId":"cmd","controlType":"Edit","key":key,"timeoutSeconds":10}
+    recorder=DesktopClickRecorder(hook_factory=lambda:hook,text_resolver=resolve_text,keyboard_resolver=resolve_key,foreground=lambda:("Terminal",42))
+    result=recorder.start("Terminal",42,record_keyboard=True,record_text=True)
+    assert result["recordText"] is True
+    assert hook.keyboard_enabled is True
+    assert hook.started.wait(1)
+    hook.key("l",["l"]);hook.key("s",["s"]);hook.key("Return",["Return"])
+    deadline=time.monotonic()+2
+    while time.monotonic()<deadline and len(recorder._events)<2:time.sleep(.01)
+    stopped=recorder.stop()
+    assert [event["type"] for event in stopped["events"]]==["desktop_recorded_text","desktop_ui_press"]
+    assert stopped["events"][0]["value"]=="ls"
+    assert stopped["events"][1]["key"]=="Enter"
 
 
 def test_windows_recorder_turns_accessible_drag_gesture_into_selector_activity(monkeypatch):
@@ -154,7 +177,7 @@ def test_desktop_record_rpc_audits_only_counts_and_target_identity(monkeypatch):
     audits = []
     monkeypatch.setattr(bridge, "send", replies.append)
     monkeypatch.setattr(bridge.history, "audit", lambda action, details: audits.append((action, details)))
-    monkeypatch.setattr(bridge.desktop_recorder, "start", lambda title, pid, record_keyboard=True: {"recording": True, "windowTitle": title, "processId": pid,"recordKeyboard":record_keyboard})
+    monkeypatch.setattr(bridge.desktop_recorder, "start", lambda title, pid, record_keyboard=True, record_text=False: {"recording": True, "windowTitle": title, "processId": pid,"recordKeyboard":record_keyboard,"recordText":record_text})
     monkeypatch.setattr(bridge.desktop_recorder, "stop", lambda: {"recording": False, "windowTitle": "Editor", "processId": 4,
                                                                     "events": [{"type": "desktop_ui_click", "name": "Save"}],
                                                                     "ignoredClicks": 2, "ignoredKeys":1,"truncated": False})
@@ -163,6 +186,6 @@ def test_desktop_record_rpc_audits_only_counts_and_target_identity(monkeypatch):
     bridge.handle({"id": 82, "method": "desktop.inspect.record.stop", "params": {}})
     assert replies[-1]["result"]["events"][0]["name"] == "Save"
     assert audits == [
-        ("desktop.recorder_start", {"processId": 4, "targetScoped": True, "keyboardCapture": True,"mode":None}),
+        ("desktop.recorder_start", {"processId": 4, "targetScoped": True, "keyboardCapture": True,"textCapture":False,"mode":None}),
         ("desktop.recorder_stop", {"processId": 4, "eventCount": 1, "ignoredClicks": 2, "ignoredKeys":1,"truncated": False,"mode":None}),
     ]

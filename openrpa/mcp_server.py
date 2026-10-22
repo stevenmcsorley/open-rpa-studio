@@ -425,6 +425,8 @@ class ProjectMCPServer:
                 {"name":"openrpa_browser_stop_recording","description":"Stop the visible browser interaction recorder and return its bounded list of editable selector-based steps for review. Typed values are omitted. Requires the live-browser startup grants.","inputSchema":{"type":"object","properties":{},"additionalProperties":False},"annotations":{"readOnlyHint":True,"openWorldHint":True}},
                 {"name":"openrpa_browser_close","description":"Close the visible browser session created by this MCP server. Requires the live-browser startup grants.","inputSchema":{"type":"object","properties":{},"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":False,"openWorldHint":True}},
             ])
+        if self.allow_credentials:
+            tools.append({"name": "openrpa_list_credentials", "description": "List credential display names and service/username references available to workflow Get Credential activities. Secret values are never returned. Requires the MCP server to start with --allow-credentials.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True}})
         if self.allow_run and self.allow_desktop:
             tools.append({"name":"openrpa_desktop_action","description":"Operate live desktop apps through accessibility: launch an explicitly selected executable, inspect and manipulate uniquely identified controls, set a bounded Slider or Spinner value through Windows UIA, scroll off-screen controls into view, select named list items, read bounded UIA grids, drag between two UIA controls, or normally close a window after confirmation. Requires --allow-run and --allow-desktop. Text entry is bounded, password controls are blocked, ambiguous selectors fail closed, and values are excluded from audit records.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["launch_application","wait_window","read_text","read_grid","state","click","invoke","fill","press","select","select_many","set_range_value","scroll_into_view","check","uncheck","expand","collapse","drag","wait","activate_window","minimize_window","restore_window","close_window"]},"windowTitle":{"type":"string","maxLength":512},"processId":{"type":"integer","minimum":1},"name":{"type":"string","maxLength":512},"automationId":{"type":"string","maxLength":512},"controlType":{"type":"string","maxLength":128},"maxRows":{"type":"integer","minimum":1,"maximum":500},"maxColumns":{"type":"integer","minimum":1,"maximum":100},"maxOutputChars":{"type":"integer","minimum":1000,"maximum":500000},"sourceName":{"type":"string","maxLength":512},"sourceAutomationId":{"type":"string","maxLength":512},"sourceControlType":{"type":"string","maxLength":128},"targetName":{"type":"string","maxLength":512},"targetAutomationId":{"type":"string","maxLength":512},"targetControlType":{"type":"string","maxLength":128},"durationMilliseconds":{"type":"integer","minimum":100,"maximum":5000},"value":{"type":"string","maxLength":10000},"numericValue":{"type":"number"},"values":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":512}},"mode":{"type":"string","enum":["replace","add","remove"]},"key":{"type":"string","enum":sorted(SUPPORTED_DESKTOP_KEYS)},"state":{"type":"string","enum":["exists","visible","hidden","enabled","disabled","checked","unchecked","selected","unselected","expanded","collapsed"]},"timeoutSeconds":{"type":"number","minimum":0.1,"maximum":30},"executable":{"type":"string","minLength":1,"maxLength":4096},"arguments":{"type":"array","maxItems":32,"items":{"type":"string","maxLength":2000}},"confirmClose":{"type":"boolean"}},"required":["action"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"openWorldHint":True}})
         if self.allow_edit:
@@ -432,6 +434,8 @@ class ProjectMCPServer:
             tools.append({"name": "openrpa_clear_workflow_draft", "description": "Clear the current unsaved live workflow preview from Studio. Optionally include draftId to avoid clearing a newer preview. Requires --allow-edit.", "inputSchema": {"type": "object", "properties": {"draftId": {"type": "string"}}, "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}})
             tools.append({"name": "openrpa_create_workflow", "description": "Create a new reusable workflow after schema and project-binding validation. Requires the current project.json SHA-256 from openrpa_project_info; editing is unavailable unless enabled when the server starts.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 100}, "expectedProjectSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "workflow": {"type": "object", "additionalProperties": True}}, "required": ["name", "expectedProjectSha256", "workflow"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}})
             tools.append({"name": "openrpa_update_workflow", "description": "Replace one declared workflow after validating it. Requires the expected SHA-256 from openrpa_read_workflow; editing is unavailable unless enabled when the server starts.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "expectedSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "workflow": {"type": "object", "additionalProperties": True}}, "required": ["name", "expectedSha256", "workflow"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}})
+            if self.allow_destructive:
+                tools.append({"name": "openrpa_delete_workflow", "description": "Delete a saved reusable workflow after project/workflow hash checks. Main workflows and workflows referenced by other workflows cannot be deleted. Requires --allow-edit and --allow-destructive.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 100}, "expectedProjectSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "expectedSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}, "required": ["name", "expectedProjectSha256", "expectedSha256"], "additionalProperties": False}, "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}})
         if self.allow_run:
             tools.append({"name": "openrpa_run_workflow", "description": "Execute a saved workflow in the project currently open in Studio. Network, desktop, credentials and destructive activities require separate startup opt-ins.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "inputs": {"type": "object", "additionalProperties": True}}, "required": ["name"], "additionalProperties": False}, "annotations": {"readOnlyHint": False,"destructiveHint": True,"idempotentHint": False,"openWorldHint": True}})
             tools.extend([
@@ -682,6 +686,54 @@ class ProjectMCPServer:
         finally:
             self._run_lock.release()
 
+    def _delete_workflow(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.allow_edit or not self.allow_destructive:
+            raise PermissionError("Workflow deletion requires both --allow-edit and --allow-destructive at MCP startup.")
+        if not self._run_lock.acquire(blocking=False):
+            raise RuntimeError("Workflow deletion is blocked while a workflow run or project edit is active.")
+        try:
+            name=args.get("name")
+            project_file=Path(self.project_path)
+            expected_project=args.get("expectedProjectSha256")
+            if not isinstance(expected_project,str) or hashlib.sha256(project_file.read_bytes()).hexdigest()!=expected_project:
+                raise ValueError("Project changed since it was read. Refresh project info before deleting.")
+            current_project,current_root=load_project(project_file)
+            if current_root!=self.root:
+                raise ValueError("Project root changed; restart the MCP server for the current project.")
+            if not isinstance(name,str) or name not in current_project["workflows"]:
+                raise ValueError("Workflow is not declared in the active project.")
+            if name.casefold()=="main":
+                raise ValueError("The Main workflow cannot be deleted.")
+            workflow_path=self._workflow_file(name)
+            raw=workflow_path.read_bytes()
+            expected_workflow=args.get("expectedSha256")
+            if not isinstance(expected_workflow,str) or hashlib.sha256(raw).hexdigest()!=expected_workflow:
+                raise ValueError("Workflow changed since it was read. Read it again before deleting.")
+            for parent_name,parent_path in current_project["workflows"].items():
+                if parent_name==name:
+                    continue
+                if any(activity.get("type")=="invoke_workflow" and activity.get("workflow")==name for activity in _walk_activities(self._workflow(parent_name))):
+                    raise ValueError(f"Workflow is referenced by {parent_name!r}; remove that invocation before deleting it.")
+            candidate=dict(current_project)
+            candidate["workflows"]={key:value for key,value in current_project["workflows"].items() if key!=name}
+            manifest_data=(json.dumps(candidate,ensure_ascii=False,indent=2,allow_nan=False)+"\n").encode("utf-8")
+            descriptor,temporary=tempfile.mkstemp(prefix=".openrpa-delete-project-",suffix=".tmp",dir=self.root)
+            try:
+                with os.fdopen(descriptor,"wb") as stream:
+                    stream.write(manifest_data);stream.flush();os.fsync(stream.fileno())
+                if hashlib.sha256(project_file.read_bytes()).hexdigest()!=expected_project:
+                    raise ValueError("Project changed during deletion. No manifest update was written.")
+                os.replace(temporary,project_file)
+            finally:
+                if os.path.exists(temporary):os.unlink(temporary)
+            # The file is retained as an unreferenced recovery copy. Project loading ignores it.
+            digest=hashlib.sha256(manifest_data).hexdigest()
+            self.project=candidate
+            self._get_history().audit("workflow.deleted",{"workflow":name,"workflowSha256":expected_workflow,"source":"mcp","workflowFileRetained":True})
+            return {"deleted":True,"workflow":name,"workflowFileRetained":True,"projectSha256":digest}
+        finally:
+            self._run_lock.release()
+
     def _mark_live_draft_saved(self, name: str, workflow: dict[str, Any]) -> None:
         try: target=_live_draft_path(self.root)
         except (OSError,ValueError): return
@@ -820,6 +872,12 @@ class ProjectMCPServer:
         if name == "openrpa_list_api_connections":
             profiles=api_connections.list_profiles(_api_connections_path())
             return {"connections":[{"id":p["id"],"name":p["name"],"baseUrl":p["baseUrl"],"authType":p["authType"],"credentialStored":api_connections.has_oauth_tokens(p["id"]) if p["authType"]=="oauth_authorization_code" else api_connections.has_secret(p["id"]) if p["authType"]!="none" else False} for p in profiles]}
+        if name == "openrpa_list_credentials":
+            if not self.allow_credentials:
+                raise PermissionError("Credential references are unavailable; restart the MCP server with --allow-credentials after reviewing the connected client.")
+            from .credentials import get_safe_keyring, list_credentials
+            vault=get_safe_keyring()
+            return {"credentials":[{**item,"stored":bool(vault.get_password(item["service"],item["username"]))} for item in list_credentials()]}
         if name == "openrpa_desktop_status":
             from . import desktop_accessibility
             return desktop_accessibility.status()
@@ -1065,6 +1123,8 @@ class ProjectMCPServer:
             return self._clear_workflow_draft(args)
         if name == "openrpa_update_workflow":
             return self._update_workflow(args)
+        if name == "openrpa_delete_workflow":
+            return self._delete_workflow(args)
         if name == "openrpa_create_workflow":
             return self._create_workflow(args)
         if name == "openrpa_validate_project":

@@ -579,8 +579,9 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             if params.get("allowDesktop") is not True:
                 raise ValueError("Desktop recording requires explicit desktop permission in the Studio toolbar")
             record_keyboard=params.get("recordKeyboard",sys.platform=="win32")
-            result=desktop_recorder.start(str(params.get("windowTitle","")),params.get("processId"),record_keyboard)
-            history.audit("desktop.recorder_start",{"processId":result["processId"],"targetScoped":True,"keyboardCapture":bool(result.get("recordKeyboard",False)),"mode":result.get("mode")})
+            record_text=params.get("recordText",False)
+            result=desktop_recorder.start(str(params.get("windowTitle","")),params.get("processId"),record_keyboard,record_text)
+            history.audit("desktop.recorder_start",{"processId":result["processId"],"targetScoped":True,"keyboardCapture":bool(result.get("recordKeyboard",False)),"textCapture":bool(result.get("recordText",False)),"mode":result.get("mode")})
         elif method == "desktop.inspect.record.stop":
             result=desktop_recorder.stop()
             history.audit("desktop.recorder_stop",{"processId":result["processId"],"eventCount":len(result["events"]),"ignoredClicks":result["ignoredClicks"],"ignoredKeys":result["ignoredKeys"],"truncated":result["truncated"],"mode":result.get("mode")})
@@ -775,20 +776,43 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             service=params.get("service")
             username=params.get("username")
             secret=params.get("secret")
+            label=params.get("label")
             if not isinstance(service,str) or not service.strip() or len(service)>200:
                 raise ValueError("Credential vault service must contain 1–200 characters")
             if not isinstance(username,str) or not username.strip() or len(username)>200:
                 raise ValueError("Credential vault username must contain 1–200 characters")
             if not isinstance(secret,str) or not secret or len(secret)>8192:
                 raise ValueError("Credential must contain 1–8,192 characters")
+            if label is not None and (not isinstance(label,str) or not label.strip() or len(label)>200):
+                raise ValueError("Credential label must contain 1–200 characters")
             from .credentials import get_safe_keyring
             vault=get_safe_keyring()
             try:
                 vault.set_password(service.strip(),username.strip(),secret)
+                from .credentials import update_credential_index
+                update_credential_index(service.strip(),username.strip(),label.strip() if label else None)
             except Exception as exc:
-                raise ValueError(f"OS credential vault refused to store the credential ({type(exc).__name__})") from None
+                raise ValueError(f"Could not store credential securely ({type(exc).__name__}); the secret value was not logged") from None
             history.audit("credential.store",{"service":service.strip(),"username":username.strip(),"secretStored":True})
             result={"stored":True,"service":service.strip(),"username":username.strip()}
+        elif method == "credential.list":
+            from .credentials import get_safe_keyring, list_credentials
+            vault=get_safe_keyring()
+            result={"credentials":[{**item,"stored":bool(vault.get_password(item["service"],item["username"]))} for item in list_credentials()]}
+        elif method == "credential.delete":
+            service=params.get("service")
+            username=params.get("username")
+            if not isinstance(service,str) or not service.strip() or len(service)>200 or not isinstance(username,str) or not username.strip() or len(username)>200:
+                raise ValueError("Credential deletion requires a valid service and username reference")
+            from .credentials import get_safe_keyring, update_credential_index
+            vault=get_safe_keyring()
+            try:
+                vault.delete_password(service.strip(),username.strip())
+            except Exception as exc:
+                raise ValueError(f"Could not delete credential from the OS vault ({type(exc).__name__})") from None
+            update_credential_index(service.strip(),username.strip(),remove=True)
+            history.audit("credential.delete",{"service":service.strip(),"username":username.strip()})
+            result={"deleted":True,"service":service.strip(),"username":username.strip()}
         elif method == "ai.models":
             provider=str(params.get("provider","ollama"))
             history.audit("ai.models",{"provider":provider,"local":bool(ai_providers.PROVIDERS.get(provider,{}).get("local"))})

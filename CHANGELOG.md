@@ -1,3 +1,16 @@
+## 0.1.125
+- Added opt-in Windows desktop typed-text recording for uniquely resolved, focused, non-password Edit/Document controls. Captured text is grouped into editable target-window activation and `desktop_type` activities; Enter and other allowlisted navigation keys remain separate activities. Typed capture is off by default, scoped to the selected window, bounded, reviewed before insertion and unavailable on Linux in this release.
+- Added guarded MCP workflow deletion. It requires both edit and destructive startup grants, current project and workflow hashes, protects Main and invoked workflows, removes the manifest entry, retains the unreferenced workflow file for recovery and records an audit event.
+- Added a concise inline disclosure and explicit text-capture opt-in in the desktop inspector.
+- Verification: full Python suite 552 passed; frontend suite 210 passed; TypeScript/Vite build passed; frozen MCP acceptance passed; Windows x64 NSIS installer built. GitHub CI remains pending after push. Installer SHA-256: `4b7c045b6c936b7ef081d4b8f47f8cb5239706ef88f8d5cf50693acf46c8bca4`.
+
+## 0.1.124
+- Added a named Credentials manager in Studio for storing, replacing, checking and deleting secrets through the approved OS credential backend. Its local index stores only labels and service/username references; secrets stay out of projects and MCP output.
+- Added permission-gated MCP credential reference discovery. `openrpa_list_credentials` is advertised only when the MCP server starts with `--allow-credentials` and never returns secret values.
+- Added explicit per-workflow run trust. Users can remember the grants for a specific workflow and its dependencies, then opt into automatic runs without the review modal. Any workflow content or permission-plan change invalidates the trust; the default remains review each run.
+- Documented how desktop trust and MCP startup grants differ. MCP autonomy remains directly configurable using its startup grant flags.
+- Verification: 210 frontend tests passed; focused credential/MCP tests passed; TypeScript/Vite production build passed; initial installer build completed before the final 0.1.125 changes.
+
 ## 0.1.123
 - Fixed live run feedback across Sequence, Flowchart and State Machine designers. Run state now exists before activity events arrive, the canvas follows the executing step, active and failed steps are marked in place, and completed runs focus End/the final state or the failed activity instead of leaving Start selected. State-machine initial styling is demoted after execution.
 - Flowchart action nodes now emit and retain start/completion/failure and selected-transition data in both the native Python engine and browser preview, so executed connectors remain visible after the run.
