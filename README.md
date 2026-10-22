@@ -76,14 +76,23 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The latest Windows installer is [Open RPA Studio v0.1.123](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.123). It is unsigned and intended for evaluation; verify its SHA-256 against the release before running it. SHA-256: `8ad0d963f3fbef7b06671fcadf034eb6e395557cd43695d6a95dde4e1e5a96c1`.
+The latest release is [Open RPA Studio v0.1.128](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.128). It includes Windows x64, Linux x64, and macOS Apple Silicon and Intel packages. The Windows installer is unsigned; verify its SHA-256 against the release before running it. SHA-256: `89f98ca9bb57c5d816e98f2f05870b4a46793b840d0136f67023e428cf5cd72d`.
+
+| Platform | Release package |
+|---|---|
+| Windows x64 | NSIS `.exe` installer |
+| Linux x64 | `.deb` and `.AppImage` |
+| macOS Apple Silicon (arm64) | `.dmg` |
+| macOS Intel (x86_64) | `.dmg` |
+
+Every package includes its matching native MCP bridge. SHA-256 checksum files are attached to the release. macOS packages are currently unsigned and not notarized; Gatekeeper may require approval on first launch. Linux packages require the WebKitGTK runtime dependencies described in [platform release notes](docs/PLATFORM-RELEASES.md); AppImage does not bundle WebKitGTK.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. Playwright browser binaries are not included in this installer. Browser Launch defaults to a visible Playwright Chromium window, and can select installed Chrome, Edge, Brave, Vivaldi, Opera or Opera GX when detected, any custom Chromium-based browser, Firefox or WebKit. Install the selected Playwright browser runtime where needed; the engine reports a clear error instead of silently switching browsers. Runtime capability status is displayed by the app rather than inferred from package presence. The visible browser inspector can record editable click, hover, fill, select and safe-key actions; field values are omitted and must be added in the workflow editor. Browser workflows can manage named tabs and capture popups, with network access and public-address checks applied to new pages. Exact accessibility-role selectors can opt into conservative recovery when a control label changes slightly; ambiguity fails closed and recovery is off by default. Browser file uploads are project-root bounded; downloads are size-limited before saving to the project, default to no-overwrite, and use Playwright's temporary download cache before that check.
 
-The v0.1.123 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it; see the [v0.1.123 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.123).
+Windows SmartScreen may show an unknown-publisher prompt for the unsigned installer. Verify the downloaded file against the SHA-256 in the release before running it.
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.123-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.128-x64.exe -Algorithm SHA256
 ```
 
 To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies.
@@ -312,7 +321,7 @@ Build and smoke-install the Windows release using `npm run build:windows-install
 
 ## Known gaps
 
-This project has not yet reached the stated beyond-UiPath parity goal. The editor supports sequences, flowcharts, and state machines, but major unfinished areas include automatic fuzzy selector healing (explicit fallback chains are supported), broader cross-toolkit accessibility acceptance, production-grade plug-in/package signing, upgrade/uninstall and clean-machine installer testing, workflow collaboration, unattended scheduling/orchestration, and adversarial security review. Desktop application launch is available only to workflows with per-run desktop permission; it starts an explicitly configured executable and argument list without a shell, but it is not a sandbox. The included installer is a development artifact, unsigned, and not production-certified. The `examples/` workflows are fixtures and should be reviewed before execution.
+This project has not yet reached the stated beyond-UiPath parity goal. The editor supports sequences, flowcharts, and state machines, but major unfinished areas include automatic fuzzy selector healing (explicit fallback chains are supported), broader cross-toolkit accessibility acceptance, production-grade plug-in/package signing, upgrade/uninstall and clean-machine installer testing, workflow collaboration, distributed orchestration, and adversarial security review. Local recurring schedules are available, but require the local MCP worker to be running at the scheduled time; there is no cloud scheduler or distributed worker pool. Desktop application launch is available only to workflows with per-run desktop permission; it starts an explicitly configured executable and argument list without a shell, but it is not a sandbox. Release installers are unsigned and not production-certified. The `examples/` workflows are fixtures and should be reviewed before execution.
 
 The current Windows installer bundles the engine bridge and its Python dependencies, but not a Playwright browser binary. Browser adapter readiness is detected at runtime; install a matching browser binary separately if browser automation is required. Windows Desktop automation via PyAutoGUI may require interactive session access and explicit user permissions.
 
