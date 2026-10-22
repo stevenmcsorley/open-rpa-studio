@@ -23,6 +23,10 @@ def main() -> None:
     }
     config["bundle"]["icon"] = ["icons/icon.icns"] if platform.system() == "Darwin" else ["icons/128x128.png"]
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    # `generate_context!` also reads this conventional filename while
+    # embedding the app icon, even when the bundle target has its own icon list.
+    icons_dir = root / "src-tauri" / "icons"
+    (icons_dir / "icon.png").write_bytes((icons_dir / "128x128.png").read_bytes())
 
 
 if __name__ == "__main__":
