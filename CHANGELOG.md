@@ -1,3 +1,7 @@
+## 0.1.126
+
+- Replaced text-heavy API connection, credentials, and run permission controls with compact monochrome toolbar icons. Permission switches retain accessible labels, tooltips, and exposed on/off states.
+- Verification: 210 frontend tests passed; TypeScript and Vite production build passed. Windows x64 NSIS installer build passed; frozen MCP acceptance passed. Installer SHA-256: `e19e0583d2519109a4a431448d0317fdc8407654fc47fd868dc0745d13ab4696`.
 ## 0.1.125
 - Added opt-in Windows desktop typed-text recording for uniquely resolved, focused, non-password Edit/Document controls. Captured text is grouped into editable target-window activation and `desktop_type` activities; Enter and other allowlisted navigation keys remain separate activities. Typed capture is off by default, scoped to the selected window, bounded, reviewed before insertion and unavailable on Linux in this release.
 - Added guarded MCP workflow deletion. It requires both edit and destructive startup grants, current project and workflow hashes, protects Main and invoked workflows, removes the manifest entry, retains the unreferenced workflow file for recovery and records an audit event.
