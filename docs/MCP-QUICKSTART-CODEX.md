@@ -25,7 +25,7 @@ Open `%USERPROFILE%\.codex\config.toml` and add a server entry. Replace the brid
 
 ```toml
 [mcp_servers.open_rpa_studio]
-command = 'C:\Users\YOUR_NAME\AppData\Local\Programs\Open RPA Studio\engine\openrpa-bridge-0.1.127.exe'
+command = 'C:\Users\YOUR_NAME\AppData\Local\Programs\Open RPA Studio\engine\openrpa-bridge-0.1.128.exe'
 args = [
   'mcp',
   'C:\Users\YOUR_NAME\Documents\Automation\MyProject\project.json',
@@ -48,6 +48,8 @@ The example grants workflow editing only. Add startup flags only for capabilitie
 | `--allow-destructive` | File move/delete and other explicitly destructive activities; MCP workflow deletion additionally requires `--allow-edit` |
 
 Permissions are fixed when Codex starts the MCP process. If a needed tool is absent, update the flags and restart Codex. The host can invoke every tool the bridge advertises, so grant only the capabilities appropriate for the project.
+
+Recurring schedules can be managed from Studio's **Workflow Manager → Schedules** view or through `openrpa_create_schedule`, `openrpa_list_schedules`, `openrpa_set_schedule_enabled`, and `openrpa_delete_schedule`. They execute only while an Open RPA MCP process for the project is running with `--allow-run` and the workflow's required grants. The schedule pins the workflow version; editing it pauses the schedule so a changed automation never runs silently. See [local job orchestration](LOCAL-JOB-ORCHESTRATION.md) for cron syntax and missed-run behavior.
 
 ## Troubleshooting
 

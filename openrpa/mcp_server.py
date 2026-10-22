@@ -204,6 +204,19 @@ class ProjectMCPServer:
                     self._sync_active_project()
                     project, root = self.project, self.root
                     queue = self._get_job_queue(root)
+                    for schedule in queue.due_schedules(str(root)):
+                        try:
+                            current_snapshot = self._prepare_run_snapshot(schedule["workflow"])
+                            if current_snapshot["snapshotSha256"] != schedule["snapshotSha256"]:
+                                queue.disable_schedule_for_error(str(root), schedule["scheduleId"], {"code": "workflow-changed", "message": "The workflow or one of its called workflows changed after this schedule was created. The schedule is paused; review it and create a new schedule for the updated workflow."})
+                                self._get_history_for(root).audit("schedule.paused", {"scheduleId": schedule["scheduleId"], "workflow": schedule["workflow"], "reason": "workflow-changed"})
+                                continue
+                            occurrence = queue.enqueue_schedule_occurrence(str(root), schedule["scheduleId"], schedule["scheduledFor"], str(project.get("name", "")))
+                            if occurrence:
+                                self._get_history_for(root).audit("schedule.triggered", {"scheduleId": schedule["scheduleId"], "jobId": occurrence["jobId"], "workflow": schedule["workflow"], "scheduledFor": schedule["scheduledFor"]})
+                        except Exception as schedule_error:
+                            queue.disable_schedule_for_error(str(root), schedule["scheduleId"], {"code": "schedule-validation", "message": str(schedule_error)[:1000]})
+                            self._get_history_for(root).audit("schedule.paused", {"scheduleId": schedule["scheduleId"], "workflow": schedule["workflow"], "reason": "schedule-validation"})
                     claimed = queue.claim_due(str(root))
                     snapshot = self._prepare_run_snapshot(claimed["workflow"]) if claimed else None
                 if claimed is None:
@@ -213,6 +226,9 @@ class ProjectMCPServer:
                 job_id = claimed["jobId"]
                 if snapshot["snapshotSha256"] != claimed["snapshotSha256"]:
                     queue.finish(job_id, "workflow_changed", error={"code": "workflow-changed", "message": "The workflow or one of its called workflows changed after this job was queued. Submit a new job to run the updated version."})
+                    if str(claimed.get("idempotencyKey") or "").startswith("schedule:"):
+                        schedule_id = str(claimed["idempotencyKey"]).split(":", 2)[1]
+                        queue.disable_schedule_for_error(str(snapshot["root"]), schedule_id, {"code": "workflow-changed", "message": "A scheduled workflow changed after the occurrence was queued. The schedule was paused."})
                     continue
                 cancellation = threading.Event()
                 with self._job_cancel_lock:
@@ -442,7 +458,11 @@ class ProjectMCPServer:
                 {"name":"openrpa_submit_job","description":"Submit a saved workflow to the durable local worker queue. Jobs can start immediately or at an ISO-8601 runAt time. The worker inherits only this MCP server's explicit startup permission grants; workflow changes before execution fail closed. Interrupted jobs are never replayed and automatic retries are disabled.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":100},"inputs":{"type":"object","additionalProperties":True},"runAt":{"type":"string","maxLength":64},"idempotencyKey":{"type":"string","minLength":1,"maxLength":200}},"required":["name"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":False,"openWorldHint":True}},
                 {"name":"openrpa_list_jobs","description":"List durable job queue entries for the active Studio project. Inputs and idempotency keys are not returned.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":200}},"additionalProperties":False},"annotations":{"readOnlyHint":True}},
                 {"name":"openrpa_get_job","description":"Inspect a durable job's status, timestamps, linked run ID and error for the active Studio project. Inputs and idempotency keys are not returned.","inputSchema":{"type":"object","properties":{"jobId":{"type":"string","minLength":36,"maxLength":36}},"required":["jobId"],"additionalProperties":False},"annotations":{"readOnlyHint":True}},
-                {"name":"openrpa_cancel_job","description":"Cancel a queued job or request cooperative cancellation of the active job. Cancellation is checked at workflow activity boundaries.","inputSchema":{"type":"object","properties":{"jobId":{"type":"string","minLength":36,"maxLength":36}},"required":["jobId"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":True}}
+                {"name":"openrpa_cancel_job","description":"Cancel a queued job or request cooperative cancellation of the active job. Cancellation is checked at workflow activity boundaries.","inputSchema":{"type":"object","properties":{"jobId":{"type":"string","minLength":36,"maxLength":36}},"required":["jobId"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":True}},
+                {"name":"openrpa_create_schedule","description":"Create a recurring local cron schedule for a saved workflow. Requires --allow-run. The workflow and statically invoked dependencies are pinned by content hash; editing them later pauses the schedule. The MCP worker process must remain running. Use five numeric cron fields and an IANA timezone.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":100},"scheduleName":{"type":"string","minLength":1,"maxLength":100},"cron":{"type":"string","minLength":9,"maxLength":128},"timezone":{"type":"string","minLength":1,"maxLength":128},"inputs":{"type":"object","additionalProperties":True}},"required":["name","scheduleName","cron","timezone"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":False}},
+                {"name":"openrpa_list_schedules","description":"List recurring cron schedules for the active Studio project without returning workflow inputs.","inputSchema":{"type":"object","properties":{},"additionalProperties":False},"annotations":{"readOnlyHint":True}},
+                {"name":"openrpa_set_schedule_enabled","description":"Enable or pause a recurring schedule. Re-enabling computes the next matching occurrence. Requires --allow-run.","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"string","minLength":36,"maxLength":36},"enabled":{"type":"boolean"}},"required":["scheduleId","enabled"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":True}},
+                {"name":"openrpa_delete_schedule","description":"Delete a recurring schedule definition. Already queued or running jobs are not cancelled. Requires --allow-run.","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"string","minLength":36,"maxLength":36}},"required":["scheduleId"],"additionalProperties":False},"annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":True}}
             ])
         return tools
 
@@ -807,6 +827,44 @@ class ProjectMCPServer:
         if root.resolve() == self.root.resolve():
             return self._get_history()
         return RunHistory(_history_path(root))
+
+    def _create_schedule(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.allow_run:
+            raise PermissionError("Recurring schedules require --allow-run at MCP startup.")
+        workflow_name = args.get("name")
+        schedule_name = args.get("scheduleName")
+        inputs = args.get("inputs", {})
+        if not isinstance(inputs, dict) or len(json.dumps(inputs, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 100_000:
+            raise ValueError("Schedule inputs must be an object no larger than 100 KB")
+        snapshot = self._prepare_run_snapshot(workflow_name)
+        queue = self._get_job_queue(snapshot["root"])
+        schedule = queue.create_schedule(project_path=str(snapshot["root"]), name=schedule_name, workflow=workflow_name,
+                                         snapshot_sha256=snapshot["snapshotSha256"], inputs=inputs,
+                                         cron=args.get("cron"), timezone_name=args.get("timezone"))
+        self._get_history_for(snapshot["root"]).audit("schedule.created", {"scheduleId": schedule["scheduleId"], "scheduleName": schedule_name, "workflow": workflow_name, "cron": schedule["cron"], "timezone": schedule["timezone"]})
+        self._ensure_job_worker()
+        self._job_worker_wake.set()
+        return schedule
+
+    def _set_schedule_enabled(self, schedule_id: str, enabled: bool) -> dict[str, Any]:
+        if not self.allow_run:
+            raise PermissionError("Recurring schedule management requires --allow-run at MCP startup.")
+        schedule = self._get_job_queue().set_schedule_enabled(str(self.root), schedule_id, enabled)
+        if schedule is None:
+            raise ValueError("No schedule with that identifier exists in the active project")
+        self._get_history().audit("schedule.enabled" if enabled else "schedule.paused", {"scheduleId": schedule_id, "workflow": schedule["workflow"]})
+        if enabled:
+            self._ensure_job_worker()
+            self._job_worker_wake.set()
+        return schedule
+
+    def _delete_schedule(self, schedule_id: str) -> dict[str, Any]:
+        if not self.allow_run:
+            raise PermissionError("Recurring schedule management requires --allow-run at MCP startup.")
+        if not self._get_job_queue().delete_schedule(str(self.root), schedule_id):
+            raise ValueError("No schedule with that identifier exists in the active project")
+        self._get_history().audit("schedule.deleted", {"scheduleId": schedule_id})
+        return {"deleted": True, "scheduleId": schedule_id}
 
     def _submit_job(self, args: dict[str, Any]) -> dict[str, Any]:
         if not self.allow_run:
@@ -1173,6 +1231,22 @@ class ProjectMCPServer:
             if not isinstance(job_id, str) or len(job_id) != 36:
                 raise ValueError("jobId must be a UUID")
             return self._job_cancel(job_id)
+        if name == "openrpa_create_schedule":
+            return self._create_schedule(args)
+        if name == "openrpa_list_schedules":
+            if not self.allow_run:
+                raise PermissionError("Recurring schedule tools require --allow-run at MCP startup.")
+            return {"schedules": self._get_job_queue().list_schedules(str(self.root)), "workerMustRemainRunning": True}
+        if name == "openrpa_set_schedule_enabled":
+            schedule_id = args.get("scheduleId")
+            if not isinstance(schedule_id, str) or len(schedule_id) != 36 or not isinstance(args.get("enabled"), bool):
+                raise ValueError("scheduleId must be a UUID and enabled must be a boolean")
+            return self._set_schedule_enabled(schedule_id, args["enabled"])
+        if name == "openrpa_delete_schedule":
+            schedule_id = args.get("scheduleId")
+            if not isinstance(schedule_id, str) or len(schedule_id) != 36:
+                raise ValueError("scheduleId must be a UUID")
+            return self._delete_schedule(schedule_id)
         raise LookupError(f"Unknown tool: {name}")
 
     def handle(self, request: Any, cancel_event: threading.Event | None = None) -> dict[str, Any] | None:

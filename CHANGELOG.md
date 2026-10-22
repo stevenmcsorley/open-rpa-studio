@@ -1,3 +1,13 @@
+## 0.1.128
+
+- Added recurring cron schedule management to Workflow Manager and matching Open RPA MCP tools for create/list/pause/resume/delete.
+- Added a bounded five-field cron parser with IANA timezone support, DST-aware matching, skipped missed occurrences, and a durable per-project SQLite schedule table migrated from queue schema v1.
+- Schedules pin their workflow and invoked dependencies; changed workflows or permissions pause a schedule before it runs. Scheduled runs inherit only MCP startup grants, use one worker, and do not automatically retry.
+- Studio schedule management opens the queue with recovery disabled, so it cannot mark a live MCP run interrupted. Schedule inputs are not returned by monitoring tools.
+- Added `tzdata` as a locked dependency and bundled its timezone database into the Windows MCP bridge.
+- Verification: `uv run --locked pytest -q` (567 passed), `npm test -- --run` (212 passed), `npm run build`, frozen MCP acceptance, and Windows x64 NSIS installer build passed.
+- Installer: `Open-RPA-Studio-Setup-0.1.128-x64.exe` (70.00 MiB), SHA-256 `89f98ca9bb57c5d816e98f2f05870b4a46793b840d0136f67023e428cf5cd72d`.
+
 ## 0.1.127
 
 - Added a dedicated Workflow Manager to browse, search, open, duplicate with Save As, rename, delete, and create sequential chains from reusable workflows.

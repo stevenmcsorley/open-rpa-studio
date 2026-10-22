@@ -25,7 +25,7 @@ from .desktop_recorder import DesktopClickRecorder, create_desktop_recorder, des
 from .activity_catalog import ACTIVITY_CATALOG
 from .active_project import publish_active_project, read_active_project
 from .app_paths import app_data_dir
-from .orchestration import read_jobs, request_job_cancel
+from .orchestration import JobQueue, read_jobs, request_job_cancel
 
 cancel_event = threading.Event()
 stdout_lock = threading.Lock()
@@ -65,6 +65,31 @@ def _mcp_job_queue_path(root: Path) -> Path:
     if configured:
         return Path(configured).expanduser() / f"job-queue-{project_key}.sqlite3"
     return app_data_dir() / f"job-queue-{project_key}.sqlite3"
+
+def _schedule_fingerprint(project: dict[str, Any], root: Path, workflow_name: str) -> str:
+    loaded: dict[str, dict[str, Any]] = {}
+    for name, relative in project["workflows"].items():
+        loaded[name] = json.loads(project_file(root, relative).read_text(encoding="utf-8"))
+    seen: set[str] = set()
+    selected: dict[str, Any] = {}
+    def visit(name: str) -> None:
+        if name in seen:
+            return
+        if name not in loaded:
+            raise ValueError(f"Workflow reference is missing: {name}")
+        seen.add(name)
+        selected[name] = loaded[name]
+        def find_calls(value: Any) -> None:
+            if isinstance(value, list):
+                for item in value: find_calls(item)
+            elif isinstance(value, dict):
+                if value.get("type") == "invoke_workflow" and isinstance(value.get("workflow"), str):
+                    visit(value["workflow"])
+                for item in value.values(): find_calls(item)
+        find_calls(loaded[name])
+    visit(workflow_name)
+    encoded = json.dumps(selected, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 def _mcp_runs(limit: int) -> list[dict[str, Any]]:
     root = read_active_project()
@@ -482,6 +507,45 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
                 raise ValueError("limit must be an integer between 1 and 200")
             result = {"jobs": read_jobs(_mcp_job_queue_path(root), str(root), limit) if root else []}
+        elif method == "jobs.schedules":
+            root = read_active_project()
+            result = {"schedules": JobQueue(_mcp_job_queue_path(root), recover=False).list_schedules(str(root)) if root else []}
+        elif method == "jobs.schedule.create":
+            root = read_active_project()
+            if root is None:
+                raise ValueError("Open a saved project before creating schedules")
+            project, loaded_root = load_project(root / "project.json")
+            if loaded_root != root:
+                raise ValueError("Studio's active project changed; reopen the schedule editor")
+            workflow_name = params.get("workflow")
+            if workflow_name not in project["workflows"]:
+                raise ValueError("Select a workflow saved in the active project")
+            digest = _schedule_fingerprint(project, root, workflow_name)
+            queue = JobQueue(_mcp_job_queue_path(root), recover=False)
+            schedule = queue.create_schedule(project_path=str(root), name=params.get("name"), workflow=workflow_name,
+                                             snapshot_sha256=digest, inputs=params.get("inputs", {}),
+                                             cron=params.get("cron"), timezone_name=params.get("timezone"))
+            RunHistory(_mcp_history_path(root)).audit("schedule.created", {"scheduleId": schedule["scheduleId"], "workflow": workflow_name, "cron": schedule["cron"], "timezone": schedule["timezone"], "source": "studio"})
+            result = {"schedule": schedule}
+        elif method == "jobs.schedule.enabled":
+            root = read_active_project()
+            schedule_id = params.get("scheduleId")
+            if root is None or not isinstance(schedule_id, str):
+                raise ValueError("A schedule ID and active Studio project are required")
+            schedule = JobQueue(_mcp_job_queue_path(root), recover=False).set_schedule_enabled(str(root), schedule_id, params.get("enabled"))
+            if schedule is None:
+                raise ValueError("Schedule not found in the active project")
+            RunHistory(_mcp_history_path(root)).audit("schedule.enabled" if schedule["enabled"] else "schedule.paused", {"scheduleId": schedule_id, "source": "studio"})
+            result = {"schedule": schedule}
+        elif method == "jobs.schedule.delete":
+            root = read_active_project()
+            schedule_id = params.get("scheduleId")
+            if root is None or not isinstance(schedule_id, str):
+                raise ValueError("A schedule ID and active Studio project are required")
+            if not JobQueue(_mcp_job_queue_path(root), recover=False).delete_schedule(str(root), schedule_id):
+                raise ValueError("Schedule not found in the active project")
+            RunHistory(_mcp_history_path(root)).audit("schedule.deleted", {"scheduleId": schedule_id, "source": "studio"})
+            result = {"deleted": True, "scheduleId": schedule_id}
         elif method == "jobs.cancel":
             root = read_active_project()
             job_id = params.get("jobId")

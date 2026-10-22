@@ -63,6 +63,11 @@ export type RunHistoryDetail=RunHistorySummary&{result:{status?:string;activitie
 export type QueuedJob={jobId:string;workflow:string;status:string;availableAt:string;submittedAt:string;startedAt:string|null;endedAt:string|null;runId:string|null;error:Record<string,unknown>|null;cancelRequested:boolean};
 export async function getJobQueue(limit=100):Promise<QueuedJob[]>{return (await rpc('jobs.history',{limit})).jobs??[];}
 export async function cancelQueuedJob(jobId:string):Promise<QueuedJob>{return (await rpc('jobs.cancel',{jobId})).job;}
+export type RecurringSchedule={scheduleId:string;name:string;workflow:string;cron:string;timezone:string;nextRun:string;enabled:boolean;createdAt:string;lastTriggeredAt:string|null;lastJobId:string|null;lastError:Record<string,unknown>|null};
+export async function getSchedules():Promise<RecurringSchedule[]>{return (await rpc('jobs.schedules')).schedules??[];}
+export async function createSchedule(name:string,workflow:string,cron:string,timezone:string,inputs:Record<string,unknown>):Promise<RecurringSchedule>{return (await rpc('jobs.schedule.create',{name,workflow,cron,timezone,inputs})).schedule;}
+export async function setScheduleEnabled(scheduleId:string,enabled:boolean):Promise<RecurringSchedule>{return (await rpc('jobs.schedule.enabled',{scheduleId,enabled})).schedule;}
+export async function deleteSchedule(scheduleId:string):Promise<void>{await rpc('jobs.schedule.delete',{scheduleId});}
 export async function getRunHistory(limit=50):Promise<RunHistorySummary[]>{const value=await rpc('run.history',{limit});return value.runs??[];}
 export async function getRunDetails(runId:string):Promise<RunHistoryDetail|null>{const value=await rpc('run.get',{runId});return value.run??null;}
 export async function exportRunEvidence(runId:string,destination:string):Promise<{sha256:string;bytes:number}>{return rpc('run.export',{runId,destination});}
