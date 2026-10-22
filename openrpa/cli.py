@@ -31,6 +31,14 @@ def main() -> int:
     unpack = sub.add_parser("unpack", help="Verify and extract a .orpa project package")
     unpack.add_argument("package")
     unpack.add_argument("destination")
+    component_pack = sub.add_parser("component-pack", help="Export a reusable workflow and its dependencies as .orwc")
+    component_pack.add_argument("project")
+    component_pack.add_argument("workflow", help="Entry workflow to export")
+    component_pack.add_argument("output")
+    component_install = sub.add_parser("component-install", help="Verify and install a reusable .orwc component into a project")
+    component_install.add_argument("package")
+    component_install.add_argument("project")
+    component_install.add_argument("namespace", help="Name prefix for the imported workflows")
     credential = sub.add_parser("credential", help="Store a credential in the operating-system vault")
     credential.add_argument("service")
     credential.add_argument("username")
@@ -67,6 +75,14 @@ def main() -> int:
         if args.command == "unpack":
             from .package import unpack_project
             print(json.dumps(unpack_project(args.package,args.destination),indent=2))
+            return 0
+        if args.command == "component-pack":
+            from .component_package import pack_component
+            print(json.dumps(pack_component(args.project,args.workflow,args.output),indent=2))
+            return 0
+        if args.command == "component-install":
+            from .component_package import install_component
+            print(json.dumps(install_component(args.package,args.project,args.namespace),indent=2))
             return 0
         project, root = load_project(args.project)
         if args.command == "validate":

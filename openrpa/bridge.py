@@ -394,6 +394,14 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
             from .package import unpack_project
             result=unpack_project(params["package"],params["destination"])
             history.audit("project.package.import",{"fileCount":result["files"],"projectName":result.get("name",""),"sha256":result["sha256"]})
+        elif method == "workflow.component.export":
+            from .component_package import pack_component
+            result=pack_component(params["root"],params["workflow"],params["destination"])
+            history.audit("workflow.component.export",{"workflowCount":result["workflowCount"],"entryWorkflow":result["entryWorkflow"],"sha256":result["sha256"]})
+        elif method == "workflow.component.install":
+            from .component_package import install_component
+            result=install_component(params["package"],params["root"],params["namespace"])
+            history.audit("workflow.component.install",{"workflowCount":len(result["workflows"]),"namespace":result["namespace"],"sha256":result["sha256"]})
         elif method == "workflow.validate":
             project = params["project"]
             problems = validate_workflow(params["workflow"], set(project["workflows"]))

@@ -282,6 +282,16 @@ uv run openrpa unpack .\csv-cleanup.orpa .\csv-cleanup-copy
 
 Package export is deterministic for the same source contents, carries per-file SHA-256 integrity checks, and excludes environment files, key material, and certificates. Workflow and package validation limits are enforced before execution or extraction.
 
+From **Workflow Manager**, export the active workflow and its dependencies as a declarative `.orwc` component, or install one into the current project. Imported workflows remain ordinary editable workflows. The CLI supports the same operations:
+
+```powershell
+uv run openrpa component-pack .\my-project CustomerImport .\customer-import.orwc
+uv run openrpa component-install .\customer-import.orwc .\my-project CustomerImport
+uv run openrpa validate .\my-project
+```
+
+Components include only the selected workflow and its called workflows; unrelated files are omitted. This format cannot load executable plug-ins or add new activity types; packages are unsigned, so review their workflows before running them. See [Reusable workflow components](docs/WORKFLOW-COMPONENTS.md).
+
 ## Development
 
 The codebase has three primary components:
@@ -333,6 +343,7 @@ The current Windows installer bundles the engine bridge and its Python dependenc
 - [Adapter details and limitations](docs/AUTOMATION_ADAPTERS.md)
 - [AI workflow drafting: supported structures and live verification](docs/AI-DRAFTING.md)
 - [Workflow format and execution models](docs/WORKFLOW-FORMAT.md)
+- [Reusable workflow components](docs/WORKFLOW-COMPONENTS.md)
 - [Product roadmap](docs/ROADMAP.md)
 - [Reverse-engineering evidence and behavior notes](docs/REVERSE_ENGINEERING_EVIDENCE.md)
 - [CycloneDX SBOM](sbom.cdx.json)
