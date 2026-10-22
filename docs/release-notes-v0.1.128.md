@@ -18,7 +18,9 @@
 - Frozen Windows MCP acceptance passed, including project-bound live draft staging and permission-gated tool discovery.
 - Windows x64 NSIS installer: 70.00 MiB.
 - SHA-256: `89f98ca9bb57c5d816e98f2f05870b4a46793b840d0136f67023e428cf5cd72d`.
+- Linux x64 `.deb` and `.AppImage`, plus macOS arm64 and x86_64 `.dmg` packages are being built by the cross-platform release workflow and will be attached to this release as they pass packaging checks.
 
 ### Operational limits
 - This is local scheduling. The MCP worker must be running at due time; missed runs, worker interruption, and queue capacity behave as documented in [Local job orchestration](LOCAL-JOB-ORCHESTRATION.md).
 - There is no cloud scheduler, distributed worker pool, or automatic whole-workflow retry.
+- macOS packages are unsigned and not notarized; first launch may require explicit user approval in Gatekeeper.

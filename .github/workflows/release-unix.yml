@@ -1,0 +1,106 @@
+name: Build macOS and Linux releases
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to add platform installers to
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-22.04
+            platform: linux
+          - name: macOS Apple Silicon
+            runner: macos-15
+            platform: macos
+          - name: macOS Intel
+            runner: macos-15-intel
+            platform: macos
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux desktop build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential curl file libayatana-appindicator3-dev libssl-dev librsvg2-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf
+
+      - name: Install locked project dependencies
+        run: |
+          uv sync --locked --extra dev --extra ocr --extra browser --extra desktop --extra credentials
+          npm ci
+
+      - name: Build native MCP bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src-tauri/resources .build/pyinstaller
+          uv run --locked --extra browser --extra desktop --extra credentials --extra ocr pyinstaller \
+            --noconfirm --clean --onefile --name openrpa-bridge \
+            --distpath src-tauri/resources --workpath .build/pyinstaller --specpath .build/pyinstaller \
+            --paths . --collect-submodules openrpa --collect-all regex \
+            --collect-all playwright --collect-all pyautogui --collect-all keyring \
+            --collect-all openpyxl --collect-all defusedxml --collect-all PIL --collect-all tzdata \
+            scripts/bridge_entry.py
+          version="$(node -p "require('./package.json').version")"
+          cp "src-tauri/resources/openrpa-bridge" "src-tauri/resources/openrpa-bridge-${version}"
+          python scripts/configure_unix_bundle.py "${version}"
+          "src-tauri/resources/openrpa-bridge-${version}" --help >/dev/null
+          if [[ "$(uname -s)" == Darwin ]]; then
+            sips -s format icns src-tauri/icons/128x128.png --out src-tauri/icons/icon.icns >/dev/null
+          fi
+
+      - name: Build Linux packages
+        if: matrix.platform == 'linux'
+        run: npm run tauri -- build --bundles deb,appimage
+
+      - name: Build macOS disk image
+        if: matrix.platform == 'macos'
+        run: npm run tauri -- build --bundles dmg
+
+      - name: Stage release assets and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          mkdir -p release
+          if [[ "${{ matrix.platform }}" == linux ]]; then
+            cp src-tauri/target/release/bundle/deb/*.deb "release/Open-RPA-Studio-${version}-linux-x64.deb"
+            cp src-tauri/target/release/bundle/appimage/*.AppImage "release/Open-RPA-Studio-${version}-linux-x64.AppImage"
+          else
+            arch="$(uname -m)"
+            cp src-tauri/target/release/bundle/dmg/*.dmg "release/Open-RPA-Studio-${version}-macos-${arch}.dmg"
+          fi
+          (cd release && shasum -a 256 Open-RPA-Studio-${version}-*) > "release/SHA256SUMS-${version}-${{ matrix.platform }}-${{ runner.arch }}.txt"
+
+      - name: Upload assets to the existing GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: gh release upload "$RELEASE_TAG" release/Open-RPA-Studio-* release/SHA256SUMS-* --clobber
