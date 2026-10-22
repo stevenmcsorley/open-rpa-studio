@@ -68,6 +68,72 @@ components: {securitySchemes: {partnerKey: {type: apiKey, in: header, name: X-Pa
     expect(()=>connectionSeedFromOpenApi({...operation,server:'https://{tenant}.example/v1'})).toThrow('template variables');
     expect(()=>connectionSeedFromOpenApi({...operation,server:'/relative'})).toThrow('absolute HTTPS');
   });
+  it('resolves OpenAPI server variables from bounded declared defaults before connection setup',()=>{
+    const imported=parseOpenApi(`openapi: 3.1.0
+info: {title: Regional API, version: '1'}
+servers:
+  - url: https://{region}.api.example/{version}
+    variables:
+      region: {default: us-east, enum: [us-east, eu-west]}
+      version: {default: v2, enum: [v1, v2]}
+paths:
+  /orders:
+    get: {responses: {'200': {description: ok}}}`);
+    const operation=imported.operations[0];
+    expect(operation.server).toBe('https://us-east.api.example/v2');
+    expect(connectionSeedFromOpenApi(operation,'Regional API').profile.baseUrl).toBe('https://us-east.api.example/v2');
+    expect(imported.warnings).toEqual([]);
+  });
+  it('honors operation, path-item, then document server precedence while resolving defaults',()=>{
+    const imported=parseOpenApi(`openapi: 3.1.0
+info: {title: Server precedence, version: '1'}
+servers:
+  - url: https://root.example/{version}
+    variables: {version: {default: v1}}
+paths:
+  /root:
+    get: {responses: {'200': {description: ok}}}
+  /path:
+    servers:
+      - url: https://path.example/{version}
+        variables: {version: {default: v2}}
+    get: {responses: {'200': {description: ok}}}
+  /operation:
+    servers:
+      - url: https://operation.example/{version}
+        variables: {version: {default: v3}}
+    get: {responses: {'200': {description: ok}}}`);
+    expect(imported.operations.map(operation=>operation.server)).toEqual([
+      'https://root.example/v1','https://path.example/v2','https://operation.example/v3',
+    ]);
+  });
+  it('omits unresolved or out-of-enum server templates and warns instead of guessing',()=>{
+    const imported=parseOpenApi(`openapi: 3.1.0
+info: {title: Regional API, version: '1'}
+servers:
+  - url: https://{region}.api.example/{version}
+    variables:
+      region: {default: us-east, enum: [eu-west]}
+paths:
+  /orders:
+    get: {responses: {'200': {description: ok}}}`);
+    expect(imported.operations[0].server).toBe('');
+    expect(imported.warnings.some(warning=>warning.includes('server URL has a variable without a valid string default'))).toBe(true);
+    expect(()=>connectionSeedFromOpenApi(imported.operations[0])).toThrow('absolute HTTPS');
+  });
+  it('rejects server-variable defaults that introduce URL query or fragment delimiters',()=>{
+    const imported=parseOpenApi(`openapi: 3.1.0
+info: {title: Regional API, version: '1'}
+servers:
+  - url: https://api.example/{tenant}
+    variables: {tenant: {default: 'team/../other?key=value#fragment'}}
+paths:
+  /orders:
+    get: {responses: {'200': {description: ok}}}`);
+    expect(imported.operations[0].server).toBe('');
+    expect(imported.warnings.some(warning=>warning.includes('incompatible with saved API connections'))).toBe(true);
+    expect(()=>connectionSeedFromOpenApi(imported.operations[0])).toThrow('absolute HTTPS');
+  });
   it('imports DELETE operations so they can receive a destructive run review',()=>{
     const imported=parseOpenApi(`openapi: 3.0.3
 info: {title: Records, version: '1'}

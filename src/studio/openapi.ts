@@ -81,7 +81,21 @@ function sample(schema:unknown,root:Obj,depth=0):unknown{
   if(current.type==='string')return '';
   return null;
 }
-function serverFor(root:Obj,pathItem:Obj,operation:Obj):string{return [operation.servers?.[0]?.url,pathItem.servers?.[0]?.url,root.servers?.[0]?.url].find(value=>typeof value==='string')??''}
+function serverFor(root:Obj,pathItem:Obj,operation:Obj,label:string,warnings:string[]):string{
+  const selected=[operation.servers?.[0],pathItem.servers?.[0],root.servers?.[0]].find(server=>obj(server)&&typeof server.url==='string');
+  if(!obj(selected)||typeof selected.url!=='string')return '';
+  let unresolved=false;
+  const resolved=selected.url.replace(/\{([^{}]+)\}/g,(_placeholder,name:string)=>{
+    const variables=obj(selected.variables)?selected.variables:{};const variable=variables[name];
+    if(!obj(variable)||typeof variable.default!=='string'||variable.default.length>256||/[\u0000-\u001f\u007f]/.test(variable.default)){unresolved=true;return ''}
+    if(Array.isArray(variable.enum)&&(!variable.enum.includes(variable.default)||variable.enum.length>1000)){unresolved=true;return ''}
+    return variable.default;
+  });
+  if(/\{[^{}]+\}/.test(resolved)||unresolved){warnings.push(`${label}: server URL has a variable without a valid string default; configure the connection base URL manually.`);return ''}
+  if(/[{}]/.test(resolved)){warnings.push(`${label}: server URL contains an unsupported template; configure the connection base URL manually.`);return ''}
+  try{const parsed=new URL(resolved);if(!parsed.hostname||parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.search||parsed.hash){warnings.push(`${label}: server URL defaults are incompatible with saved API connections; configure an absolute public HTTPS base URL without credentials, query, or fragment.`);return ''}}catch{warnings.push(`${label}: server URL template defaults did not form a valid absolute URL; configure the connection base URL manually.`);return ''}
+  return resolved;
+}
 function pointer(parts:string[]):string{return parts.map(part=>`/${part.replace(/~/g,'~0').replace(/\//g,'~1')}`).join('')}
 function schemaFields(schema:unknown,root:Obj,prefix:string,depth=0,used=new Set<string>()):ApiResponseField[]{
   if(depth>4||!obj(schema))return [];
@@ -214,7 +228,7 @@ export function parseOpenApi(text:string):OpenApiImport{
       const method=methodKey.toUpperCase() as OpenApiOperation['method'];const name=String(operation.summary??operation.operationId??`${method} ${path}`).slice(0,200);const key=`${method} ${path}`;
       const mappedResponse=responseMapping(operation,root,methodKey,path,warnings);
       const auth=securityAlternatives(operation,root,key,warnings);
-      operations.push({key,name,method,path,server:serverFor(root,pathItem,operation),parameters,headers,query,...(auth?{securityAlternatives:auth}:{}),...(body!==undefined?{body}:{}),...(contentType?{contentType}:{}),...(mappedResponse?{responseMapping:mappedResponse}:{})});
+      operations.push({key,name,method,path,server:serverFor(root,pathItem,operation,key,warnings),parameters,headers,query,...(auth?{securityAlternatives:auth}:{}),...(body!==undefined?{body}:{}),...(contentType?{contentType}:{}),...(mappedResponse?{responseMapping:mappedResponse}:{})});
     }
   }
   if(!operations.length)throw new Error('No supported GET/POST/PUT/PATCH/DELETE operations were found in this OpenAPI document');

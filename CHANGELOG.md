@@ -1,3 +1,7 @@
+## 0.1.118
+- OpenAPI import now substitutes valid server-variable defaults using the operation, path-item, then document precedence. Missing defaults, invalid enum choices, and resolved URLs incompatible with saved API connections are warned and left unset so authors can configure the base URL manually.
+- Verification: frontend suite 198 passed; production Vite build, frozen MCP acceptance, and Windows x64 NSIS installer build passed locally. Installer: `release/Open-RPA-Studio-Setup-0.1.118-x64.exe` (73,058,428 bytes; SHA-256 `c4e4051b3b08ca02e4fd58d4b603f6b1eebcd977d88138832e43d94375cd23aa`).
+
 ## 0.1.117
 - API response discovery now offers value-free, heuristic pagination hints for conventional cursor and next-link fields. Authors can prefill bounded pagination settings, retain relevant page/item/byte limits, reuse a matching cursor query parameter, and edit the resulting configuration before execution.
 - Verification: Python suite 523 passed; frontend suite 194 passed; production Vite build, frozen MCP acceptance, and Windows x64 NSIS installer build passed. Installer: `release/Open-RPA-Studio-Setup-0.1.117-x64.exe` (73,052,275 bytes; SHA-256 `522392dff3052feb623194b1f57422348bb17efbd9563e920ac99c7c8830e9a4`).
