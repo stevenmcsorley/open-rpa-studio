@@ -1,3 +1,11 @@
+## 0.1.127
+
+- Added a dedicated Workflow Manager to browse, search, open, duplicate with Save As, rename, delete, and create sequential chains from reusable workflows.
+- Workflow renames update `invoke_workflow` references. Deletion protects Main and invoked workflows. Save As preserves the original workflow; chain creation validates the resulting project and exposes required child inputs as chain arguments.
+- Closing a workflow with unsaved edits now prompts to save the project; cancelling keeps the tab open.
+- Added Codex MCP quick-start documentation covering the installed bridge executable, active Studio project binding, `config.toml`, permission flags, version mismatches, and troubleshooting.
+- Verification: TypeScript/Vite build passed; 212 frontend tests and 552 Python tests passed; frozen MCP acceptance passed; Windows x64 NSIS installer built (69.76 MiB). Installer SHA-256: `81ae1212fc715e649d0154c6de580af5cf9ee2293d0c8b1059b65152e83b0d55`.
+
 ## 0.1.126
 
 - Replaced text-heavy API connection, credentials, and run permission controls with compact monochrome toolbar icons. Permission switches retain accessible labels, tooltips, and exposed on/off states.
