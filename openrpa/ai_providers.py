@@ -29,6 +29,7 @@ PROVIDERS = {
     "local_openai_compatible": {"name":"Local OpenAI-compatible server","local":True,"defaultBaseUrl":"http://127.0.0.1:8000/v1","requiresCredential":False,"kind":"openai"},
 }
 MAX_RESPONSE_BYTES=2_000_000
+MAX_STREAM_RESPONSE_BYTES=8_000_000
 CAPABILITY_CACHE_TTL_SECONDS=900
 _capability_cache:dict[tuple[str,str,str],tuple[float,dict[str,Any]]]={}
 _capability_cache_lock=threading.Lock()
@@ -174,8 +175,8 @@ def _call(url: str, local: bool, method: str="GET", headers: dict[str,str]|None=
     try:
         if stream:
             if on_chunk is None:raise ValueError("Streaming response requires a chunk consumer")
-            result=(request_loopback_stream(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,on_chunk,cancel,on_headers)
-                    if local else restricted_stream(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,on_chunk,cancel,on_headers))
+            result=(request_loopback_stream(url,method,hdr,raw,min(max(timeout,1),180),MAX_STREAM_RESPONSE_BYTES,on_chunk,cancel,on_headers)
+                    if local else restricted_stream(url,method,hdr,raw,min(max(timeout,1),180),MAX_STREAM_RESPONSE_BYTES,on_chunk,cancel,on_headers))
         else:
             result=(request_loopback(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,cancel)
                     if local else restricted_request(url,method,hdr,raw,min(max(timeout,1),180),MAX_RESPONSE_BYTES,cancel))
@@ -185,7 +186,12 @@ def _call(url: str, local: bool, method: str="GET", headers: dict[str,str]|None=
         try: return json.loads(str(result["body"]))
         except json.JSONDecodeError as exc: raise ValueError("Provider returned invalid JSON") from exc
     except RequestCancelled: raise
-    except ValueError: raise
+    except ValueError as exc:
+        if "Provider response exceeded the configured size limit" in str(exc):
+            if stream:
+                raise ValueError("AI provider stream exceeded the 8 MB transport limit, which includes provider metadata. Try a non-reasoning model such as DeepSeek Chat, or request a smaller workflow.") from exc
+            raise ValueError("AI provider response exceeded the 2 MB response limit. Request a smaller workflow or fewer activities.") from exc
+        raise
     except Exception as exc: raise ValueError(f"Provider network request failed: {type(exc).__name__}: {exc}") from exc
 
 
@@ -446,10 +452,16 @@ class _SSEDecoder:
 
 class _OpenAIChatStream:
     def __init__(self,on_text:Callable[[str],None]|None=None,on_activity:Callable[[dict[str,Any]],None]|None=None):
-        self.text=[];self.usage=None;self.finish_reason=None;self.done=False;self.refused=False;self.on_text=on_text
-        self._raw="";self._activity_callback=on_activity;self._activity_scanner=_IncrementalActivityScanner(on_activity) if on_activity else None
+        self.text=[];self.text_size=0;self.usage=None;self.finish_reason=None;self.done=False;self.refused=False;self.on_text=on_text
+        self._activity_scanner=_IncrementalActivityScanner(on_activity) if on_activity else None
         self.decoder=_SSEDecoder(self._event)
     def feed(self,chunk:bytes)->None:self.decoder.feed(chunk)
+    def _append_text(self,value:str)->None:
+        self.text_size+=len(value)
+        if self.text_size>MAX_RESPONSE_BYTES:raise ValueError("AI workflow output exceeded the 2 MB limit; request a smaller workflow or fewer activities")
+        self.text.append(value)
+        if self._activity_scanner:self._activity_scanner.feed(value)
+        if self.on_text:self.on_text(value)
     def _event(self,data:str)->None:
         if data.strip()=="[DONE]":self.done=True;return
         try:event=json.loads(data)
@@ -465,17 +477,11 @@ class _OpenAIChatStream:
         if isinstance(delta.get("refusal"),str) and delta["refusal"].strip():self.refused=True
         content=delta.get("content")
         if isinstance(content,str) and content:
-            self.text.append(content)
-            self._raw+=content
-            if self._activity_scanner:self._activity_scanner.feed(content)
-            if self.on_text:self.on_text(content)
+            self._append_text(content)
         elif isinstance(content,list):
             for part in content:
                 if isinstance(part,dict) and part.get("type")=="text" and isinstance(part.get("text"),str):
-                    self.text.append(part["text"])
-                    self._raw+=part["text"]
-                    if self._activity_scanner:self._activity_scanner.feed(part["text"])
-                    if self.on_text:self.on_text(part["text"])
+                    self._append_text(part["text"])
     def finish(self)->tuple[dict[str,Any],dict[str,int]|None]:
         self.decoder.finish()
         if self.refused:raise ValueError("AI provider refused to draft this workflow")
@@ -491,7 +497,7 @@ class _IncrementalActivityScanner:
         self.buffer="";self.on_activity=on_activity;self.decoder=json.JSONDecoder();self.position=0;self.array_position:int|None=None;self.finished=False
     def feed(self,text:str)->None:
         if self.finished:return
-        if len(self.buffer)+len(text)>MAX_RESPONSE_BYTES:raise ValueError("AI workflow output exceeded the configured size limit")
+        if len(self.buffer)+len(text)>MAX_RESPONSE_BYTES:raise ValueError("AI workflow output exceeded the 2 MB limit; request a smaller workflow or fewer activities")
         self.buffer+=text
         if self.array_position is None:self._find_array()
         if self.array_position is not None:self._read_items()
@@ -547,10 +553,16 @@ class _IncrementalActivityScanner:
 
 class _GeminiStream:
     def __init__(self,on_text=None,on_activity=None):
-        self.text=[];self.finish_reason="STOP";self.completed=False;self.usage=None;self.on_text=on_text
+        self.text=[];self.text_size=0;self.finish_reason="STOP";self.completed=False;self.usage=None;self.on_text=on_text
         self.scanner=_IncrementalActivityScanner(on_activity) if on_activity else None
         self.decoder=_SSEDecoder(self._event)
     def feed(self,chunk:bytes)->None:self.decoder.feed(chunk)
+    def _append_text(self,value:str)->None:
+        self.text_size+=len(value)
+        if self.text_size>MAX_RESPONSE_BYTES:raise ValueError("AI workflow output exceeded the 2 MB limit; request a smaller workflow or fewer activities")
+        self.text.append(value)
+        if self.scanner:self.scanner.feed(value)
+        if self.on_text:self.on_text(value)
     def _event(self,data:str)->None:
         try:event=json.loads(data)
         except json.JSONDecodeError as exc:raise ValueError("Gemini stream returned malformed SSE JSON") from exc
@@ -566,9 +578,7 @@ class _GeminiStream:
                 for part in parts:
                     value=part.get("text") if isinstance(part,dict) else None
                     if isinstance(value,str) and value:
-                        self.text.append(value)
-                        if self.scanner:self.scanner.feed(value)
-                        if self.on_text:self.on_text(value)
+                        self._append_text(value)
         usage=event.get("usageMetadata")
         if isinstance(usage,dict):self.usage=_usage({"usageMetadata":usage},"gemini")
     def finish(self):
@@ -786,7 +796,9 @@ def draft(provider: str, model: str, prompt: str, activity_types: list[str], bas
     use_stream=provider in {"openai","deepseek"} or (provider=="openrouter" and capability["streaming"]=="supported")
     if use_stream:
         body["stream"]=True
-        if provider=="deepseek":body["stream_options"]={"include_usage":True}
+        if provider=="deepseek":
+            body["max_tokens"]=65536
+            body["stream_options"]={"include_usage":True}
     try:
         if use_stream:
             stream=_OpenAIChatStream(on_stream_text,on_activity if execution_model=="sequence" else None)

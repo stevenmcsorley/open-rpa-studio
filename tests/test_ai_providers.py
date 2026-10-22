@@ -164,7 +164,31 @@ def test_deepseek_provider_discovers_models_and_uses_json_object_streaming(monke
     assert seen["body"]["response_format"]=={"type":"json_object"} and seen["body"]["stream"] is True
     assert seen["secret"]=="deepseek-secret"
     assert seen["body"]["stream"] is True
+    assert seen["body"]["max_tokens"]==65536
     assert seen["body"]["stream_options"]=={"include_usage":True}
+
+
+def test_provider_stream_size_failure_is_actionable(monkeypatch):
+    from openrpa.network import EgressDenied
+    def too_large(*_args,**_kwargs):raise EgressDenied("Provider response exceeded the configured size limit")
+    monkeypatch.setattr(ai,"restricted_stream",too_large)
+    with pytest.raises(ValueError,match="8 MB transport limit.*non-reasoning model"):
+        ai._call("https://api.deepseek.com/chat/completions",False,"POST",body={},provider="deepseek",stream=True,on_chunk=lambda _chunk:None)
+
+
+def test_openai_stream_discards_large_reasoning_metadata_before_workflow_text_limit():
+    stream=ai._OpenAIChatStream()
+    reasoning="r"*2_100_000
+    draft={"explanation":"valid","activities":[]}
+    frames=(
+        {"choices":[{"delta":{"reasoning_content":reasoning},"finish_reason":None}]},
+        {"choices":[{"delta":{"content":json.dumps(draft,separators=(",",":"))},"finish_reason":"stop"}]},
+        {"choices":[{"delta":{},"finish_reason":"stop"}]},
+    )
+    for frame in frames:stream.feed(("data: "+json.dumps(frame,separators=(",",":"))+"\n\n").encode())
+    result,_=stream.finish()
+    assert result==draft
+    assert all("reasoning_content" not in chunk for chunk in stream.text)
 
 
 @pytest.mark.parametrize("provider,url",[

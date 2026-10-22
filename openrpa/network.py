@@ -402,7 +402,7 @@ def _request_cancellable(scheme: str, host: str, port: int, address: str, target
                          timeout: float, max_bytes: int,
                          cancel: threading.Event,on_chunk=None,on_headers=None) -> dict[str, object]:
     timeout = min(max(float(timeout), 1.0), 180.0)
-    max_bytes = min(max(int(max_bytes), 1), 5_000_000)
+    max_bytes = min(max(int(max_bytes), 1), 8_000_000)
     if not method or any(character in method for character in " \r\n\t"):
         raise EgressDenied("Invalid provider HTTP method")
     if any(character in target for character in "\r\n\t") or " " in target:

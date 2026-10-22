@@ -58,6 +58,18 @@ class _ChunkedStream(BaseHTTPRequestHandler):
         self.wfile.write(b"0\r\n\r\n");self.wfile.flush()
 
 
+class _LargeChunkedStream(BaseHTTPRequestHandler):
+    payload=b"x"*6_000_000
+    def log_message(self,*_args):pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length","0")))
+        self.send_response(200);self.send_header("Content-Type","text/event-stream");self.send_header("Transfer-Encoding","chunked");self.end_headers()
+        for offset in range(0,len(type(self).payload),65536):
+            piece=type(self).payload[offset:offset+65536]
+            self.wfile.write(f"{len(piece):x}\r\n".encode()+piece+b"\r\n")
+        self.wfile.write(b"0\r\n\r\n");self.wfile.flush()
+
+
 class _SlowChunkedStream(BaseHTTPRequestHandler):
     sent=threading.Event();release=threading.Event()
     def log_message(self,*_args):pass
@@ -95,6 +107,18 @@ def test_loopback_stream_transport_delivers_decoded_http_chunks_incrementally():
         server.shutdown();server.server_close();thread.join(timeout=2)
     assert result["status"]==200
     assert b"".join(received)==b"data: first-event\r\n\r\ndata: second\n\n"
+
+
+def test_loopback_stream_accepts_large_bounded_reasoning_payload():
+    server=ThreadingHTTPServer(("127.0.0.1",0),_LargeChunkedStream)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();received=[]
+    try:
+        result=request_loopback_stream(f"http://127.0.0.1:{server.server_port}/v1/chat/completions","POST",{},b"{}",10,
+            ai_providers.MAX_STREAM_RESPONSE_BYTES,received.append,threading.Event())
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=2)
+    assert result["status"]==200
+    assert sum(map(len,received))==6_000_000
 
 
 def test_loopback_stream_cancellation_closes_waiting_provider_socket():

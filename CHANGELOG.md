@@ -1,3 +1,7 @@
+## 0.1.121
+- Fixed DeepSeek long-thinking responses failing at the previous 2 MB raw-stream transport ceiling. Streamed provider payloads are now bounded at 8 MB, including provider metadata, while generated workflow text remains capped at 2 MB. DeepSeek drafts request at most 65,536 output tokens; a still-oversized stream gets an actionable message recommending a non-reasoning model or a smaller draft.
+- Verification: focused provider/cancellation suite 79 passed; full Python suite 540 passed in the project virtual environment; frontend suite 198 passed; production frontend build, frozen MCP acceptance, Windows x64 NSIS installer build, in-place install and installed-app launch passed. The normal global Python interpreter could not collect the full suite because it lacks the project's `defusedxml` dependency; the locked project environment passed. Remote DeepSeek API was not live-tested because no provider credential was configured. Installer SHA-256: `db2245fbbcbd02ecc2f2df1e928b514c4ef90097a3910b76facc1ea5405af17d`.
+
 ## 0.1.120
 - Added DeepSeek as a first-class AI drafting provider with model discovery, OS-vault credentials, JSON-object output, streamed generation, final-frame token usage, cancellation, and native workflow validation. DeepSeek does not receive a JSON Schema parameter; the schema is included in the prompt and Studio's validator remains authoritative.
 - Preserved normalized usage data from streamed responses instead of passing it through a second parser that discarded it.
