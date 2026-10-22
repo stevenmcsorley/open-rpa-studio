@@ -1,9 +1,9 @@
 export const DEFAULT_OUTPUT_HEIGHT = 218;
 export const MIN_OUTPUT_HEIGHT = 140;
 export const MAX_OUTPUT_HEIGHT = 500;
-const MIN_APP_HEIGHT = 650;
+const MIN_APP_HEIGHT = 397;
 const FIXED_VERTICAL_CHROME = 60 + 48 + 29;
-const MIN_WORKSPACE_HEIGHT = 330;
+const MIN_WORKSPACE_HEIGHT = 120;
 
 export function maximumOutputHeight(viewportHeight: number): number {
   const appHeight = Number.isFinite(viewportHeight) ? Math.max(MIN_APP_HEIGHT, viewportHeight) : MIN_APP_HEIGHT;

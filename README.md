@@ -76,7 +76,7 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The latest release is [Open RPA Studio v0.1.128](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.128). It includes Windows x64, Linux x64, and macOS Apple Silicon and Intel packages. The Windows installer is unsigned; verify its SHA-256 against the release before running it. SHA-256: `89f98ca9bb57c5d816e98f2f05870b4a46793b840d0136f67023e428cf5cd72d`.
+The latest release is [Open RPA Studio v0.1.129](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.129). It includes Windows x64, Linux x64, and macOS Apple Silicon and Intel packages. The Windows installer is unsigned; verify its SHA-256 against the release before running it. SHA-256: `ee4aecb503cdcf105b5b5d2d7bff9b29f47b0cb6d47f418c89b12e9901cc9f6f`.
 
 | Platform | Release package |
 |---|---|
@@ -92,7 +92,7 @@ The NSIS installer supports a per-user installation and uninstall. The app bundl
 Windows SmartScreen may show an unknown-publisher prompt for the unsigned installer. Verify the downloaded file against the SHA-256 in the release before running it.
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.128-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.129-x64.exe -Algorithm SHA256
 ```
 
 To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies.

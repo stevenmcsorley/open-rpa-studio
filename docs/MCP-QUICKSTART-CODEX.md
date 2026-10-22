@@ -25,7 +25,7 @@ Open `%USERPROFILE%\.codex\config.toml` and add a server entry. Replace the brid
 
 ```toml
 [mcp_servers.open_rpa_studio]
-command = 'C:\Users\YOUR_NAME\AppData\Local\Programs\Open RPA Studio\engine\openrpa-bridge-0.1.128.exe'
+command = 'C:\Users\YOUR_NAME\AppData\Local\Programs\Open RPA Studio\engine\openrpa-bridge-0.1.129.exe'
 args = [
   'mcp',
   'C:\Users\YOUR_NAME\Documents\Automation\MyProject\project.json',

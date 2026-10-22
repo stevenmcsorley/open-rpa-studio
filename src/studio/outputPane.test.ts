@@ -16,9 +16,11 @@ describe('output pane sizing',()=>{
   });
 
   it('keeps the minimum designer height available on shorter windows',()=>{
-    expect(maximumOutputHeight(650)).toBe(183);
-    expect(maximumOutputHeight(900)).toBe(433);
+    expect(maximumOutputHeight(650)).toBe(393);
+    expect(maximumOutputHeight(900)).toBe(MAX_OUTPUT_HEIGHT);
     expect(maximumOutputHeight(1200)).toBe(MAX_OUTPUT_HEIGHT);
-    expect(adjustOutputHeight(180,20,183)).toBe(183);
+    expect(maximumOutputHeight(500)).toBe(243);
+    expect(maximumOutputHeight(360)).toBe(140);
+    expect(adjustOutputHeight(180,20,243)).toBe(200);
   });
 });

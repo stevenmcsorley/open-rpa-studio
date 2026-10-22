@@ -104,6 +104,61 @@
 .state-machine-overview.run-reviewed .state-map-node.initial:not(.running) rect{stroke:#505c67}
 @keyframes execution-path{to{stroke-dashoffset:-26}}
 @media(prefers-reduced-motion:reduce){.flowchart-transition.active path:not(.flowchart-edge-hit),.state-map-edge.traversed path:not(.state-map-edge-hit){animation:none}}
+
+/* Keep every Studio region inside the actual desktop window, including compact and short-height windows. */
+html,body,#root{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}
+body{min-width:0;min-height:0}
+.app-shell{height:100vh;height:100dvh;min-height:0;min-width:0;grid-template-rows:60px 48px minmax(120px,1fr) minmax(36px,var(--output-height,218px)) 29px;overflow:hidden}
+.app-shell.output-collapsed{grid-template-rows:60px 48px minmax(120px,1fr) 36px 29px}
+.topbar,.toolbar,.workspace,.designer,.bottom-panel,.statusbar{min-width:0}
+.topbar{gap:clamp(8px,1.8vw,24px);padding-inline:clamp(8px,1.4vw,18px)}
+.brand{min-width:0;width:clamp(150px,20vw,223px)}
+.project-title{min-width:0;overflow:hidden;white-space:nowrap}
+.project-title strong{overflow:hidden;text-overflow:ellipsis}
+.top-actions{flex:none;gap:clamp(2px,.6vw,8px)}
+.toolbar{overflow-x:auto;overflow-y:hidden;gap:8px}
+.tool-group{flex:none;min-width:max-content}
+.left-panel,.right-panel{min-width:0;overflow:hidden}
+.left-panel.collapsed{width:36px;min-width:36px;align-items:center;border-right:1px solid #303741}
+.left-panel.collapsed>:not(.panel-heading):not(.activities-expand){display:none}
+.left-panel.collapsed .panel-heading{height:0;min-height:0;padding:0;overflow:hidden}
+.activities-expand{display:none}
+.left-panel.collapsed .activities-expand{display:flex;width:36px;height:100%;flex-direction:column;align-items:center;justify-content:flex-start;gap:12px;padding:12px 0;border:0;background:transparent;color:#aeb7c2;font-size:8px;writing-mode:vertical-rl;letter-spacing:1px}
+.left-panel.collapsed .activities-expand:hover{background:#20252c;color:#dce4ec}
+.right-panel.collapsed{overflow:hidden}
+.bottom-tabs{min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+.bottom-tabs button{flex:none;white-space:nowrap}
+.bottom-spacer{min-width:6px}
+.collapse-bottom{position:sticky;right:0;z-index:2;flex:none;background:#171a20!important}
+.bottom-content,.inspector-content,.variables-block,.activity-groups{overscroll-behavior:contain}
+.statusbar{overflow:hidden;white-space:nowrap}
+.status-right{min-width:0;overflow:hidden}
+@media(max-width:900px){
+  .topbar{gap:8px}
+  .brand{width:clamp(132px,21vw,190px)}
+  .toolbar-center{display:none}
+  .right-tools .subdued{display:none}
+  .project-title{font-size:10px;gap:5px}
+  .bottom-tabs button{padding-inline:9px}
+}
+@media(max-width:760px){
+  .topbar{padding-inline:7px}
+  .brand{width:40px;gap:0}
+  .brand>div:last-child{display:none}
+  .project-title{gap:5px}
+  .project-title .crumb,.project-title .slash{display:none}
+  .top-actions{gap:1px}
+  .top-divider{margin-inline:2px}
+  .statusbar{gap:5px;padding-inline:6px;font-size:7px}
+  .status-right{display:none}
+}
+@media(max-width:560px){
+  .project-title{font-size:9px}
+  .top-actions .mode-pill{font-size:0;gap:4px;padding:7px}
+  .top-actions .avatar{display:none}
+  .toolbar{padding-inline:6px}
+  .bottom-tabs button{padding-inline:7px;font-size:7px}
+}
 .start-node.complete .play-ring{border-color:#46524a;background:#202520;color:#748570;box-shadow:none}
 
 /* Properties inspector is user-sized and collapsible, with a keyboard-accessible splitter. */

@@ -1,3 +1,11 @@
+## 0.1.129
+
+- Fixed window clipping in the Studio workspace. The activity library and properties panel now collapse to reachable expand rails in compact windows; side-panel widths adapt to the available width.
+- The header toolbar and lower output tabs remain accessible when their controls exceed the visible width. Short windows allocate more height to the designer and constrain the resizable output panel to the available space.
+- Removed the page-level minimum dimensions that forced the outer header, side panels, and lower panel outside smaller desktop windows.
+- Lowered the native desktop window minimum to 700×480 so the responsive compact layout is available on smaller displays.
+- Verification: Python 570 passed; frontend 213 passed; TypeScript and Vite production build passed; frozen MCP acceptance passed; Windows x64 NSIS installer built (69.82 MiB). SHA-256: `ee4aecb503cdcf105b5b5d2d7bff9b29f47b0cb6d47f418c89b12e9901cc9f6f`. Linux and macOS packages are built by the tagged GitHub Actions release workflow.
+
 ## 0.1.128
 
 - Added recurring cron schedule management to Workflow Manager and matching Open RPA MCP tools for create/list/pause/resume/delete.
