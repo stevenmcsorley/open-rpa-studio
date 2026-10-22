@@ -1,7 +1,7 @@
 import { describe,expect,it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ApiRequestEditor } from './ApiRequestEditor';
+import { ApiRequestEditor,paginationPatchFromHint } from './ApiRequestEditor';
 import { ApiConnectionsDialog } from './ApiConnectionsDialog';
 
 describe('API Request response mapping editor',()=>{
@@ -97,5 +97,25 @@ describe('API Request response mapping editor',()=>{
     expect(enabled).toContain('Discover fields');
     expect(enabled).toContain('response values are discarded');
     expect(enabled).toContain('not a guaranteed API schema');
+  });
+  it('turns a pagination hint into editable bounded settings and reuses a matching query name',()=>{
+    const settings=paginationPatchFromHint(
+      {itemsPointer:'/data/items',stablePointer:true,observedRows:20,sampledRows:20,fields:[],fieldsTruncated:false},
+      {strategy:'cursor',pointer:'/meta/next_cursor',queryParam:'cursor',kind:'cursor',confidence:'heuristic'},
+      {after:'old-value'},
+      {maxPages:7,result:'orders',metadataResult:'orders',maxItems:500,maxTotalBytes:2500000},
+    );
+    expect(settings).toMatchObject({strategy:'cursor',itemsPointer:'/data/items',cursorPointer:'/meta/next_cursor',cursorParam:'after',maxPages:7,maxItems:500,maxTotalBytes:2500000,result:'orders',metadataResult:'apiPageInfo'});
+    expect(settings).not.toHaveProperty('nextLinkPointer');
+  });
+  it('turns a next-link hint into bounded pagination without retaining an unrelated cursor',()=>{
+    const settings=paginationPatchFromHint(
+      {itemsPointer:'/items',stablePointer:true,observedRows:1,sampledRows:1,fields:[],fieldsTruncated:false},
+      {strategy:'next_link',pointer:'/links/next',queryParam:'',kind:'next link',confidence:'heuristic'},
+      {},
+      {cursorPointer:'/meta/cursor',cursorParam:'after',result:'items',metadataResult:'pageInfo'},
+    );
+    expect(settings).toMatchObject({strategy:'next_link',itemsPointer:'/items',nextLinkPointer:'/links/next',maxPages:10,maxItems:10000,maxTotalBytes:5000000,result:'items',metadataResult:'pageInfo'});
+    expect(settings).not.toHaveProperty('cursorPointer');
   });
 });

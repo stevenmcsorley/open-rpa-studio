@@ -85,4 +85,5 @@ The suggested order is API connector and discovery first, then the local tool-se
 ## Current increment
 
 - API authoring can now discover response arrays and scalar field paths from an explicitly requested, bounded GET through a saved connection. It drops response values, excludes sensitive-looking fields, and labels inferred shapes as sample evidence rather than a contract.
+- API sample discovery also recognizes conventional cursor and next-link field shapes and can prefill bounded pagination settings. It exposes only JSON Pointers and a suggested query parameter; the UI labels each hint heuristic and requires authors to verify behavior against the API contract.
 - Browser selector recovery is now an opt-in native workflow option: it only considers visible, enabled controls with the same exact accessibility role, applies a strict bounded accessible-name similarity check, and rejects ambiguous alternatives. It remains off by default and emits redacted run/audit evidence.

@@ -38,8 +38,53 @@ def _kind(value: Any) -> str:
     return "object" if isinstance(value, dict) else "array"
 
 
+def _pagination_hints(document: Any) -> list[dict[str, str]]:
+    """Find likely next-page fields without returning any response values."""
+    hints: list[dict[str, str]] = []
+    visited = 0
+    next_link_names = {"next", "nexturl", "nextlink", "nextpageurl", "nextpagelink"}
+    cursor_names = {
+        "nextcursor": "cursor", "nexttoken": "token", "nextpagetoken": "page_token",
+        "nextcontinuationtoken": "continuation_token", "continuationtoken": "continuation_token",
+        "endcursor": "after",
+    }
+
+    def visit(value: Any, parts: tuple[str, ...], depth: int) -> None:
+        nonlocal visited
+        visited += 1
+        if visited > 1_000 or depth > MAX_DEPTH or len(hints) >= 20:
+            return
+        if not isinstance(value, dict):
+            return
+        for key, child in list(value.items())[:MAX_FIELDS]:
+            if len(hints) >= 20:
+                break
+            if not isinstance(key, str):
+                continue
+            child_parts = parts + (key,)
+            pointer = _pointer(child_parts)
+            if len(pointer) > 2_048:
+                continue
+            normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+            recognized_cursor = normalized in cursor_names
+            if SENSITIVE.search(key) and not recognized_cursor:
+                continue
+            if (normalized in next_link_names and isinstance(child, (str, type(None)))
+                    and (normalized != "next" or (parts and parts[-1].casefold() in {"links", "link"}))):
+                hints.append({"strategy": "next_link", "pointer": pointer, "queryParam": "",
+                              "kind": "next link", "confidence": "heuristic"})
+            elif normalized in cursor_names and isinstance(child, (str, int, float, type(None))) and not isinstance(child, bool):
+                hints.append({"strategy": "cursor", "pointer": pointer,
+                              "queryParam": cursor_names[normalized], "kind": "cursor", "confidence": "heuristic"})
+            if isinstance(child, dict):
+                visit(child, child_parts, depth + 1)
+
+    visit(document, (), 0)
+    return hints
+
+
 def discover_response(body: str) -> dict[str, Any]:
-    """Return candidate object-array locations and scalar field paths only."""
+    """Return value-free object-array mappings and heuristic pagination hints."""
     if not isinstance(body, str) or len(body.encode("utf-8")) > MAX_BODY_BYTES:
         raise ValueError("API response is not text or exceeds the 2 MB discovery limit")
     try:
@@ -116,4 +161,4 @@ def discover_response(body: str) -> dict[str, Any]:
     # Numeric indexes are useful evidence but unstable as a JSON Pointer for an
     # array nested inside another array; leave those candidates visible while
     # excluding them from automatic field mapping in the UI.
-    return {"candidates": candidates}
+    return {"candidates": candidates, "paginationHints": _pagination_hints(document)}

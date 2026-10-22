@@ -710,7 +710,7 @@ def test_api_response_discovery_returns_only_bounded_structure_and_audits_counts
     monkeypatch.setenv("OPENRPA_API_CONNECTIONS_FILE",str(tmp_path/"connections.json"))
     monkeypatch.setattr(api_connections,"assert_public_url",lambda _url:None)
     profile=api_connections.save_profile(tmp_path/"connections.json",{"name":"Orders","baseUrl":"https://orders.example/v1"})
-    body=json.dumps({"data":{"orders":[{"order/id":"private-order","amount":10,"customer":{"name":"Private Person"},"refresh_token":"secret"},{"order/id":"other-order","amount":None,"customer":{"name":"Someone Else"}}]}})
+    body=json.dumps({"data":{"orders":[{"order/id":"private-order","amount":10,"customer":{"name":"Private Person"},"refresh_token":"secret"},{"order/id":"other-order","amount":None,"customer":{"name":"Someone Else"}}]},"meta":{"next_cursor":"private-cursor"}})
     calls=[];audits=[]
     monkeypatch.setattr(network,"request",lambda *args:(calls.append(args) or {"status":200,"headers":{"Content-Type":"application/json"},"body":body}))
     class History:
@@ -723,9 +723,10 @@ def test_api_response_discovery_returns_only_bounded_structure_and_audits_counts
     assert calls[0][0]=="https://orders.example/v1/orders?status=paid&limit=5"
     assert calls[0][1:3]==("GET",{}) and calls[0][4:]==(10,2_000_000)
     candidate=next(item for item in result["candidates"] if item["itemsPointer"]=="/data/orders")
+    assert result["paginationHints"]==[{"strategy":"cursor","pointer":"/meta/next_cursor","queryParam":"cursor","kind":"cursor","confidence":"heuristic"}]
     assert candidate["stablePointer"] is True
     assert {item["path"] for item in candidate["fields"]}=={"/amount","/customer/name","/order~1id"}
-    assert "private-order" not in json.dumps(replies[-1]) and "Private Person" not in json.dumps(replies[-1]) and "secret" not in json.dumps(replies[-1])
+    assert "private-order" not in json.dumps(replies[-1]) and "Private Person" not in json.dumps(replies[-1]) and "secret" not in json.dumps(replies[-1]) and "private-cursor" not in json.dumps(replies[-1])
     assert audits==[("api.response.discover",{"profileId":profile["id"],"host":"orders.example","status":200,"candidateCount":1})]
     from openrpa.model import validate_workflow
     workflow={"format":"openrpa.workflow","formatVersion":1,"name":"Main","variables":[],"arguments":[],"activities":[{"id":"fetch","type":"api_request","connectionId":profile["id"],"method":"GET","path":"/orders","result":"response","responseMapping":{"responseCode":"200","itemsPointer":candidate["itemsPointer"],"fields":[{"name":field["name"],"path":field["path"]} for field in candidate["fields"]],"result":"mappedOrders","maxItems":10000,"maxOutputBytes":5000000}}]}

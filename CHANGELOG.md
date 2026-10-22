@@ -1,3 +1,7 @@
+## 0.1.117
+- API response discovery now offers value-free, heuristic pagination hints for conventional cursor and next-link fields. Authors can prefill bounded pagination settings, retain relevant page/item/byte limits, reuse a matching cursor query parameter, and edit the resulting configuration before execution.
+- Verification: Python suite 523 passed; frontend suite 194 passed; production Vite build, frozen MCP acceptance, and Windows x64 NSIS installer build passed. Installer: `release/Open-RPA-Studio-Setup-0.1.117-x64.exe` (73,052,275 bytes; SHA-256 `522392dff3052feb623194b1f57422348bb17efbd9563e920ac99c7c8830e9a4`).
+
 ## 0.1.116
 - Added live API response shape discovery to the API Request editor. A GET request can inspect a bounded, value-free sample from a saved API connection and suggest editable response mappings; public egress, request size, traversal, and sensitive-field checks apply.
 - Verification: Python suite 521 passed; frontend suite 192 passed; production Vite build, frozen MCP acceptance, and Windows host check passed in CI. Windows x64 NSIS installer built locally (73,047,688 bytes; SHA-256 `cc2e3f9f9612fcc73f610111d62c58f5799c505886e249baa9cb922f9312d554`).

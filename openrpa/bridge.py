@@ -725,7 +725,7 @@ def handle(request: dict[str, Any], ai_cancel: threading.Event | None = None) ->
                 history.audit("api.oauth.token",{"connectionId":profile["id"],"host":urlsplit(profile["tokenUrl"]).hostname,"grant":"authorization_code"})
             response=restricted_http_request(url,"GET",headers,None,10,2_000_000)
             status=int(response.get("status",0));content_type=next((value for key,value in response.get("headers",{}).items() if key.lower()=="content-type"),"")[:200]
-            result={"status":status,"ok":200<=status<300,"contentType":content_type,"candidates":[]}
+            result={"status":status,"ok":200<=status<300,"contentType":content_type,"candidates":[],"paginationHints":[]}
             if result["ok"]:
                 body=response.get("body","")
                 if isinstance(body,str):
