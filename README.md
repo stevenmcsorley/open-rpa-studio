@@ -74,14 +74,14 @@ Before every run, Studio now shows an impact review that expands saved child wor
 
 ## Download and install
 
-The latest Windows installer is [Open RPA Studio v0.1.121](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.121). It is unsigned and intended for evaluation; verify its SHA-256 against the release before running it.
+The latest Windows installer is [Open RPA Studio v0.1.122](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.122). It is unsigned and intended for evaluation; verify its SHA-256 against the release before running it. SHA-256: `33c88a81db3d00274bd44a8445624dfe323fadb7690e997ab5a62e5ae7749195`.
 
 The NSIS installer supports a per-user installation and uninstall. The app bundle includes a frozen Python bridge, so Python does not need to be installed on the target computer. Windows WebView2 is required; current Windows 10/11 installations normally provide the Evergreen runtime. Playwright browser binaries are not included in this installer. Browser Launch defaults to a visible Playwright Chromium window, and can select installed Chrome, Edge, Brave, Vivaldi, Opera or Opera GX when detected, any custom Chromium-based browser, Firefox or WebKit. Install the selected Playwright browser runtime where needed; the engine reports a clear error instead of silently switching browsers. Runtime capability status is displayed by the app rather than inferred from package presence. The visible browser inspector can record editable click, hover, fill, select and safe-key actions; field values are omitted and must be added in the workflow editor. Browser workflows can manage named tabs and capture popups, with network access and public-address checks applied to new pages. Exact accessibility-role selectors can opt into conservative recovery when a control label changes slightly; ambiguity fails closed and recovery is off by default. Browser file uploads are project-root bounded; downloads are size-limited before saving to the project, default to no-overwrite, and use Playwright's temporary download cache before that check.
 
-The v0.1.121 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it; see the [v0.1.121 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.121).
+The v0.1.122 installer is unsigned. Windows SmartScreen may show an unknown-publisher prompt. Verify the downloaded file against the SHA-256 in the release before running it; see the [v0.1.122 release](https://github.com/stevenmcsorley/open-rpa-studio/releases/tag/v0.1.122).
 
 ```powershell
-Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.121-x64.exe -Algorithm SHA256
+Get-FileHash .\release\Open-RPA-Studio-Setup-0.1.122-x64.exe -Algorithm SHA256
 ```
 
 To build an installer from the current source on Windows, run `npm ci` and then `npm run build:windows-installer`. This creates an unsigned `release/Open-RPA-Studio-Setup-<version>-x64.exe`; the installer build includes the optional Pillow OCR preflight dependency, but Tesseract and language data remain separate system dependencies.

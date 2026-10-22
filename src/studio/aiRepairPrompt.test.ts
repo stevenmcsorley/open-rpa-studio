@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createAiRepairPrompt } from './aiRepairPrompt';
+import { createAiDraftRepairPrompt, createAiRepairPrompt } from './aiRepairPrompt';
 import type { Workflow } from './types';
 
 const workflow: Workflow = {
@@ -30,5 +30,19 @@ describe('createAiRepairPrompt', () => {
     const before = structuredClone(workflow);
     createAiRepairPrompt(workflow, { code: 'FAILED' });
     expect(workflow).toEqual(before);
+  });
+
+  it('creates a targeted validation repair from bounded code and activity IDs without passing error text', () => {
+    const prompt = createAiDraftRepairPrompt(workflow, [
+      { code: 'invalid-expression', activityId: 'if-1' },
+      { code: 'missing-property', activityId: 'write-1' },
+    ]);
+    expect(prompt).toContain('targeted repair');
+    expect(prompt).toContain('invalid-expression');
+    expect(prompt).toContain('if-1');
+    expect(prompt).toContain('missing-property');
+    expect(prompt).not.toContain('PRIVATE ROW');
+    expect(prompt).not.toContain('PRIVATE DEFAULT');
+    expect(prompt).not.toContain('PRIVATE TOKEN');
   });
 });

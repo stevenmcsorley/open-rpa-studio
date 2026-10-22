@@ -7,6 +7,8 @@ export type RepairFailure = {
   workflowStack?: { workflow: string; activityId: string; targetWorkflow: string }[];
 };
 
+export type DraftValidationProblem = { code: string; activityId?: string };
+
 const SENSITIVE_KEY = /(?:secret|password|token|api.?key|authorization|credential|cookie)/i;
 
 function sanitize(value: unknown): unknown {
@@ -36,5 +38,24 @@ export function createAiRepairPrompt(workflow: Workflow, failure: RepairFailure)
     'Return a complete replacement workflow in the requested schema.',
     `Failure diagnostic:\n${JSON.stringify(diagnostic, null, 2)}`,
     `Workflow definition (configured literals such as paths, URLs, selectors, and strings may be included):\n${JSON.stringify(safeDefinition, null, 2)}`,
+  ].join('\n\n');
+}
+
+/** Build a bounded repair request from validation codes and activity identifiers only. */
+export function createAiDraftRepairPrompt(workflow: Workflow, problems: DraftValidationProblem[]): string {
+  const safeProblems = problems.slice(0, 50).map(problem => ({
+    code: String(problem.code).slice(0, 100),
+    ...(problem.activityId ? { activityId: String(problem.activityId).slice(0, 128) } : {}),
+  }));
+  const base = createAiRepairPrompt(workflow, {
+    code: safeProblems.map(problem => problem.code).join(', ').slice(0, 1000) || 'WORKFLOW_VALIDATION_FAILED',
+    activityId: safeProblems.find(problem => problem.activityId)?.activityId,
+  });
+  return [
+    'This is a targeted repair of a generated workflow that failed Studio validation.',
+    'Correct the listed validation issues while preserving the requested behavior. Do not add unrelated activities.',
+    'Use only the supported workflow schema and activity properties. Return the complete corrected workflow.',
+    `Validation issue codes and activity IDs (error messages and runtime values are intentionally excluded):\n${JSON.stringify(safeProblems, null, 2)}`,
+    base,
   ].join('\n\n');
 }
