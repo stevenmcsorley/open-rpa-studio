@@ -220,6 +220,8 @@ def test_flowchart_action_executes_nested_control_flow_activity(tmp_path: Path):
     assert result.status=="succeeded"
     assert result.variables["result"]=="nested branch executed"
     assert result.activities["set-result"]["status"]=="succeeded"
+    assert result.activities["action-if"]["status"]=="succeeded"
+    assert result.activities["action-if"]["nextNode"]=="end"
 
 def test_xlsx_activities_round_trip_with_literal_formula_text_and_audit(tmp_path: Path):
     project={"format":"openrpa.project","formatVersion":1,"name":"Excel","main":"Main","workflows":{"Main":"main.json"}}
@@ -513,6 +515,8 @@ def test_flowchart_executes_selected_decision_path(tmp_path: Path):
     assert result.status=="succeeded"
     assert result.variables["result"]=="yes"
     assert result.activities["yes-action"]["status"]=="succeeded"
+    assert result.activities["decision"]["nextNode"]=="yes-node"
+    assert result.activities["yes-node"]["nextNode"]=="end"
     assert "no-action" not in result.activities
     workflow["variables"][0]["value"]=False
     (tmp_path/"main.json").write_text(json.dumps(workflow),encoding="utf-8")

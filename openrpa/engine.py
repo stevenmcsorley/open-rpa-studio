@@ -506,9 +506,22 @@ class WorkflowEngine:
                 raise WorkflowError(f"Flowchart exceeded its {self._max_activity_executions} node visit quota",current,"activity-quota")
             node=nodes[current];kind=node["kind"]
             if kind=="action":
-                self._sequence([node["activity"]],variables,logs,states,workflow_name)
-                edges=outgoing[current]
-                current=edges[0]["to"] if edges else None
+                aid=current;node_type="flowchart_action";edges=outgoing[current]
+                states[aid]={"status":"running","type":node_type,"workflow":workflow_name}
+                self._emit({"event":"activity-started","activityId":aid,"type":node_type},logs)
+                try:
+                    self._sequence([node["activity"]],variables,logs,states,workflow_name)
+                    next_node=edges[0]["to"] if edges else None
+                    states[aid].update(status="succeeded",durationMs=0,nextNode=next_node)
+                    self._emit({"event":"activity-completed","activityId":aid,"type":node_type,"nextNode":next_node},logs)
+                    current=next_node
+                except RunCancelled:
+                    states[aid]["status"]="cancelled"
+                    raise
+                except Exception as exc:
+                    states[aid].update(status="failed",error=str(exc))
+                    self._emit({"event":"activity-failed","activityId":aid,"type":node_type,"error":str(exc)},logs)
+                    raise
                 continue
             aid=current;node_type=f"flowchart_{kind}"
             if self.options.debugger is not None:
@@ -526,7 +539,7 @@ class WorkflowEngine:
                     edge=next(edge for edge in outgoing[aid] if edge["when"]==("true" if outcome else "false"))
                     next_node=edge["to"]
                 else: next_node=outgoing[aid][0]["to"]
-                states[aid].update(status="succeeded",durationMs=0)
+                states[aid].update(status="succeeded",durationMs=0,nextNode=next_node)
                 self._emit({"event":"activity-completed","activityId":aid,"type":node_type,"nextNode":next_node},logs)
                 if self.options.debugger is not None: self.options.debugger.after_activity(aid,0)
                 current=next_node
@@ -582,7 +595,7 @@ class WorkflowEngine:
                     if next_state is None and fallback is not None:next_state=fallback["to"]
                     if next_state is None:
                         raise WorkflowError(f"No transition condition matched from state {current}",current,"state-machine-no-transition-match")
-                states[current].update(status="succeeded",durationMs=0)
+                states[current].update(status="succeeded",durationMs=0,nextState=next_state)
                 self._emit({"event":"activity-completed","activityId":current,"type":state_type,"nextState":next_state},logs)
                 if self.options.debugger is not None:self.options.debugger.after_activity(current,0)
                 current=next_state

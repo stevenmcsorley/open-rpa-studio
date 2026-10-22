@@ -88,3 +88,31 @@
 *::-webkit-scrollbar-thumb:active{background:#b2e29b}
 *::-webkit-scrollbar-corner{background:#171a1f}
 *::-webkit-scrollbar-button{display:none;width:0;height:0}
+
+/* Execution feedback: show the live path without turning the designer into a loader. */
+.activity-card.running{position:relative;border-color:#d6ad62;background:#28251e;box-shadow:0 0 0 1px #d6ad6240,0 5px 16px #0005;transform:translateY(-1px)}
+.activity-card.running::after{content:"RUNNING";margin-left:4px;padding:3px 5px;border-radius:3px;background:#42371f;color:#f0cf83;font:7px 'DM Mono',monospace;letter-spacing:.6px}
+.activity-card.succeeded{background:#1b241d}.activity-card.failed{background:#2a1e20;box-shadow:0 0 0 1px #e47e7e45}
+.start-node.running .play-ring{border-color:#d5ae63;background:#382e1d;color:#f1ce7e;box-shadow:0 0 0 4px #d5ae631c}
+.end-node.succeeded .check-ring{border-color:#87bc73;background:#213020;color:#b8e49f;box-shadow:0 0 0 4px #87bc7317}
+.flowchart-node.running{border-color:#d6ad62;background:#28251e;box-shadow:0 0 0 2px #d6ad6230,0 8px 22px #0006}
+.flowchart-node.succeeded{border-color:#64855c;background:#1c261e}.flowchart-node.failed{border-color:#d87f7f;background:#2b2022;box-shadow:0 0 0 2px #d87f7f28}
+.flowchart-node.running::after{content:"RUNNING";position:absolute;right:9px;top:9px;padding:3px 5px;border-radius:3px;background:#42371f;color:#f0cf83;font:7px 'DM Mono',monospace;letter-spacing:.5px}
+.flowchart-transition path:not(.flowchart-edge-hit){transition:stroke .18s,stroke-width .18s}.flowchart-transition.active path:not(.flowchart-edge-hit){stroke:#e7c16f;stroke-width:3;stroke-dasharray:8 5;animation:execution-path 1.1s linear infinite}
+.state-map-edge.traversed path:not(.state-map-edge-hit){stroke:#d7b461;stroke-width:3;stroke-dasharray:7 4;animation:execution-path 1.1s linear infinite}
+.state-map-node.running rect{filter:drop-shadow(0 0 5px #e4c57655)}
+.state-machine-overview.run-reviewed .state-map-node.initial:not(.running) rect{stroke:#505c67}
+@keyframes execution-path{to{stroke-dashoffset:-26}}
+@media(prefers-reduced-motion:reduce){.flowchart-transition.active path:not(.flowchart-edge-hit),.state-map-edge.traversed path:not(.state-map-edge-hit){animation:none}}
+.start-node.complete .play-ring{border-color:#46524a;background:#202520;color:#748570;box-shadow:none}
+
+/* Properties inspector is user-sized and collapsible, with a keyboard-accessible splitter. */
+.right-panel-splitter{position:relative;z-index:8;cursor:col-resize;touch-action:none;background:#171a20;border-left:1px solid #222830;border-right:1px solid #222830}
+.right-panel-splitter::after{content:"";position:absolute;left:2px;top:calc(50% - 24px);width:2px;height:48px;border-radius:2px;background:#4a515d;transition:background .12s,width .12s,left .12s}
+.right-panel-splitter:hover::after,.right-panel-splitter:focus-visible::after{left:1px;width:4px;background:#9bd67e}
+.right-panel-splitter:focus-visible{outline:1px solid #9bd67e;outline-offset:-1px}
+.inspector-actions{display:flex;align-items:center;gap:3px}.properties-expand{display:none}
+.right-panel.collapsed{width:36px;min-width:36px;align-items:center;border-left:1px solid #303741}
+.right-panel.collapsed>:not(.properties-expand){display:none}
+.right-panel.collapsed .properties-expand{display:flex;width:36px;height:100%;flex-direction:column;align-items:center;justify-content:flex-start;gap:12px;padding:12px 0;border:0;background:transparent;color:#aeb7c2;font-size:8px;writing-mode:vertical-rl;letter-spacing:1px}
+.right-panel.collapsed .properties-expand:hover{background:#20252c;color:#dce4ec}

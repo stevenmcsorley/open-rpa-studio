@@ -8,6 +8,7 @@
 .ai-build-stage>small{font-size:9px;white-space:nowrap}
 .ai-build-stage.stage-done{color:#b8d4aa}.ai-build-stage.stage-done>span{border-color:#67835b;background:#263425;color:#c8e4ba}
 .ai-build-stage.stage-active{color:#e4e9ed}.ai-build-stage.stage-active>span{border-color:#9cbb8c;color:#b9d8a9;animation:ai-stage-pulse 1.7s ease-in-out infinite}
+.ai-build-stage.stage-failed{color:#f0aaa7}.ai-build-stage.stage-failed>span{border-color:#a45d5a;background:#382425;color:#f0aaa7}
 @keyframes ai-stage-pulse{50%{box-shadow:0 0 0 4px #8eae7922}}
 .ai-monitor-stats>div:first-child strong{color:#d7e2d0}
 .ai-monitor-stats>div strong{font-variant-numeric:tabular-nums}
@@ -37,7 +38,7 @@
 .ai-monitor-stats small{display:block;font-size:8px;color:#858e9b;letter-spacing:.6px;margin-bottom:4px}
 .ai-monitor-stats strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:600;color:#e0e5eb}
 .ai-monitor-indeterminate{height:32px;display:flex;align-items:center;gap:9px;padding:0 13px;font-size:9px;color:#a3acb7;border-bottom:1px solid #292f37}
-.ai-monitor-indeterminate span{width:14px;height:14px;border:2px solid #485347;border-top-color:#b4d69d;border-radius:50%;animation:ai-monitor-spin .85s linear infinite}
+.ai-monitor-indeterminate-message{min-width:0;line-height:1.45}
 @keyframes ai-monitor-spin{to{transform:rotate(360deg)}}
 .ai-monitor-layout{display:grid;grid-template-columns:minmax(240px,.78fr) minmax(330px,1.22fr);min-height:190px;max-height:360px}
 .ai-monitor-layout>div{padding:12px 14px;overflow:auto}
@@ -50,6 +51,16 @@
 .ai-event-list li.event-failed,.ai-event-list li.event-cancelled{border-color:#cc7772}
 .ai-event-list li time{float:right;font-size:8px;color:#808a96}
 .ai-event-list li small{display:block;margin-top:4px;color:#d5a890;line-height:1.4}
+.ai-monitor-diagnostics{margin-top:12px;padding-top:10px;border-top:1px solid #343b45}
+.ai-monitor-diagnostics h4{margin-bottom:7px}
+.ai-monitor-diagnostics h4 small{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;margin-left:5px;padding:0 4px;border-radius:9px;background:#392a29;color:#f0aaa7;font-size:8px}
+.ai-monitor-diagnostics ul{display:grid;gap:6px;list-style:none;margin:0;padding:0}
+.ai-monitor-diagnostics li{display:grid;gap:3px;padding:7px 8px;border-left:2px solid #cc7772;border-radius:0 4px 4px 0;background:#21191b;font-size:9px;line-height:1.45;overflow-wrap:anywhere}
+.ai-monitor-diagnostics li strong{color:#f0aaa7;font-size:8px;font-weight:600}
+.ai-monitor-diagnostics li span{color:#d7c4c3}
+.ai-monitor-diagnostics li.issue-warning{border-color:#c8aa61;background:#242116}
+.ai-monitor-diagnostics li.issue-warning strong{color:#e7d58e}
+.ai-monitor-diagnostics li.issue-warning span{color:#d8cfad}
 .ai-monitor-empty{margin:0;padding:12px;border:1px dashed #3b424c;border-radius:5px;color:#8f99a4;font-size:9px;line-height:1.5}
 .ai-live-sequence{display:flex;flex-direction:column;align-items:stretch}
 .ai-live-node-wrap{display:flex;flex-direction:column;align-items:center}
@@ -63,6 +74,13 @@
 .ai-live-node>details{grid-column:1/-1;border-top:1px solid #344034;padding-top:6px;font-size:8px;color:#a8b3a2}
 .ai-live-node>details pre,.ai-output-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;color:#c7d0c1;font:8px 'DM Mono',monospace}
 .ai-live-node-wrap>i{display:block;height:14px;width:1px;background:#667560}
+.ai-live-next-step{display:flex;flex-direction:column;align-items:center;gap:5px;color:#a3acb7}
+.ai-live-next-step>i{display:block;height:14px;width:1px;border-left:1px dashed #79866f;position:relative;overflow:hidden}
+.sequence-building .ai-live-next-step>i::after{content:"";position:absolute;top:-8px;left:-2px;width:3px;height:6px;background:#b4d69d;box-shadow:0 0 8px #b4d69d;animation:ai-connector-travel 1.35s linear infinite}
+.ai-live-next-step>div{text-align:center;display:grid;gap:3px;padding:7px 10px;border:1px dashed #4b5648;border-radius:5px;background:#171c19}
+.ai-live-next-step>div strong{font-size:9px;color:#cad5c3}
+.ai-live-next-step>div small{font-size:8px;color:#8c9787}
+.ai-live-next-step>svg{color:#a9c893;animation:ai-monitor-spin .85s linear infinite}
 .ai-repair-result{display:grid;gap:7px;margin:12px 0;padding:11px 12px;border:1px solid #657a56;border-radius:6px;background:#1b2419;color:#d7e2d0;font-size:10px;line-height:1.5}
 .ai-repair-result>strong{font-size:11px;color:#c2ddaF}
 .ai-repair-result details{border-top:1px solid #3a4734;padding-top:7px;color:#aebca7}
