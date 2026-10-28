@@ -1,4 +1,4 @@
-name: Build macOS and Linux releases
+name: Build Windows, macOS and Linux releases
 
 on:
   push:
@@ -20,6 +20,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Windows x64
+            runner: windows-latest
+            platform: windows
           - name: Linux x64
             runner: ubuntu-22.04
             platform: linux
@@ -33,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
@@ -56,6 +59,7 @@ jobs:
           npm ci
 
       - name: Build native MCP bridge
+        if: matrix.platform != 'windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -75,6 +79,16 @@ jobs:
             sips -s format icns src-tauri/icons/128x128.png --out src-tauri/icons/icon.icns >/dev/null
           fi
 
+      - name: Verify packaged compact MCP
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: uv run --locked python scripts/check_code_mode.py src-tauri/resources/openrpa-bridge
+
+      - name: Build Windows installer and verify packaged MCP
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build_windows_installer.ps1
+
       - name: Build Linux packages
         if: matrix.platform == 'linux'
         run: npm run tauri -- build --bundles deb,appimage
@@ -92,11 +106,13 @@ jobs:
           if [[ "${{ matrix.platform }}" == linux ]]; then
             cp src-tauri/target/release/bundle/deb/*.deb "release/Open-RPA-Studio-${version}-linux-x64.deb"
             cp src-tauri/target/release/bundle/appimage/*.AppImage "release/Open-RPA-Studio-${version}-linux-x64.AppImage"
+          elif [[ "${{ matrix.platform }}" == windows ]]; then
+            test -f "release/Open-RPA-Studio-Setup-${version}-x64.exe"
           else
             arch="$(uname -m)"
             cp src-tauri/target/release/bundle/dmg/*.dmg "release/Open-RPA-Studio-${version}-macos-${arch}.dmg"
           fi
-          (cd release && shasum -a 256 Open-RPA-Studio-${version}-*) > "release/SHA256SUMS-${version}-${{ matrix.platform }}-${{ runner.arch }}.txt"
+          python -c "from pathlib import Path; import hashlib; files=sorted(Path('release').glob('Open-RPA-Studio-*${version}*')); assert files; Path('release/SHA256SUMS-${version}-${{ matrix.platform }}-${{ runner.arch }}.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in files))"
 
       - name: Upload assets to the existing GitHub release
         env:

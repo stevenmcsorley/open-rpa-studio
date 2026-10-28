@@ -41,6 +41,10 @@ Write-Host 'Verifying staged MCP workflow updates in the frozen bridge...'
 uv run --locked python (Join-Path $appRoot 'scripts\check_frozen_mcp.py') $versionedBridgePath
 if ($LASTEXITCODE -ne 0) { throw 'The frozen MCP live workflow acceptance check failed.' }
 
+Write-Host 'Verifying compact MCP discovery and portable batch execution...'
+uv run --locked python (Join-Path $appRoot 'scripts\check_code_mode.py') $versionedBridgePath
+if ($LASTEXITCODE -ne 0) { throw 'Packaged compact MCP acceptance failed.' }
+
 Write-Host 'Building the Windows NSIS installer...'
 $tauri = Join-Path $appRoot 'node_modules\.bin\tauri.cmd'
 if (-not (Test-Path $tauri)) { throw 'Run npm ci before building the Windows installer.' }

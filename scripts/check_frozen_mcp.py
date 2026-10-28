@@ -38,7 +38,7 @@ def main() -> int:
 
         def call(request: dict, flags: tuple[str, ...] = ()) -> dict:
             process = subprocess.Popen(
-                [str(bridge), "mcp", str(root), "--allow-edit", *flags],
+                [str(bridge), "mcp", str(root), "--mcp-mode", "full", "--allow-edit", *flags],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", env=env,
             )

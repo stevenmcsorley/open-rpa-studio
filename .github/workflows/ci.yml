@@ -52,6 +52,7 @@ jobs:
         run: |
           src-tauri/resources/openrpa-bridge.exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'The bundled CLI/MCP command failed its startup check.' }
+          uv run --locked python scripts/check_code_mode.py src-tauri/resources/openrpa-bridge.exe
           uv run --locked python tests/fixtures/packaged_mcp_acceptance.py src-tauri/resources/openrpa-bridge.exe
           uv run --locked python tests/fixtures/packaged_ocr_acceptance.py src-tauri/resources/openrpa-bridge.exe
           uv run --locked python tests/fixtures/packaged_web_table_acceptance.py src-tauri/resources/openrpa-bridge.exe
