@@ -119,4 +119,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
-        run: gh release upload "$RELEASE_TAG" release/Open-RPA-Studio-* release/SHA256SUMS-* --clobber
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          gh release upload "$RELEASE_TAG" release/Open-RPA-Studio-*${version}* "release/SHA256SUMS-${version}-${{ matrix.platform }}-${{ runner.arch }}.txt" --clobber
