@@ -7,6 +7,7 @@ paths from an MCP client.
 from __future__ import annotations
 
 import json
+from . import code_mode
 import math
 import base64
 import sys
@@ -111,7 +112,9 @@ class ProjectMCPServer:
                  allow_edit: bool = False,
                  allow_network: bool = False, allow_desktop: bool = False,
                  allow_credentials: bool = False,
-                 allow_destructive: bool = False):
+                 allow_destructive: bool = False, mcp_mode: str = "full"):
+        if mcp_mode not in ("code", "full"): raise ValueError("Invalid MCP mode")
+        self.mcp_mode = mcp_mode
         source=Path(project_path).expanduser().resolve()
         if source.is_dir(): source=source/"project.json"
         self._fallback_project_path = source
@@ -1268,11 +1271,11 @@ class ProjectMCPServer:
                 requested = params.get("protocolVersion")
                 if requested not in SUPPORTED_PROTOCOLS:
                     raise ValueError(f"Unsupported MCP protocol version; supported versions: {', '.join(SUPPORTED_PROTOCOLS)}")
-                result = {"protocolVersion": requested, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-rpa-studio", "version": __version__}, "instructions": "This local server follows the project currently open in Open RPA Studio. If Studio has not opened a project yet, it uses the project passed at startup. Workflow execution is controlled by startup flags; tools cannot choose arbitrary paths. With run and desktop grants, one live desktop action tool targets exact accessible controls and records value-free audit metadata. When run, network, and desktop grants are all enabled, live browser tools open a visible MCP-owned browser and can inspect bounded untrusted page content; they do not attach to an existing browser profile."}
+                result = {"protocolVersion": requested, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-rpa-studio", "version": __version__}, "instructions": "Use search to discover native operations and execute to compose await tools.operation(args); return only needed fields. Native calls remain available. This local server follows the project currently open in Open RPA Studio. If Studio has not opened a project yet, it uses the project passed at startup. Workflow execution is controlled by startup flags; tools cannot choose arbitrary paths. With run and desktop grants, one live desktop action tool targets exact accessible controls and records value-free audit metadata. When run, network, and desktop grants are all enabled, live browser tools open a visible MCP-owned browser and can inspect bounded untrusted page content; they do not attach to an existing browser profile."}
             elif method == "ping":
                 result = {}
             elif method == "tools/list":
-                result = {"tools": self._tools()}
+                result = {"tools": code_mode.tool_specs() if self.mcp_mode == "code" else self._tools() + code_mode.tool_specs()}
             elif method == "tools/call":
                 tool_name = params.get("name")
                 args = params.get("arguments", {})
@@ -1281,7 +1284,26 @@ class ProjectMCPServer:
                 try:
                     with self._project_lock:
                         self._sync_active_project()
-                        value = self._call_tool(tool_name, args, cancel_event)
+                        if tool_name == "search":
+                            value = code_mode.search(self._tools(), args)
+                        elif tool_name == "execute":
+                            bound_project = self.project_path
+                            def invoke(operation, arguments):
+                                self._sync_active_project()
+                                if self.project_path != bound_project:
+                                    raise ValueError("Studio active project changed during this script; earlier effects remain. Start a fresh run.")
+                                try:
+                                    response = self._call_tool(operation, arguments, cancel_event)
+                                except Exception as exc:
+                                    if operation.startswith("openrpa_browser_"):
+                                        raise ValueError(re.sub(r"https?://[^\s\"'<>]+", "[URL]", str(exc))) from None
+                                    raise
+                                if isinstance(response, _MCPImageResult):
+                                    return {"metadata":response.metadata,"image_omitted":True,"hint":"Call the screenshot tool directly for its image content."}
+                                return response
+                            value = code_mode.execute(self._tools(), args, invoke, cancel_event)
+                        else:
+                            value = self._call_tool(tool_name, args, cancel_event)
                     if isinstance(value,_MCPImageResult):
                         content=[{"type":"text","text":json.dumps(value.metadata,ensure_ascii=False,default=str)},
                                  {"type":"image","data":base64.b64encode(value.data).decode("ascii"),"mimeType":value.mime_type}]
@@ -1289,7 +1311,7 @@ class ProjectMCPServer:
                     else:
                         content = [{"type": "text", "text": json.dumps(value, ensure_ascii=False, default=str)}]
                         structured=value
-                    result = {"content": content, "structuredContent": structured, "isError": False}
+                    result = {"content": content, "structuredContent": structured, "isError": tool_name == "execute" and isinstance(value, dict) and value.get("ok") is False}
                 except Exception as exc:
                     message=f"{type(exc).__name__}: {exc}"
                     if isinstance(tool_name,str) and tool_name.startswith("openrpa_browser_"):
@@ -1349,7 +1371,7 @@ class ProjectMCPServer:
                         response = None
                     elif (isinstance(request, dict) and request.get("method") == "tools/call"
                           and isinstance(request.get("params"), dict)
-                          and request["params"].get("name") == "openrpa_run_workflow"
+                          and request["params"].get("name") in ("openrpa_run_workflow", "execute")
                           and request.get("id") is not None):
                         cancellation = threading.Event()
                         with active_lock:

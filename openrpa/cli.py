@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+import sys
 import json
 from pathlib import Path
 from .engine import run_project
@@ -18,6 +19,7 @@ def main() -> int:
             cmd.add_argument("--allow-desktop", action="store_true")
             cmd.add_argument("--allow-destructive", action="store_true", help="Permit destructive file and API DELETE activities for this run")
     mcp = sub.add_parser("mcp", help="Expose one local project to an AI client over stdio MCP")
+    mcp.add_argument("--mcp-mode", choices=("code", "full"), default="code", help="Compact search/execute discovery (default) or all native schemas")
     mcp.add_argument("project", help="Project directory or project.json; fixed for this server process")
     mcp.add_argument("--allow-edit", action="store_true", help="Expose validated workflow replacement with an expected SHA-256")
     mcp.add_argument("--allow-run", action="store_true", help="Expose workflow execution to the MCP client")
@@ -46,7 +48,7 @@ def main() -> int:
     try:
         if args.command == "mcp":
             from .mcp_server import ProjectMCPServer
-            server = ProjectMCPServer(args.project, allow_run=args.allow_run,
+            server = ProjectMCPServer(args.project, mcp_mode=args.mcp_mode, allow_run=args.allow_run,
                                       allow_edit=args.allow_edit,
                                       allow_network=args.allow_network, allow_desktop=args.allow_desktop,
                                       allow_credentials=args.allow_credentials,
@@ -98,7 +100,6 @@ def main() -> int:
         return 0 if result.status == "succeeded" else 1
     except WorkflowError as exc:
         if args.command == "mcp":
-            import sys
             print(f"Open RPA MCP startup failed: {exc}", file=sys.stderr)
             return 2
         print(json.dumps({"valid": False, "error": {"code": exc.code, "message": str(exc), "activityId": exc.activity_id}}, indent=2))

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.130
+
+- Added compact MCP search/execute discovery and portable sequential batches to Windows, macOS, Linux and frozen bridges, with native permission and validation checks preserved.
+- Added optional sandboxed JavaScript for Linux source installations, bounded output/calls, partial-completion traces and full native compatibility mode.
+- Added cross-platform contract CI and packaged-runtime compact MCP acceptance; release automation now builds Windows x64, Linux x64, macOS Apple Silicon and macOS Intel.
+- Aligned desktop, engine, MCP and Rust package versions at 0.1.130. Reconnect MCP clients after upgrading.
+
+
 ## 0.1.112
 - Studio scrollbars now use the application graphite/green palette with slim rounded thumbs and consistent Chromium/WebView and Firefox styling.
 - Verification: frontend suite 179 passed; production build and frozen MCP packaging acceptance passed.

@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix="openrpa-packaged-mcp-") as directory:
         ],
     }), encoding="utf-8")
     def exchange(requests, extra_args=()):
-        process = subprocess.Popen([str(executable), "mcp", str(root), *extra_args],
+        process = subprocess.Popen([str(executable), "mcp", str(root), "--mcp-mode", "full", *extra_args],
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    text=True, bufsize=1,
                                    env=dict(os.environ, OPENRPA_DATA_DIR=str(root / "acceptance-data")))
